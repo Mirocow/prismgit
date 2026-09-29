@@ -76,3 +76,46 @@ describe('toast error detail humanization', () => {
     expect(useToastStore.getState().toasts[0].detail).toBe(detail);
   });
 });
+
+describe('commit hash chip (Task 29: «В тоасте Коммит создан не отображается хеш комита»)', () => {
+  beforeEach(() => {
+    useToastStore.setState({ toasts: [] });
+    vi.clearAllTimers?.();
+  });
+
+  it('successCommit stores the hash and the longer 8s duration', () => {
+    useToastStore.getState().successCommit('Коммит создан', 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0');
+    const toast = useToastStore.getState().toasts[0];
+    expect(toast.hash).toBe('a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0');
+    expect(toast.type).toBe('success');
+    expect(toast.duration).toBe(8000);
+  });
+
+  it('renders the short hash as a copyable chip next to the title', () => {
+    useToastStore.getState().successCommit('Коммит создан', 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0');
+    render(<ToastContainer />);
+    // shortHash default = 7 chars
+    const chip = screen.getByText('a1b2c3d');
+    expect(chip).toBeInTheDocument();
+    expect(chip.closest('button')).toHaveAttribute(
+      'aria-label',
+      expect.stringContaining('a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0')
+    );
+  });
+
+  it('does not render a chip for plain success toasts', () => {
+    useToastStore.getState().success('Operation succeeded');
+    render(<ToastContainer />);
+    expect(screen.queryByRole('button', { name: /copy/i })).not.toBeInTheDocument();
+  });
+
+  it('copies the FULL hash when the chip is clicked', () => {
+    const FULL = 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0';
+    const clipboardSpy = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText: clipboardSpy } });
+    useToastStore.getState().successCommit('Коммит создан', FULL);
+    render(<ToastContainer />);
+    fireEvent.click(screen.getByText('a1b2c3d'));
+    expect(clipboardSpy).toHaveBeenCalledWith(FULL);
+  });
+});

@@ -21,7 +21,11 @@
  */
 
 import type { LLMProvider } from './aiCommitMessages';
-import { AI_TOOLS, getTool, type AITool } from './aiTools';
+import {
+  LLMApiError, OPENROUTER_FREE_MODEL, notifyLLMFallback,
+  shouldFallbackToOpenRouterFree,
+} from './aiErrors';
+import { AI_TOOLS, getTool, getToolLimits, type AITool } from './aiTools';
 import { api } from './api';
 
 /**
@@ -51,18 +55,29 @@ import { api } from './api';
 const MAX_RETRIES = 3;
 const INITIAL_BACKOFF_MS = 2000;
 
-/** Detect Ollama "model not loaded" / "model loading" responses. */
-function isModelLoading(status: number, body: string): boolean {
-  // HTTP 404 + "model not found" — older Ollama signature.
-  // HTTP 503 — newer Ollama when another worker is loading the model.
+/**
+ * Detect Ollama "model is loading" responses that are worth retrying.
+ *
+ * Retryable (transient — the model will become available):
+ *  - HTTP 503 — newer Ollama while another worker is loading the model.
+ *  - HTTP 200 with an {"error":"... loading ..."} body (rare).
+ *  - HTTP 404 + "model ... loading" — LEGACY Ollama loading signature.
+ *
+ * NOT retryable (permanent — the user must act):
+ *  - HTTP 404 + "not found" / "try pulling" — the path or model genuinely
+ *    doesn't exist. Retrying burned 2+4+8 s of backoff before surfacing an
+ *    error the user had to act on anyway, which made a misconfigured
+ *    endpoint look like a 14-second hang. (This exact storm fired when
+ *    callOllama POSTed to the server root and real Ollama answered
+ *    404 "path '/' not found".)
+ *
+ * Exported for unit tests.
+ */
+export function isModelLoading(status: number, body: string): boolean {
   if (status === 503) return true;
   if (status === 404) {
     const lower = body.toLowerCase();
-    return (
-      lower.includes('not found') ||
-      lower.includes('try pulling') ||
-      lower.includes('model ') && lower.includes(' loading')
-    );
+    return lower.includes('model ') && lower.includes(' loading');
   }
   // Some Ollama versions return 200 but with an error body (rare).
   if (status === 200) {
@@ -82,6 +97,32 @@ export async function proxyFetch(
   const httpMethod = method || 'POST';
   let lastError: { ok: boolean; status: number; statusText: string; body: string } | null = null;
   let backoff = INITIAL_BACKOFF_MS;
+
+  // RACE FIX (R8): the retry loop's `setTimeout` backoff timers were never
+  // cleared on abort — if the user pressed Stop during a 2-8 s backoff,
+  // the timer kept running and the abort only fired on the NEXT iteration.
+  // On Ollama cold-model (3 retries × 8 s = 24 s of backoff + up to 300 s
+  // per request), this meant the model stayed loaded in VRAM for minutes
+  // after the user pressed Stop.
+  //
+  // We now race every backoff timer against the abort signal and clear the
+  // timer as soon as the abort wins, so the event loop drops the timer
+  // immediately.
+  const sleepWithAbort = (ms: number): Promise<void> => new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('Aborted', 'AbortError'));
+      return;
+    }
+    const t = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(t);
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     // If the user pressed Stop, abort immediately — don't start another
@@ -111,6 +152,25 @@ export async function proxyFetch(
         if (!r) throw new Error('IPC returned empty');
         result = r;
       }
+      // If the IPC proxy returned a NETWORK error (status === 0),
+      // try the direct renderer fetch as a fallback. The IPC handler
+      // uses Node.js fetch (undici) which ignores system proxy settings
+      // on macOS. The renderer's fetch uses Chromium's network stack
+      // which respects system proxy/SSL/DNS. This fallback is the
+      // difference between "Cannot connect" and actually connecting.
+      if (result.status === 0 && result.ok === false) {
+        try {
+          const fetchOpts: RequestInit = { method: httpMethod, headers, signal };
+          if (httpMethod !== 'GET' && httpMethod !== 'HEAD' && body) {
+            fetchOpts.body = body;
+          }
+          const res = await fetch(url, fetchOpts);
+          const text = await res.text();
+          result = { ok: res.ok, status: res.status, statusText: res.statusText, body: text };
+        } catch {
+          // Direct fetch also failed — keep the IPC error result.
+        }
+      }
     } catch (e) {
       // If the user aborted, rethrow the AbortError immediately — don't
       // fall through to the retry/model-loading logic below.
@@ -135,7 +195,7 @@ export async function proxyFetch(
         // fetch abort on the long initial wait). If we haven't exhausted retries,
         // treat as model-loading and retry.
         if (attempt < MAX_RETRIES) {
-          await new Promise(resolve => setTimeout(resolve, backoff));
+          await sleepWithAbort(backoff);
           backoff *= 2;
           continue;
         }
@@ -152,7 +212,7 @@ export async function proxyFetch(
     // loading the model in the background. After 2-3 retries (4-12 seconds
     // total), the model is typically warm and subsequent requests succeed.
     if (attempt < MAX_RETRIES && isModelLoading(result.status, result.body)) {
-      await new Promise(resolve => setTimeout(resolve, backoff));
+      await sleepWithAbort(backoff);
       backoff *= 2;
       continue;
     }
@@ -216,11 +276,28 @@ export interface TokenUsage {
  * This lets the AI gracefully handle "no repo open" by suggesting the user
  * clone/init/open one instead of failing on a git command.
  */
-export function buildToolSystemPrompt(tools: AITool[] = AI_TOOLS, repoPath?: string): string {
+export function buildToolSystemPrompt(tools: AITool[] = AI_TOOLS, repoPath?: string, userLocale?: string): string {
   const toolDocs = tools.map(t => `- ${t.name}: ${t.description}\n  Parameters: ${JSON.stringify(t.parameters)}`).join('\n');
   const repoContext = repoPath
     ? `Current repository context: ${repoPath}\nYou can run git commands against this repo directly using the repository-scoped tools.`
     : `No repository is currently open. For repository-scoped tools (get_status, get_log, commit, push, etc.) to work, the user must first open or clone a repo. Use the app-scoped tools (list_repos, search_repos, clone_repo, init_repo, open_repo) to help them set one up — they do NOT require an open repo.`;
+
+  // ── Language detection ──────────────────────────────────────────────
+  // The app's UI locale (from settings) tells us the user's preferred
+  // language. We inject it into the system prompt so the LLM ALWAYS
+  // responds in that language — even if the user's message is short
+  // or ambiguous (which causes some models to fall back to English).
+  const localeMap: Record<string, string> = {
+    'en': 'English',
+    'ru': 'Russian (Русский)',
+    'zh': 'Chinese (中文)',
+    'de': 'German (Deutsch)',
+  };
+  const langName = localeMap[userLocale || ''] || 'the same language the user writes in';
+  const langInstruction = userLocale
+    ? `CRITICAL: The user's PrismGit UI is set to ${langName}. You MUST respond in ${langName} for ALL messages — tool summaries, explanations, error reports, everything. Even if the user types a short message in English (e.g. "ok" or "status"), respond in ${langName}. This is non-negotiable.`
+    : `MATCH THE USER'S LANGUAGE. If the user writes in Russian, respond in Russian. If in English, respond in English. If in Chinese, respond in Chinese. If in German, respond in German. Detect the language from the user's message and use it for ALL your responses.`;
+
   return `You are PrismGit's AI assistant — you help the user manage their Git repositories.
 
 ${repoContext}
@@ -250,15 +327,23 @@ Rules:
 15. "Show recent commits" / "покажи коммиты" / "история" / "log" → get_log (COLLAPSED mode by default — it returns a summary + last 5 commits. Only use verbose=true if the user asks for MORE commits).
 16. "Show the diff" / "покажи diff" / "что именно поменялось в коде" → get_diff (STAT mode by default — file names + line counts. Only use full=true + file="<path>" if the user asks for the actual diff CONTENT of a specific file).
 17. "Изучи коммиты" / "what was done" / "что было реализовано" / "summary of changes" → get_log (default collapsed mode gives you the last 5 commit messages — that's usually enough to summarise what was done. If the user wants ALL commits, call get_log with verbose=true and count=50).
-18. "Sync with remote" / "обновить из origin" / "откатить и обновить" → sync_with_remote (atomic stash + fetch + reset + restore).
-19. NEVER call get_status when the user asks about COMMITS — use get_log. NEVER call get_log when the user asks about FILE CHANGES — use get_status. NEVER call get_diff with full=true without specifying a file — it will return 1000+ lines and flood the chat.
+18. "Read file" / "прочитай файл" / "покажи содержимое файла" / "what's in this file" → read_file (pass the file path. For large files, use start_line and end_line to read specific sections. Returns the file content with line numbers).
+19. "List files" / "список файлов" / "какие файлы есть" / "show me the project structure" → list_files (pass pattern="*.ts" to filter by type, or include_untracked=true to also see untracked files).
+20. "Sync with remote" / "обновить из origin" / "откатить и обновить" → sync_with_remote (atomic stash + fetch + reset + restore).
+21. NEVER call get_status when the user asks about COMMITS — use get_log. NEVER call get_log when the user asks about FILE CHANGES — use get_status. NEVER call get_diff with full=true without specifying a file — it will return 1000+ lines and flood the chat.
+22. "Where is X used?" / "где используется" / "найди в коде" / "кто вызывает эту функцию" / "search the code" → search_code (content search over the working tree — the same engine as the Search tool's Content tab). Chain it with read_file when the user wants the surrounding code, and with blame_file when they ask WHO wrote it.
+23. "Who wrote this line?" / "кто внёс эту строку" / "когда появилась" / "blame" / "кто автор этого кода" → blame_file (per-line commit+author attribution — the same engine as the Blame tool). Pass start_line/end_line to focus on the lines the user mentioned. Follow up with get_log when they ask what ELSE that commit changed.
+24. "Where was HEAD before" / "куда делся коммит" / "что было до reset" / "lost my commit" / "я потерял коммит" → get_reflog (recorded movements of a ref, newest first) AND recyclable_commits (commits that still exist but are no longer referenced — lost after reset/rebase/deleted branch). The reflog selector (e.g. HEAD@{2}) can be passed to checkout to return to that exact point.
+25. "Find the breaking commit" / "когда сломалось" / "bisect" → the bisect tool, action by action: status → start → bad → good → … The tool reports the NEXT candidate after every action — tell the user to test it and reply good/bad (or skip). Call action=reset to finish.
+26. Submodules / LFS: "какие сабмодули" / "submodules" / "is the submodule initialized" → list_submodules (+ submodule_update to init/update them); "LFS" / "большие файлы" / "файлы-указатели вместо содержимого" → lfs_overview, then lfs_sync (action=pull) to download the real content.
+27. "gitflow" / "фичевые ветки" / "от чего ветвиться" → gitflow_overview (flow config + branches by type + current branch's role); "ревью" / "комментарии ревью" (local, stored in git notes) → list_reviews; "PR" / "мерж-реквесты" / "что ждёт ревью" / "что не смержено" → list_pull_requests (needs the GitHub/GitLab integration token — the tool says so if it's missing).
 
 ── Error recovery ──
 20. If a tool returns an error (e.g. "Ollama chat error 0"), DON'T repeat the same request. Instead, tell the user what happened and suggest a fix (e.g. "the model may have timed out, try again" or "check if the git operation is valid").
 21. If the user repeats the same request 2+ times and you keep failing, STOP and explain what's going wrong — don't just retry the same tool call in a loop.
 
 ── Language ──
-22. MATCH THE USER'S LANGUAGE. If the user writes in Russian, respond in Russian. If in English, respond in English. If in Chinese, respond in Chinese. If in German, respond in German. Detect the language from the user's message and use it for ALL your responses — tool descriptions, summaries, explanations. This is critical for a good user experience.
+22. ${langInstruction}
 
 ── Persistent memory ──
 23. You have persistent memory via save_memory and get_memory tools. When the user tells you something worth remembering (e.g. "we use conventional commits", "main branch is called develop", "don't commit the dist folder"), call save_memory to store it. The memory persists between sessions in .prismgit/ai-memory.json — next time the user starts a conversation, call get_memory to recall the saved facts.
@@ -333,9 +418,12 @@ export async function runWithTools(
      *  Default: 20,000 chars (~5,000 tokens). When exceeded, old messages
      *  are compressed into a text summary. User-configurable via Settings. */
     contextMaxChars?: number;
+    /** User's UI locale ('en' | 'ru' | 'zh' | 'de') — injected into the
+     *  system prompt so the LLM always responds in the user's language. */
+    userLocale?: string;
   },
 ): Promise<{ finalMessage: string; history: ChatMessage[] }> {
-  const systemPrompt = buildToolSystemPrompt(AI_TOOLS, repoPath);
+  const systemPrompt = buildToolSystemPrompt(AI_TOOLS, repoPath, options?.userLocale);
   const priorMessages = options?.priorHistory ?? [];
   const maxChars = options?.contextMaxChars ?? DEFAULT_CONTEXT_MAX_CHARS;
 
@@ -440,9 +528,12 @@ export async function runWithTools(
       }
     }
   }
-  // Hit the iteration cap — return the last assistant message.
+  // Hit the iteration cap — return the last assistant message with a
+  // notice that the tool-call limit was reached, so the user understands
+  // why the AI stopped without a final answer.
   const last = history[history.length - 1];
-  return { finalMessage: last?.content ?? 'No final message.', history };
+  const limitNotice = `[Tool-call limit reached (${maxIterations} iterations). The AI was still calling tools when the cap was hit. Send another message to continue.]`;
+  return { finalMessage: last?.content ? `${last.content}\n\n${limitNotice}` : limitNotice, history };
 }
 
 /**
@@ -532,7 +623,7 @@ function buildOpenAIBody(messages: ChatMessage[], provider: LLMProvider, include
       }
       return { role: m.role, content: m.content };
     }),
-    max_tokens: 1024,
+    max_tokens: provider.maxTokens ?? getToolLimits().maxTokensChat,
     temperature: provider.temperature ?? 0.4,
   };
   if (includeTools) {
@@ -545,12 +636,19 @@ function buildOpenAIBody(messages: ChatMessage[], provider: LLMProvider, include
 }
 
 async function callOpenAIChat(messages: ChatMessage[], provider: LLMProvider, signal?: AbortSignal): Promise<{ message: ChatMessage; usage?: TokenUsage }> {
-  const url = provider.url || 'https://api.openai.com/v1/chat/completions';
+  // Ensure the URL ends with /chat/completions. Some providers store just
+  // the base URL (e.g. "https://openrouter.ai/api/v1") without the
+  // /chat/completions suffix. If it's missing, append it — same logic as
+  // generateCommitMessage in electron/services/ai.ts.
+  const rawUrl = provider.url || 'https://api.openai.com/v1/chat/completions';
+  const base = rawUrl.replace(/\/+$/, '');
+  const url = /\/chat\/completions$/.test(base) ? base : `${base}/chat/completions`;
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (provider.apiKey) headers['Authorization'] = `Bearer ${provider.apiKey}`;
 
   // First attempt: WITH tools (full agent mode).
-  let body = buildOpenAIBody(messages, provider, true);
+  let includeTools = true;
+  let body = buildOpenAIBody(messages, provider, includeTools);
   let res = await proxyFetch(url, headers, body, signal);
 
   // ── Fallback: if the model doesn't support tools, retry WITHOUT tools ──
@@ -558,7 +656,21 @@ async function callOpenAIChat(messages: ChatMessage[], provider: LLMProvider, si
   // when the `tools` field is present. We retry the same request without
   // tools — the AI can still chat, just without git tool integration.
   if (!res.ok && isToolsUnsupported(res.status, res.body)) {
-    body = buildOpenAIBody(messages, provider, false);
+    includeTools = false;
+    body = buildOpenAIBody(messages, provider, includeTools);
+    res = await proxyFetch(url, headers, body, signal);
+  }
+
+  // ── v2.3.12 Fallback: OpenRouter free model 429 → free meta-router ──────
+  // OpenRouter's :free models share one rate-limited upstream pool, but
+  // `openrouter/free` routes across ALL of them. When the configured free
+  // model is rate-limited (the user's «из бесплатных доступна только
+  // openrouter/free» report), retry ONCE through the meta-router instead of
+  // failing. The UI gets a toast via notifyLLMFallback so the switch is
+  // visible, not silent.
+  if (!res.ok && shouldFallbackToOpenRouterFree(provider.type, provider.model, res.status, res.body)) {
+    notifyLLMFallback(provider.model);
+    body = buildOpenAIBody(messages, { ...provider, model: OPENROUTER_FREE_MODEL }, includeTools);
     res = await proxyFetch(url, headers, body, signal);
   }
 
@@ -572,7 +684,9 @@ async function callOpenAIChat(messages: ChatMessage[], provider: LLMProvider, si
         `Switch to a model that supports tools (e.g. llama3.1, mistral, qwen2.5) for full AI Assistant functionality.`
       );
     }
-    throw new Error(`OpenAI chat error ${res.status}: ${res.body}`);
+    // v2.3.12 — structured error (kind + provider message + remedy) instead
+    // of a raw JSON wall: `OpenAI chat error 429: {"error":{…}}`.
+    throw new LLMApiError(res.status, res.body);
   }
   const data = JSON.parse(res.body);
   const msg = data.choices?.[0]?.message ?? {};
@@ -604,7 +718,9 @@ async function callOpenAIChat(messages: ChatMessage[], provider: LLMProvider, si
 }
 
 async function callAnthropicChat(messages: ChatMessage[], provider: LLMProvider, signal?: AbortSignal): Promise<{ message: ChatMessage; usage?: TokenUsage }> {
-  const url = provider.url || 'https://api.anthropic.com/v1/messages';
+  const rawUrl = provider.url || 'https://api.anthropic.com/v1/messages';
+  const base = rawUrl.replace(/\/+$/, '');
+  const url = /\/v1\/messages$/.test(base) ? base : `${base}/v1/messages`;
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     'anthropic-version': '2023-06-01',
@@ -640,11 +756,12 @@ async function callAnthropicChat(messages: ChatMessage[], provider: LLMProvider,
     system,
     messages: userMessages,
     tools: AI_TOOLS.map(t => ({ name: t.name, description: t.description, input_schema: t.parameters })),
-    max_tokens: 1024,
+    max_tokens: provider.maxTokens ?? getToolLimits().maxTokensChat,
   });
   const res = await proxyFetch(url, headers, body, signal);
   if (!res.ok) {
-    throw new Error(`Anthropic chat error ${res.status}: ${res.body}`);
+    // v2.3.12 — structured error instead of a raw body dump.
+    throw new LLMApiError(res.status, res.body);
   }
   const data = JSON.parse(res.body);
   // Anthropic returns content as an array of blocks (text + tool_use).
@@ -663,12 +780,22 @@ async function callAnthropicChat(messages: ChatMessage[], provider: LLMProvider,
       content: textParts,
       toolCalls: toolUses?.length ? toolUses : undefined,
     },
-    usage: undefined, // Anthropic returns usage in a different format
+    usage: data.usage ? {
+      inputTokens: data.usage.input_tokens ?? 0,
+      outputTokens: data.usage.output_tokens ?? 0,
+      totalTokens: (data.usage.input_tokens ?? 0) + (data.usage.output_tokens ?? 0),
+      contextSize: data.usage.input_tokens ?? 0,
+    } : undefined,
   };
 }
 
 async function callOllamaChat(messages: ChatMessage[], provider: LLMProvider, signal?: AbortSignal): Promise<{ message: ChatMessage; usage?: TokenUsage }> {
-  const url = (provider.url || 'http://localhost:11434') + '/api/chat';
+  // Ollama URL should be the base server URL (e.g. http://localhost:11434).
+  // Strip any trailing /api/chat or /chat/completions that might have been
+  // saved from a different provider, then append /api/chat.
+  const rawUrl = (provider.url || 'http://localhost:11434').replace(/\/+$/, '');
+  const base = rawUrl.replace(/\/api\/chat$/, '').replace(/\/chat\/completions$/, '');
+  const url = `${base}/api/chat`;
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
 
   // Ollama's tool format:
@@ -750,7 +877,8 @@ async function callOllamaChat(messages: ChatMessage[], provider: LLMProvider, si
         `Switch to a model that supports tools (e.g. llama3.1, mistral, qwen2.5) for full AI Assistant functionality.`
       );
     }
-    throw new Error(`Ollama chat error ${res.status}: ${res.body}`);
+    // v2.3.12 — structured error instead of a raw body dump.
+    throw new LLMApiError(res.status, res.body);
   }
   const data = JSON.parse(res.body);
   const content: string = data.message?.content ?? '';
@@ -782,7 +910,12 @@ async function callOllamaChat(messages: ChatMessage[], provider: LLMProvider, si
       content: toolCalls?.length ? content.replace(/<tool>[\s\S]*?<\/tool>/g, '').trim() : content,
       toolCalls,
     },
-    usage: undefined, // Ollama doesn't return usage stats in /api/chat
+    usage: (data.prompt_eval_count || data.eval_count) ? {
+      inputTokens: data.prompt_eval_count ?? 0,
+      outputTokens: data.eval_count ?? 0,
+      totalTokens: (data.prompt_eval_count ?? 0) + (data.eval_count ?? 0),
+      contextSize: data.prompt_eval_count ?? 0,
+    } : undefined,
   };
 }
 

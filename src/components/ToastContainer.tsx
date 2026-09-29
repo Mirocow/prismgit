@@ -1,6 +1,7 @@
-import { CheckCircle, AlertCircle, Info, X, AlertTriangle } from './icons';
+import { CheckCircle, AlertCircle, Info, X, AlertTriangle, Copy } from './icons';
 import { useToastStore } from '../stores/toastStore';
-import { cn } from '../lib/utils';
+import { t as i18nT } from '../lib/i18n';
+import { cn, copyToClipboard, shortHash } from '../lib/utils';
 
 const ICONS = {
   success: CheckCircle,
@@ -62,23 +63,42 @@ export function ToastContainer() {
         key={toast.id}
         className="panel min-w-[280px] max-w-md shadow-lg flex items-start gap-3 p-3 animate-fade-in"
       >
-        <Icon size={18} className={cn('flex-shrink-0 mt-0.5', COLORS[toast.type])} aria-hidden={true} />
+        <Icon size={18} className={cn('shrink-0 mt-0.5', COLORS[toast.type])} aria-hidden={true} />
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-medium text-text-primary">
+          <div className="text-sm font-medium text-text-primary flex items-center gap-2 flex-wrap">
             {/* SR-only severity prefix — visually hidden but read by SR */}
             <span className="sr-only">{SR_PREFIX[toast.type]}</span>
-            {toast.message}
+            <span className="min-w-0 break-words">{toast.message}</span>
+            {/* Task 29 — the commit hash chip: monospace, accent border,
+                one click copies the FULL hash. Replaces the easily-missed
+                «Hash: abc1234» detail line the user reported as invisible. */}
+            {toast.hash && (
+              <button
+                type="button"
+                className="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-accent/40 bg-accent/10 font-mono text-xs text-accent hover:bg-accent/20 transition-colors"
+                title={i18nT('history.copyFullHash')}
+                aria-label={`${i18nT('history.copyFullHash')}: ${toast.hash}`}
+                onClick={() => {
+                  void copyToClipboard(toast.hash!).then(() => {
+                    useToastStore.getState().show('info', i18nT('common.copied'), undefined, 2000);
+                  });
+                }}
+              >
+                {shortHash(toast.hash)}
+                <Copy size={10} aria-hidden={true} />
+              </button>
+            )}
           </div>
           {toast.detail && (
-            <div className="text-xs text-text-secondary mt-1 break-words">
+            <div className="text-xs text-text-secondary mt-1 wrap-break-word">
               {toast.detail}
             </div>
           )}
         </div>
         <button
-          className="icon-btn flex-shrink-0"
+          className="icon-btn shrink-0"
           onClick={() => dismiss(toast.id)}
-          aria-label="Dismiss notification"
+          aria-label={i18nT('common.dismissNotification')}
         >
           <X size={14} />
         </button>
@@ -105,7 +125,7 @@ export function ToastContainer() {
           className={cn(
             'fixed right-4 z-50 flex flex-col gap-2 animate-slide-up',
             // Offset so the two regions don't overlap when both have content.
-            assertiveToasts.length > 0 ? 'bottom-[calc(2.5rem+8rem)]' : 'bottom-10'
+            assertiveToasts.length > 0 ? 'bottom-[10.5rem]' : 'bottom-10'
           )}
           role="status"
           aria-live="polite"

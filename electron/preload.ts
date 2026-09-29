@@ -1,33 +1,71 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { GitApi } from './types/git-api.js';
 import type { GithubApi } from './types/github-api.js';
+import type { GitLabApi } from './types/gitlab-api.js';
 import type { FsApi } from './types/fs-api.js';
 import type { SettingsApi } from './types/settings-api.js';
 import type { CommandLogEntry } from './types/command-log-api.js';
 import type { VsCodeApi } from './types/vscode-api.js';
+import type { SshApi, CredentialsApi } from './types/ssh-api.js';
+
+// Expose webUtils.getPathForFile to the renderer — Electron 32 removed
+// the non-standard `File.path` property in renderer context. Use this
+// helper to resolve the real filesystem path of dropped File objects.
+// (https://www.electronjs.org/blog/electron-32-0#removed-non-standard-filepath-property-on-file-objects)
+//
+// Exposed via contextBridge as window.smartgit.webUtils.getPathForFile
+// so it works under contextIsolation: true.
+const webUtilsApi = {
+  /**
+   * Resolve the real filesystem path of a File object received via
+   * drag-and-drop from the OS file manager. Returns '' for synthetic
+   * File objects (e.g. created by `new File([''], 'foo')` in tests).
+   */
+  getPathForFile: (file: File): string => {
+    try {
+      return webUtils.getPathForFile(file);
+    } catch {
+      return '';
+    }
+  },
+};
 
 const api = {
   // Git operations
   git: {
     status: (repoPath: string) => ipcRenderer.invoke('git:status', repoPath),
+    // Watcher-driven background refresh — computed in the dedicated git
+    // worker process (see gitPollProcess/gitStatusCore), off the main loop.
+    statusBackground: (repoPath: string) => ipcRenderer.invoke('git:statusBackground', repoPath),
+    rawBackground: (repoPath: string, args: string[]) => ipcRenderer.invoke('git:rawBackground', repoPath, args),
     listDirectories: (repoPath: string, maxDepth?: number) => ipcRenderer.invoke('git:listDirectories', repoPath, maxDepth),
     listAllDirectories: (repoPath: string, maxDepth?: number) => ipcRenderer.invoke('git:listAllDirectories', repoPath, maxDepth),
     add: (repoPath: string, files: string[]) => ipcRenderer.invoke('git:add', repoPath, files),
     addAll: (repoPath: string) => ipcRenderer.invoke('git:addAll', repoPath),
+    // SmartGit "Commit all except untracked" (git add -u) — no untracked files
+    stageAllTracked: (repoPath: string) => ipcRenderer.invoke('git:stageAllTracked', repoPath),
     restore: (repoPath: string, files: string[], staged?: boolean) => ipcRenderer.invoke('git:restore', repoPath, files, staged),
     commit: (repoPath: string, message: string, amend?: boolean, signoff?: boolean, noVerify?: boolean) =>
       ipcRenderer.invoke('git:commit', repoPath, message, amend, signoff, noVerify),
     clean: (repoPath: string, paths: string[], dryRun?: boolean, force?: boolean, directories?: boolean) =>
       ipcRenderer.invoke('git:clean', repoPath, paths, dryRun, force, directories),
-    push: (repoPath: string, remote?: string, branch?: string, setUpstream?: boolean, force?: boolean, tags?: boolean, targetBranch?: string) =>
-      ipcRenderer.invoke('git:push', repoPath, remote, branch, setUpstream, force, tags, targetBranch),
+    push: (repoPath: string, remote?: string, branch?: string, setUpstream?: boolean, force?: boolean, tags?: boolean, targetBranch?: string, forceMode?: 'lease' | 'force') =>
+      ipcRenderer.invoke('git:push', repoPath, remote, branch, setUpstream, force, tags, targetBranch, forceMode),
     pull: (repoPath: string, remote?: string, branch?: string, rebase?: boolean, noFF?: boolean) =>
       ipcRenderer.invoke('git:pull', repoPath, remote, branch, rebase, noFF),
     fetch: (repoPath: string, remote?: string, prune?: boolean, tags?: boolean) =>
       ipcRenderer.invoke('git:fetch', repoPath, remote, prune, tags),
     fetchAll: (repoPath: string, prune?: boolean) => ipcRenderer.invoke('git:fetchAll', repoPath, prune),
+    /** PR/MR head fetch for squash-to-branch (refs/pull/N/head etc.). */
+    fetchRef: (repoPath: string, remote: string, refspec: string) =>
+      ipcRenderer.invoke('git:fetchRef', repoPath, remote, refspec),
     fetchDeepen: (repoPath: string, remote?: string, commits?: number) =>
       ipcRenderer.invoke('git:fetchDeepen', repoPath, remote, commits),
+    /** BUGFIX "не получаю все ветки": refspec map for single-branch detection. */
+    remoteFetchSpecs: (repoPath: string) => ipcRenderer.invoke('git:remoteFetchSpecs', repoPath),
+    /** One-click remediation: `git remote set-branches <remote> '*'` + fetch. */
+    fetchAllBranches: (repoPath: string, remote?: string) =>
+      ipcRenderer.invoke('git:fetchAllBranches', repoPath, remote),
     setFetchDepth: (repoPath: string, remote?: string, depth?: number) =>
       ipcRenderer.invoke('git:setFetchDepth', repoPath, remote, depth),
     remoteProperties: (repoPath: string, name: string) =>
@@ -38,6 +76,7 @@ const api = {
     commitFiles: (repoPath: string, hash: string) => ipcRenderer.invoke('git:commitFiles', repoPath, hash),
     mergeNestedCommits: (repoPath: string, hash: string) => ipcRenderer.invoke('git:mergeNestedCommits', repoPath, hash),
     tagsAt: (repoPath: string, hash: string) => ipcRenderer.invoke('git:tagsAt', repoPath, hash),
+    tagShow: (repoPath: string, name: string) => ipcRenderer.invoke('git:tagShow', repoPath, name),
     trackedFiles: (repoPath: string) => ipcRenderer.invoke('git:trackedFiles', repoPath),
     diffCommit: (repoPath: string, hash: string, parentHash?: string) =>
       ipcRenderer.invoke('git:diffCommit', repoPath, hash, parentHash),
@@ -47,7 +86,10 @@ const api = {
     remotes: (repoPath: string) => ipcRenderer.invoke('git:remotes', repoPath),
     checkout: (repoPath: string, branch: string, options?: { newBranch?: boolean; force?: boolean; track?: boolean }) =>
       ipcRenderer.invoke('git:checkout', repoPath, branch, options),
+    hasSubmoduleConfigChanges: (repoPath: string, target: string) =>
+      ipcRenderer.invoke('git:hasSubmoduleConfigChanges', repoPath, target),
     checkoutFile: (repoPath: string, file: string, ref?: string) => ipcRenderer.invoke('git:checkoutFile', repoPath, file, ref),
+    checkoutFiles: (repoPath: string, files: string[], ref?: string) => ipcRenderer.invoke('git:checkoutFiles', repoPath, files, ref),
     createBranch: (repoPath: string, name: string, startPoint?: string, force?: boolean, track?: boolean) =>
       ipcRenderer.invoke('git:createBranch', repoPath, name, startPoint, force, track),
     deleteBranch: (repoPath: string, name: string, force?: boolean, remote?: boolean) =>
@@ -64,6 +106,7 @@ const api = {
       ipcRenderer.invoke('git:aheadBehind', repoPath, base, compare),
     pollRemoteSummary: (repoPath: string) => ipcRenderer.invoke('git:pollRemoteSummary', repoPath),
     pollRemoteSummaries: (paths: string[]) => ipcRenderer.invoke('git:pollRemoteSummaries', paths),
+    clearPollCache: (repoPath?: string) => ipcRenderer.invoke('git:clearPollCache', repoPath),
     diff: (repoPath: string, file: string, options?: { staged?: boolean; ref?: string }) =>
       ipcRenderer.invoke('git:diff', repoPath, file, options),
     diffBranches: (repoPath: string, base: string, compare: string) =>
@@ -71,8 +114,8 @@ const api = {
     stashList: (repoPath: string) => ipcRenderer.invoke('git:stashList', repoPath),
     stashPush: (repoPath: string, message?: string, includeUntracked?: boolean, keepIndex?: boolean, files?: string[]) =>
       ipcRenderer.invoke('git:stashPush', repoPath, message, includeUntracked, keepIndex, files),
-    stashPop: (repoPath: string, index?: number) => ipcRenderer.invoke('git:stashPop', repoPath, index),
-    stashApply: (repoPath: string, index?: number) => ipcRenderer.invoke('git:stashApply', repoPath, index),
+    stashPop: (repoPath: string, index?: number, keepIndex?: boolean) => ipcRenderer.invoke('git:stashPop', repoPath, index, keepIndex),
+    stashApply: (repoPath: string, index?: number, keepIndex?: boolean) => ipcRenderer.invoke('git:stashApply', repoPath, index, keepIndex),
     stashFiles: (repoPath: string, hash: string) => ipcRenderer.invoke('git:stashFiles', repoPath, hash),
     stashFileRawDiff: (repoPath: string, hash: string, file: string) =>
       ipcRenderer.invoke('git:stashFileRawDiff', repoPath, hash, file),
@@ -97,7 +140,7 @@ const api = {
       ipcRenderer.invoke('git:submoduleDeinit', repoPath, name, force),
     submoduleAdd: (repoPath: string, url: string, targetPath: string, branch?: string) =>
       ipcRenderer.invoke('git:submoduleAdd', repoPath, url, targetPath, branch),
-    clone: (url: string, targetPath: string, options?: { depth?: number; branch?: string; recursive?: boolean; shallowSubmodules?: boolean }) =>
+    clone: (url: string, targetPath: string, options?: { depth?: number; branch?: string; recursive?: boolean; shallowSubmodules?: boolean; sslVerify?: boolean }) =>
       ipcRenderer.invoke('git:clone', url, targetPath, options),
     init: (targetPath: string, bare?: boolean) => ipcRenderer.invoke('git:init', targetPath, bare),
     addRemote: (repoPath: string, name: string, url: string) => ipcRenderer.invoke('git:addRemote', repoPath, name, url),
@@ -119,10 +162,11 @@ const api = {
     applyPatch: (repoPath: string, patch: string | string[], options?: Record<string, null> | string[]) => ipcRenderer.invoke('git:applyPatch', repoPath, patch, options),
     show: (repoPath: string, args: string[]) => ipcRenderer.invoke('git:show', repoPath, args),
     showBuffer: (repoPath: string, args: string[]) => ipcRenderer.invoke('git:showBuffer', repoPath, args),
-    mirror: (remoteUrl: string, targetPath: string) => ipcRenderer.invoke('git:mirror', remoteUrl, targetPath),
+    mirror: (remoteUrl: string, targetPath: string, options?: { sslVerify?: boolean }) => ipcRenderer.invoke('git:mirror', remoteUrl, targetPath, options),
     countObjects: (repoPath: string, verbose?: boolean) => ipcRenderer.invoke('git:countObjects', repoPath, verbose),
     updateServerInfo: (repoPath: string) => ipcRenderer.invoke('git:updateServerInfo', repoPath),
     listRemote: (repoPath: string, remote?: string) => ipcRenderer.invoke('git:listRemote', repoPath, remote),
+    lsRemoteUrl: (url: string, args?: string[]) => ipcRenderer.invoke('git:lsRemoteUrl', url, args),
     addAnnotatedTag: (repoPath: string, name: string, message: string, ref?: string) => ipcRenderer.invoke('git:addAnnotatedTag', repoPath, name, message, ref),
 
     // SmartGit 20-24 extended
@@ -143,6 +187,8 @@ const api = {
     cherryPickContinue: (repoPath: string, allowEmpty?: boolean) =>
       ipcRenderer.invoke('git:cherryPickContinue', repoPath, allowEmpty),
     cherryPickSkip: (repoPath: string) => ipcRenderer.invoke('git:cherryPickSkip', repoPath),
+    squashToBranch: (repoPath: string, params: import('./types/git-api.js').SquashToBranchParams) =>
+      ipcRenderer.invoke('git:squashToBranch', repoPath, params),
     revert: (repoPath: string, hashes: string[], noCommit?: boolean) =>
       ipcRenderer.invoke('git:revert', repoPath, hashes, noCommit),
     revertAbort: (repoPath: string) => ipcRenderer.invoke('git:revertAbort', repoPath),
@@ -169,6 +215,13 @@ const api = {
       ipcRenderer.invoke('git:splitOffFiles', repoPath, hash, files, message),
     configGet: (repoPath: string, key: string, scope?: 'system' | 'global' | 'local') =>
       ipcRenderer.invoke('git:configGet', repoPath, key, scope),
+    // Batched dialog access — ONE `git config --list -z` subprocess instead
+    // of one spawn per key (Repository Settings used to fire 19 parallel
+    // configGet round-trips through the shared git queue).
+    configGetMany: (repoPath: string, keys: string[]) =>
+      ipcRenderer.invoke('git:configGetMany', repoPath, keys),
+    configSetMany: (repoPath: string, entries: { key: string; value: string | null }[]) =>
+      ipcRenderer.invoke('git:configSetMany', repoPath, entries),
     configSet: (repoPath: string, key: string, value: string, scope?: 'system' | 'global' | 'local') =>
       ipcRenderer.invoke('git:configSet', repoPath, key, value, scope),
     configList: (repoPath: string, scope?: 'system' | 'global' | 'local') =>
@@ -180,6 +233,8 @@ const api = {
       ipcRenderer.invoke('git:reset', repoPath, mode, ref),
     resetFile: (repoPath: string, file: string, ref?: string) =>
       ipcRenderer.invoke('git:resetFile', repoPath, file, ref),
+    resetFiles: (repoPath: string, files: string[], ref?: string) =>
+      ipcRenderer.invoke('git:resetFiles', repoPath, files, ref),
     extractRepoInfo: (repoPath: string) => ipcRenderer.invoke('git:extractRepoInfo', repoPath),
     revealInFileManager: (fullPath: string) => ipcRenderer.invoke('git:revealInFileManager', fullPath),
     openFile: (fullPath: string) => ipcRenderer.invoke('git:openFile', fullPath),
@@ -189,7 +244,10 @@ const api = {
       ipcRenderer.invoke('git:getIndexFlags', repoPath, file),
     setIndexFlag: (repoPath: string, file: string, flag: 'assume-unchanged' | 'skip-worktree', value: boolean) =>
       ipcRenderer.invoke('git:setIndexFlag', repoPath, file, flag, value),
+    setIndexFlagBatch: (repoPath: string, files: string[], flag: 'assume-unchanged' | 'skip-worktree', value: boolean) =>
+      ipcRenderer.invoke('git:setIndexFlagBatch', repoPath, files, flag, value),
     deleteFile: (repoPath: string, file: string) => ipcRenderer.invoke('git:deleteFile', repoPath, file),
+    deleteFiles: (repoPath: string, files: string[]) => ipcRenderer.invoke('git:deleteFiles', repoPath, files),
 
     // LFS support
     lfsStatus: (repoPath: string) => ipcRenderer.invoke('git:lfsStatus', repoPath),
@@ -198,7 +256,11 @@ const api = {
     lfsPush: (repoPath: string) => ipcRenderer.invoke('git:lfsPush', repoPath),
     lfsFetch: (repoPath: string) => ipcRenderer.invoke('git:lfsFetch', repoPath),
     lfsInstall: (repoPath: string) => ipcRenderer.invoke('git:lfsInstall', repoPath),
+    detectLfsConfigured: (repoPath: string) => ipcRenderer.invoke('git:detectLfsConfigured', repoPath),
+    removeLfsFilter: (repoPath: string) => ipcRenderer.invoke('git:removeLfsFilter', repoPath),
     lfsTrack: (repoPath: string, patterns: string[]) => ipcRenderer.invoke('git:lfsTrack', repoPath, patterns),
+    lfsUntrack: (repoPath: string, pattern: string) => ipcRenderer.invoke('git:lfsUntrack', repoPath, pattern),
+    lfsFsck: (repoPath: string) => ipcRenderer.invoke('git:lfsFsck', repoPath),
     lfsList: (repoPath: string) => ipcRenderer.invoke('git:lfsList', repoPath),
 
     // Split commit
@@ -249,6 +311,11 @@ const api = {
     verifyDatabase: (repoPath: string) => ipcRenderer.invoke('git:verifyDatabase', repoPath),
     garbageCollect: (repoPath: string, aggressive?: boolean) =>
       ipcRenderer.invoke('git:garbageCollect', repoPath, aggressive),
+    repack: (repoPath: string) => ipcRenderer.invoke('git:repack', repoPath),
+    packRefs: (repoPath: string) => ipcRenderer.invoke('git:packRefs', repoPath),
+    pruneObjects: (repoPath: string) => ipcRenderer.invoke('git:pruneObjects', repoPath),
+    reflogExpire: (repoPath: string) => ipcRenderer.invoke('git:reflogExpire', repoPath),
+    fullMaintenance: (repoPath: string) => ipcRenderer.invoke('git:fullMaintenance', repoPath),
     unreachableCommits: (repoPath: string) => ipcRenderer.invoke('git:unreachableCommits', repoPath),
 
     // ===== Bugtraq =====
@@ -267,25 +334,21 @@ const api = {
     noteAdd: (repoPath: string, commit: string, content: string, ref?: string, force?: boolean) =>
       ipcRenderer.invoke('git:noteAdd', repoPath, commit, content, ref, force),
     noteRemove: (repoPath: string, commit: string, ref?: string) => ipcRenderer.invoke('git:noteRemove', repoPath, commit, ref),
-    forceCompare: (repoPath: string, file: string, options?: { staged?: boolean; ref?: string }) =>
-      ipcRenderer.invoke('git:forceCompare', repoPath, file, options),
+    // NOTE: forceCompare IPC was removed (dead renderer-side code).
     isEolOnlyChange: (repoPath: string, file: string) => ipcRenderer.invoke('git:isEolOnlyChange', repoPath, file),
+    filesWithRealChanges: (repoPath: string, files: string[]) => ipcRenderer.invoke('git:filesWithRealChanges', repoPath, files),
     pushToGerrit: (repoPath: string, branch?: string, remote?: string, options?: { draft?: boolean; reviewers?: string[]; topic?: string }) =>
       ipcRenderer.invoke('git:pushToGerrit', repoPath, branch, remote, options),
-    clonePartial: (url: string, targetPath: string, filter?: 'blob:none' | 'tree:0' | 'blob:limit=1m', options?: { depth?: number; branch?: string; recursive?: boolean }) =>
+    clonePartial: (url: string, targetPath: string, filter?: 'blob:none' | 'tree:0' | 'blob:limit=1m', options?: { depth?: number; branch?: string; recursive?: boolean; sslVerify?: boolean }) =>
       ipcRenderer.invoke('git:clonePartial', url, targetPath, filter, options),
     setupCredentialHelper: (repoPath: string) => ipcRenderer.invoke('git:setupCredentialHelper', repoPath),
-    blameBidirectional: (repoPath: string, file: string, ref?: string) =>
-      ipcRenderer.invoke('git:blameBidirectional', repoPath, file, ref),
-    pickaxeSearch: (repoPath: string, file: string, search: string, options?: { regex?: boolean; ignoreCase?: boolean }) =>
-      ipcRenderer.invoke('git:pickaxeSearch', repoPath, file, search, options),
-    detectRenames: (repoPath: string, options?: { threshold?: number; ref?: string }) =>
-      ipcRenderer.invoke('git:detectRenames', repoPath, options),
+    // NOTE: blameBidirectional, pickaxeSearch, detectRenames IPCs were
+    // removed (dead renderer-side code).
     isCommitPushed: (repoPath: string, hash: string) => ipcRenderer.invoke('git:isCommitPushed', repoPath, hash),
-    squashCommits: (repoPath: string, fromHash: string, toHash: string, message?: string) =>
-      ipcRenderer.invoke('git:squashCommits', repoPath, fromHash, toHash, message),
-    coalesceCommits: (repoPath: string, firstHash: string, secondHash: string) =>
-      ipcRenderer.invoke('git:coalesceCommits', repoPath, firstHash, secondHash),
+    branchesContaining: (repoPath: string, hash: string) => ipcRenderer.invoke('git:branchesContaining', repoPath, hash),
+    // NOTE: squashCommits, coalesceCommits IPCs were removed (dead
+    // renderer-side code).
+    // Squash-transfer: History multi-select → "Send to branch as one commit".
 
     // === SmartGit Manual v25/26 — extended backend (batch 1-7) ===
     smartPull: (repoPath: string, remote?: string, branch?: string) =>
@@ -306,8 +369,6 @@ const api = {
       ipcRenderer.invoke('git:commitSigned', repoPath, message, options),
     createSignedTag: (repoPath: string, name: string, message: string, ref?: string, sshSign?: boolean) =>
       ipcRenderer.invoke('git:createSignedTag', repoPath, name, message, ref, sshSign),
-    lfsFsck: (repoPath: string) =>
-      ipcRenderer.invoke('git:lfsFsck', repoPath),
     batchOperation: (repos: string[], operation: 'fetch' | 'pull' | 'push' | 'status', options?: { remote?: string; branch?: string; force?: boolean }) =>
       ipcRenderer.invoke('git:batchOperation', repos, operation, options),
     exportConfig: (repoPath: string | null) =>
@@ -318,6 +379,9 @@ const api = {
     // (closes its child process pool). Called by repositoryStore.closeRepository.
     invalidateCache: (repoPath?: string) =>
       ipcRenderer.invoke('git:invalidateCache', repoPath),
+    // PERF (v3.1, repo-switch): soft trim — LRU-cap per-repo caches without
+    // destroying them (warm switch-back). Called on repo switch-away/close.
+    trimRepoCaches: () => ipcRenderer.invoke('git:trimRepoCaches'),
   } as GitApi,
 
   // GitHub integration
@@ -331,6 +395,16 @@ const api = {
       ipcRenderer.invoke('github:createPullRequest', owner, repo, data),
     listPullRequests: (owner: string, repo: string, state?: 'open' | 'closed' | 'all') =>
       ipcRenderer.invoke('github:listPullRequests', owner, repo, state),
+    getPullRequest: (owner: string, repo: string, prNumber: number) =>
+      ipcRenderer.invoke('github:getPullRequest', owner, repo, prNumber),
+    listPRFiles: (owner: string, repo: string, prNumber: number) =>
+      ipcRenderer.invoke('github:listPRFiles', owner, repo, prNumber),
+    listPRIssueComments: (owner: string, repo: string, prNumber: number) =>
+      ipcRenderer.invoke('github:listPRIssueComments', owner, repo, prNumber),
+    listPRCommits: (owner: string, repo: string, prNumber: number) =>
+      ipcRenderer.invoke('github:listPRCommits', owner, repo, prNumber),
+    getCommitFiles: (owner: string, repo: string, commitSha: string) =>
+      ipcRenderer.invoke('github:getCommitFiles', owner, repo, commitSha),
     getCheckRuns: (owner: string, repo: string, shas: string[]) =>
       ipcRenderer.invoke('github:getCheckRuns', owner, repo, shas),
     logout: () => ipcRenderer.invoke('github:logout'),
@@ -352,6 +426,45 @@ const api = {
       ipcRenderer.invoke('github:listPRComments', owner, repo, prNumber),
   } as GithubApi,
 
+  // GitLab integration — mirrors github shape. Used by the Clone modal
+  // (GitLab projects tab) and the Pull Requests page (when the repo's
+  // remote is on a GitLab instance). The IPC handlers live in
+  // electron/ipc/gitlab.ts and were already registered in main.ts; this
+  // preload binding is what makes them callable from the renderer as
+  // `api.gitlab.*`.
+  gitlab: {
+    authWithPAT: (token: string, baseUrl?: string) =>
+      ipcRenderer.invoke('gitlab:authWithPAT', token, baseUrl),
+    logout: () => ipcRenderer.invoke('gitlab:logout'),
+    getAuthState: () => ipcRenderer.invoke('gitlab:getAuthState'),
+    listProjects: (page?: number, perPage?: number) =>
+      ipcRenderer.invoke('gitlab:listProjects', page, perPage),
+    getProjectByPath: (pathWithNamespace: string) =>
+      ipcRenderer.invoke('gitlab:getProjectByPath', pathWithNamespace),
+    listMergeRequests: (projectId: number, state?: 'opened' | 'closed' | 'merged' | 'all') =>
+      ipcRenderer.invoke('gitlab:listMergeRequests', projectId, state),
+    getMergeRequest: (projectId: number, mrIid: number) =>
+      ipcRenderer.invoke('gitlab:getMergeRequest', projectId, mrIid),
+    listMRChanges: (projectId: number, mrIid: number) =>
+      ipcRenderer.invoke('gitlab:listMRChanges', projectId, mrIid),
+    listMRNotes: (projectId: number, mrIid: number) =>
+      ipcRenderer.invoke('gitlab:listMRNotes', projectId, mrIid),
+    listMRCommits: (projectId: number, mrIid: number) =>
+      ipcRenderer.invoke('gitlab:listMRCommits', projectId, mrIid),
+    getCommitDiff: (projectId: number, commitSha: string) =>
+      ipcRenderer.invoke('gitlab:getCommitDiff', projectId, commitSha),
+    createMergeRequest: (projectId: number, data: { title: string; source_branch: string; target_branch: string; description?: string }) =>
+      ipcRenderer.invoke('gitlab:createMergeRequest', projectId, data),
+    approveMergeRequest: (projectId: number, mrIid: number) =>
+      ipcRenderer.invoke('gitlab:approveMergeRequest', projectId, mrIid),
+    mergeMergeRequest: (projectId: number, mrIid: number, options?: { squash?: boolean; should_remove_source_branch?: boolean }) =>
+      ipcRenderer.invoke('gitlab:mergeMergeRequest', projectId, mrIid, options),
+    addMRComment: (projectId: number, mrIid: number, body: string) =>
+      ipcRenderer.invoke('gitlab:addMRComment', projectId, mrIid, body),
+    listPipelines: (projectId: number, sha?: string) =>
+      ipcRenderer.invoke('gitlab:listPipelines', projectId, sha),
+  } as GitLabApi,
+
   // File system
   fs: {
     openDirectoryPicker: () => ipcRenderer.invoke('dialog:openDirectory'),
@@ -361,6 +474,7 @@ const api = {
     writeFile: (filePath: string, content: string) => ipcRenderer.invoke('fs:writeFile', filePath, content),
     pathBasename: (filePath: string) => ipcRenderer.invoke('fs:pathBasename', filePath),
     pathDirname: (filePath: string) => ipcRenderer.invoke('fs:pathDirname', filePath),
+    exists: (filePath: string) => ipcRenderer.invoke('fs:exists', filePath),
     openTerminal: (dirPath: string) => ipcRenderer.invoke('fs:openTerminal', dirPath),
   } as FsApi,
 
@@ -369,6 +483,11 @@ const api = {
     get: (key: string) => ipcRenderer.invoke('settings:get', key),
     set: (key: string, value: unknown) => ipcRenderer.invoke('settings:set', key, value),
     getAll: () => ipcRenderer.invoke('settings:getAll'),
+    // Hosts whose TLS certificates are deliberately not verified — dedicated
+    // channels (the main process keeps a cache in sync with every mutation).
+    getInsecureSslHosts: () => ipcRenderer.invoke('settings:getInsecureSslHosts') as Promise<string[]>,
+    addInsecureSslHost: (host: string) => ipcRenderer.invoke('settings:addInsecureSslHost', host),
+    removeInsecureSslHost: (host: string) => ipcRenderer.invoke('settings:removeInsecureSslHost', host),
     getRepos: () => ipcRenderer.invoke('settings:getRepos'),
     addRepo: (repo: { path: string; name: string }) => ipcRenderer.invoke('settings:addRepo', repo),
     removeRepo: (path: string) => ipcRenderer.invoke('settings:removeRepo', path),
@@ -387,6 +506,10 @@ const api = {
     addTag: (path: string, tag: string) => ipcRenderer.invoke('settings:addTag', path, tag),
     removeTag: (path: string, tag: string) => ipcRenderer.invoke('settings:removeTag', path, tag),
     refreshRepoStats: (path: string) => ipcRenderer.invoke('settings:refreshRepoStats', path),
+    // Force-refresh the cached metadata (lastCommit, branchCount, commitCount,
+    // provider...) for every configured repo. Returns the number of repos that
+    // were successfully refreshed.
+    refreshAllRepoStats: () => ipcRenderer.invoke('settings:refreshAllRepoStats'),
 
     // Repository groups (tree in the sidebar)
     getRepoGroups: () => ipcRenderer.invoke('settings:getRepoGroups'),
@@ -400,7 +523,41 @@ const api = {
       ipcRenderer.invoke('settings:setRepoGroupExpanded', id, expanded),
     setRepoGroup: (path: string, groupId: string | null) =>
       ipcRenderer.invoke('settings:setRepoGroup', path, groupId),
+
+    // Folder repository scan (v2.3) — recursive scan of a folder and its
+    // subfolders; groups mirror the folder structure.
+    scanFolderRepos: (root: string, opts?: { maxDepth?: number }) =>
+      ipcRenderer.invoke('settings:scanFolderRepos', root, opts),
+    addFolderRepositories: (root: string, opts?: { maxDepth?: number }) =>
+      ipcRenderer.invoke('settings:addFolderRepositories', root, opts),
   } as SettingsApi,
+
+  // SSH key management (Settings → Security → SSH keys)
+  ssh: {
+    list: () => ipcRenderer.invoke('ssh:list'),
+    generate: (options) => ipcRenderer.invoke('ssh:generate', options),
+    importKey: (options) => ipcRenderer.invoke('ssh:importKey', options),
+    remove: (id: string) => ipcRenderer.invoke('ssh:remove', id),
+    copyPublicKey: (id: string) => ipcRenderer.invoke('ssh:copyPublicKey', id),
+    test: (id: string, opts?: { host?: string; user?: string }) => ipcRenderer.invoke('ssh:test', id, opts),
+    listSystemKeys: () => ipcRenderer.invoke('ssh:listSystemKeys'),
+    pickKeyFile: () => ipcRenderer.invoke('ssh:pickKeyFile'),
+    listProfiles: () => ipcRenderer.invoke('ssh:listProfiles'),
+    saveProfile: (input) => ipcRenderer.invoke('ssh:saveProfile', input),
+    deleteProfile: (id: string) => ipcRenderer.invoke('ssh:deleteProfile', id),
+    testProfile: (id: string) => ipcRenderer.invoke('ssh:testProfile', id),
+    testParams: (params) => ipcRenderer.invoke('ssh:testParams', params),
+    resolveForUrl: (url: string) => ipcRenderer.invoke('ssh:resolveForUrl', url),
+  } as SshApi,
+
+  // Credential storage status + secrets manager (Settings → Security)
+  credentials: {
+    status: () => ipcRenderer.invoke('credentials:status'),
+    list: () => ipcRenderer.invoke('credentials:list'),
+    set: (ns: string, key: string, value: string) => ipcRenderer.invoke('credentials:set', ns, key, value),
+    delete: (ns: string, key: string) => ipcRenderer.invoke('credentials:delete', ns, key),
+    reveal: (ns: string, key: string) => ipcRenderer.invoke('credentials:reveal', ns, key),
+  } as CredentialsApi,
 
   // Window controls
   window: {
@@ -408,6 +565,8 @@ const api = {
     maximize: () => ipcRenderer.send('window:maximize'),
     close: () => ipcRenderer.send('window:close'),
     isMaximized: () => ipcRenderer.invoke('window:isMaximized'),
+    /** Keep the native window background in sync with the active theme. */
+    setBackgroundColor: (color: string) => ipcRenderer.send('window:setBackgroundColor', color),
     onMaximizeChange: (cb: (maximized: boolean) => void) => {
       const listener = (_: unknown, value: boolean) => cb(value);
       ipcRenderer.on('window:maximizeChanged', listener);
@@ -418,6 +577,8 @@ const api = {
   // App info
   app: {
     getVersion: () => ipcRenderer.invoke('app:getVersion'),
+    /** { app, electron, node } versions for the About panel (Settings → About). */
+    getVersions: () => ipcRenderer.invoke('app:versions') as Promise<{ app: string; electron: string; node: string }>,
     getPlatform: () => ipcRenderer.invoke('app:getPlatform'),
     openExternal: (url: string) => ipcRenderer.send('app:openExternal', url),
     /** Locale override for e2e/tests (PRISMGIT_LOCALE), empty in normal runs. */
@@ -491,6 +652,9 @@ const api = {
       ipcRenderer.invoke('ai:memory:summary', repoPath),
     chat: (config: { url: string; headers: Record<string, string>; body: string; method?: string }) =>
       ipcRenderer.invoke('ai:chat', config),
+    /** Multi-provider registry: unified model list / connectivity test. */
+    providerListModels: (kind: string, url: string, apiKey?: string) =>
+      ipcRenderer.invoke('ai:providerListModels', kind, url, apiKey),
   },
 
   // Raw git command log (Output panel → Commands tab)
@@ -498,10 +662,42 @@ const api = {
     list: () => ipcRenderer.invoke('command-log:list'),
     clear: () => ipcRenderer.invoke('command-log:clear'),
     onEntry: (cb: (entry: CommandLogEntry) => void) => {
-      const listener = (_: unknown, entry: CommandLogEntry) => cb(entry);
-      ipcRenderer.on('command-log:entry', listener);
+      // PERFORMANCE: main process batches entries 100 ms and emits them
+      // via 'command-log:batch' (Array<CommandLogEntry>) instead of per-
+      // entry 'command-log:entry'. We unpack the batch here so the store
+      // API stays the same. The legacy per-entry channel is kept as a
+      // fallback for any older main process still sending single entries
+      // (not used in production since v2.1.1, but harmless to keep).
+      const batchListener = (_: unknown, batch: CommandLogEntry[]) => {
+        if (Array.isArray(batch)) {
+          for (const e of batch) cb(e);
+        } else {
+          // Single entry fallback (legacy main process shape).
+          cb(batch as unknown as CommandLogEntry);
+        }
+      };
+      const singleListener = (_: unknown, entry: CommandLogEntry) => cb(entry);
+      ipcRenderer.on('command-log:batch', batchListener);
+      ipcRenderer.on('command-log:entry', singleListener);
       return () => {
-        ipcRenderer.removeListener('command-log:entry', listener);
+        ipcRenderer.removeListener('command-log:batch', batchListener);
+        ipcRenderer.removeListener('command-log:entry', singleListener);
+      };
+    },
+    onBatch: (cb: (entries: CommandLogEntry[]) => void) => {
+      // PERFORMANCE (v3.4): the batch-aware variant — ONE callback per
+      // 100 ms main-process batch. The store then does a single set()
+      // (one array copy, one re-render, one errorPulse evaluation) per
+      // batch instead of N per-entry set()s. During a "Check all
+      // repositories" burst (4 spawns × N repos logged in main) that is
+      // the difference between a calm panel and a renderer freeze.
+      const batchListener = (_: unknown, batch: CommandLogEntry[]) => {
+        if (Array.isArray(batch)) cb(batch);
+        else if (batch) cb([batch as unknown as CommandLogEntry]);
+      };
+      ipcRenderer.on('command-log:batch', batchListener);
+      return () => {
+        ipcRenderer.removeListener('command-log:batch', batchListener);
       };
     },
   },
@@ -524,6 +720,14 @@ const api = {
   },
 
   // Menu events (one-way from main to renderer)
+  // Avatar cache — downloads + caches avatar images on disk.
+  // Renderer calls api.avatar.get(url). Returns a data URI string (or null)
+  // — no network in renderer. The `getByEmail` variant was removed as dead
+  // code; the renderer builds the Gravatar URL itself via src/lib/gravatar.ts.
+  avatar: {
+    get: (url: string) => ipcRenderer.invoke('avatar:get', url),
+  },
+
   events: {
     on: (channel: string, cb: (...args: unknown[]) => void) => {
       const listener = (_: unknown, ...args: unknown[]) => cb(...args);
@@ -536,6 +740,12 @@ const api = {
   },
 } as const;
 
-contextBridge.exposeInMainWorld('smartgit', api);
+contextBridge.exposeInMainWorld('smartgit', {
+  ...api,
+  // Expose webUtils.getPathForFile under api.webUtils so the renderer
+  // can resolve the filesystem path of dropped File objects. Required
+  // since Electron 32 — File.path is no longer defined in the renderer.
+  webUtils: webUtilsApi,
+});
 
 export type SmartGitApi = typeof api;

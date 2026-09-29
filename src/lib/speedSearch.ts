@@ -35,10 +35,17 @@ export interface SpeedSearchOptions {
   ignoreKeys?: string[];
 }
 
+/** Module-level default — a per-render `['Tab','Enter']` literal would give
+ *  useCallback/useEffect a NEW array identity every render, detaching and
+ *  re-attaching the keydown listener on every state change (found by the
+ *  unit tests: Backspace/Escape/ArrowUp silently stopped working after the
+ *  first keystroke had triggered a re-render). */
+const DEFAULT_IGNORE_KEYS: string[] = ['Tab', 'Enter'];
+
 export function useSpeedSearch<T extends HTMLElement = HTMLDivElement>(
   options: SpeedSearchOptions = {}
 ) {
-  const { onNavigate, onHome, onEnd, resetDelay = 1500, ignoreKeys = ['Tab', 'Enter'] } = options;
+  const { onNavigate, onHome, onEnd, resetDelay = 1500, ignoreKeys = DEFAULT_IGNORE_KEYS } = options;
   const [query, setQuery] = useState('');
   const targetRef = useRef<T | null>(null);
   const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);

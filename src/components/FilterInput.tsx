@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { cn } from '../lib/utils';
+import { X } from './icons';
 
 /**
  * Reusable FilterInput — a text input with an optional regex `.*` toggle.
@@ -47,6 +48,10 @@ export interface FilterInputProps {
   ariaLabel?: string;
   autoFocus?: boolean;
   onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+  /** Tooltip for the clear (✕) button shown while the input has text.
+   *  v3.8 — the user's report: filters felt "stuck" because the text search
+   *  stayed active with no visible way to reset it. */
+  clearTitle?: string;
 }
 
 export function FilterInput({
@@ -60,6 +65,7 @@ export function FilterInput({
   ariaLabel,
   autoFocus,
   onKeyDown,
+  clearTitle = 'Clear',
 }: FilterInputProps) {
   // Local state mirrors the parent's value when debounce is in use so the
   // input stays responsive; the parent's onChange is fired after debounce.
@@ -100,6 +106,22 @@ export function FilterInput({
     };
   }, []);
 
+  const clear = () => {
+    setLocalValue('');
+    lastEmittedRef.current = '';
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    onChange('');
+  };
+
+  // Esc clears — a keyboard shortcut for the same one-click reset.
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Escape' && localValue) {
+      e.stopPropagation();
+      clear();
+    }
+    onKeyDown?.(e);
+  };
+
   return (
     <div className="flex items-center gap-1 flex-1 min-w-0">
       <input
@@ -110,13 +132,24 @@ export function FilterInput({
         value={localValue}
         onChange={handleChange}
         autoFocus={autoFocus}
-        onKeyDown={onKeyDown}
+        onKeyDown={handleKeyDown}
       />
+      {localValue && (
+        <button
+          type="button"
+          className="icon-btn !w-4 !h-4 shrink-0"
+          title={clearTitle}
+          aria-label={clearTitle}
+          onClick={clear}
+        >
+          <X size={10} />
+        </button>
+      )}
       {onToggleRegex && (
         <button
           type="button"
           className={cn(
-            'text-2xs px-1.5 py-0.5 border rounded font-mono flex-shrink-0',
+            'text-2xs px-1.5 py-0.5 border rounded font-mono shrink-0',
             isRegex
               ? 'border-accent bg-accent-muted text-accent'
               : 'border-border-default bg-bg-tertiary text-text-secondary hover:text-text-primary',

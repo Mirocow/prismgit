@@ -599,6 +599,39 @@ describe('reflog / init / clone', () => {
     fs.mkdirSync(fresh, { recursive: true });
     await gitService.init(fresh, false);
     expect(await gitService.isRepo(fresh)).toBe(true);
-    expect(await gitService.currentBranch(fresh)).toBeNull(); // no commits yet
+    // currentBranch now uses symbolic-ref which returns the branch name
+    // even before any commits exist (git init creates HEAD → refs/heads/main).
+    // The old git.branch() returned branch.current='' for unborn HEAD.
+    const branch = await gitService.currentBranch(fresh);
+    // On a fresh repo, HEAD points to refs/heads/main but the ref doesn't exist yet.
+    // symbolic-ref --short -q HEAD returns the configured branch name.
+    expect(branch === null || branch === 'main' || branch === 'master').toBe(true);
   });
+});
+
+describe('commit() hash extraction (Task 29: branch names with «/»)', () => {
+  it('returns the real HEAD hash for a feature/x branch (was: empty string)', async () => {
+    // The old implementation parsed "[branch hash] msg" from the commit
+    // output with a [a-z0-9_-]+ branch charset — NO '/'. Commits on
+    // feature/... branches returned '' and the «Коммит создан» toast had
+    // no hash at all (the actual user report).
+    g(['checkout', '-q', '-b', 'feature/smartgit-electron-v3']);
+    write('probe.txt', 'slash-branch\n');
+    g(['add', '-A']);
+    const hash = await gitService.commit(REPO, 'chore: probe on slashed branch');
+    const realHead = g(['rev-parse', 'HEAD']).trim();
+    expect(hash).toBe(realHead);
+    expect(hash).toMatch(/^[0-9a-f]{40}$/);
+    g(['checkout', '-q', 'main']);
+  }, 30_000);
+
+  it('returns the real HEAD hash on main as well', async () => {
+    write('probe2.txt', 'main-branch\n');
+    g(['add', '-A']);
+    const hash = await gitService.commit(REPO, 'chore: probe on main');
+    const realHead = g(['rev-parse', 'HEAD']).trim();
+    expect(hash).toBe(realHead);
+    // cleanup back to the shared base so other suites stay unaffected
+    g(['reset', '--hard', 'HEAD~1']);
+  }, 30_000);
 });

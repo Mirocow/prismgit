@@ -81,28 +81,40 @@ describe('settingsStore', () => {
   });
 
   describe('toggleTheme', () => {
-    it('switches from dark to light', async () => {
+    it('switches from a dark theme to light', async () => {
       vi.mocked(api.settings.set).mockResolvedValue(undefined);
-      useSettingsStore.setState({ theme: 'dark' });
+      // Curation: 'dark' (Ayu Dark) is gone — one-dark is the dark pole.
+      useSettingsStore.setState({ theme: 'one-dark' });
 
       await useSettingsStore.getState().toggleTheme();
 
       expect(useSettingsStore.getState().theme).toBe('light');
     });
 
-    it('switches from light to dark', async () => {
+    it('switches from light to the dark pole (one-dark)', async () => {
       vi.mocked(api.settings.set).mockResolvedValue(undefined);
       useSettingsStore.setState({ theme: 'light' });
 
       await useSettingsStore.getState().toggleTheme();
 
-      expect(useSettingsStore.getState().theme).toBe('dark');
+      expect(useSettingsStore.getState().theme).toBe('one-dark');
+    });
+
+    it('switches discord (dark) → light, and a dark custom theme → light', async () => {
+      vi.mocked(api.settings.set).mockResolvedValue(undefined);
+      useSettingsStore.setState({ theme: 'discord', settings: { customThemes: [{ id: 'custom-d', name: 'D', isDark: true, colors: {} }] } });
+      await useSettingsStore.getState().toggleTheme();
+      expect(useSettingsStore.getState().theme).toBe('light');
+
+      useSettingsStore.setState({ theme: 'custom-d' });
+      await useSettingsStore.getState().toggleTheme();
+      expect(useSettingsStore.getState().theme).toBe('light');
     });
   });
 
   describe('applyTheme', () => {
     it('adds dark class to documentElement', () => {
-      useSettingsStore.setState({ theme: 'dark' });
+      useSettingsStore.setState({ theme: 'one-dark' });
       useSettingsStore.getState().applyTheme();
 
       expect(document.documentElement.classList.contains('dark')).toBe(true);

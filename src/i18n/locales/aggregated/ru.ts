@@ -23,6 +23,12 @@ import { ru as tour } from '../domains/tour';
 import { ru as aiassistant } from '../domains/aiassistant';
 import { ru as toasts } from '../domains/toasts';
 import { ru as actions } from '../domains/actions';
+import { ru as contextMenus } from '../domains/contextMenus';
+import { ru as banner } from '../domains/banner';
+import { ru as conflict } from '../domains/conflict';
+import { ru as iRebase } from '../domains/iRebase';
+import { ru as nav } from '../domains/nav';
+import { ru as errors } from '../domains/errors';
 
 export const ru: Record<string, string> = {
   ...core,
@@ -43,4 +49,10 @@ export const ru: Record<string, string> = {
   ...aiassistant,
   ...toasts,
   ...actions,
+  ...contextMenus,
+  ...banner,
+  ...conflict,
+  ...iRebase,
+  ...nav,
+  ...errors,
 };

@@ -2,7 +2,6 @@ export interface RepositoryEntry {
   path: string;
   name: string;
   lastOpened: number;
-  pinned?: boolean;
   /** Repository group (folder) this repo belongs to; null/undefined = root level. */
   groupId?: string | null;
 }
@@ -39,30 +38,119 @@ export interface RepositoryMetadata {
   lastCommitHash?: string;
   lastCommitDate?: string;
   lastCommitMessage?: string;
+  /** Local branches only; remote-tracking branches are remoteBranchCount. */
   branchCount?: number;
+  remoteBranchCount?: number;
   commitCount?: number;
   remoteUrl?: string;
-  provider?: 'github' | 'gitlab' | 'bitbucket' | 'unknown';
+  provider?: 'github' | 'gitlab' | 'unknown';
   owner?: string;
   repo?: string;
   webUrl?: string;
 }
 
+/**
+ * One configured AI provider instance — the unit of the multi-provider
+ * registry (settings.aiProviders). Unlike the legacy per-preset config
+ * (one slot per preset id), entries are UNLIMITED: the user can register
+ * any number of Ollama servers (e.g. home GPU box + work workstation) and
+ * OpenAI-compatible endpoints (OpenAI, Groq, OpenRouter, vLLM, LM Studio,
+ * corporate gateways...), each with its own URL, key and model.
+ */
+export interface AiProviderEntry {
+  /** Stable unique id ("prov-<random>"), referenced by aiActiveProviderId. */
+  id: string;
+  /**
+   * Protocol/preset flavor — an LLMProvider type id ('ollama',
+   * 'openai-compatible', 'anthropic', 'openai', 'groq', ...). Determines
+   * which API protocol the caller uses and which icon/label the UI shows.
+   */
+  kind: string;
+  /** User-editable display name ("Home Ollama", "Groq free", ...). */
+  name: string;
+  /** Base URL (Ollama: http://host:11434; OpenAI-compatible: .../v1). */
+  url: string;
+  /** API key — vault-backed placeholder on disk (see credentialKeys.ts). */
+  apiKey?: string;
+  /** Default model for this provider ("llama3.2", "gpt-4o-mini", ...). */
+  model: string;
+  /** Soft switch — disabled entries stay configured but are not offered. */
+  enabled: boolean;
+  /** Creation timestamp (epoch ms) — used to sort the grid. */
+  createdAt?: number;
+}
+
+/** Color tokens a user-created theme can set — the editor's input set.
+ *  Shared between the renderer registry (src/lib/themes.ts re-exports)
+ *  and the settings JSON so both sides agree on the shape. */
+export interface CustomThemeColors {
+  bgPrimary?: string;
+  bgSecondary?: string;
+  bgTertiary?: string;
+  bgElevated?: string;
+  /** Sidebar background — scoped to `aside` in the generated CSS, which is
+   *  how a dark-sidebar + light-main theme is built. */
+  bgSidebar?: string;
+  textPrimary?: string;
+  textSecondary?: string;
+  textTertiary?: string;
+  accent?: string;
+  border?: string;
+  statusAdded?: string;
+  statusModified?: string;
+  statusDeleted?: string;
+  statusConflict?: string;
+  statusUntracked?: string;
+}
+
+/** One user-created theme (Settings → Appearance → Themes → editor). */
+export interface CustomThemeEntry {
+  /** Stable id — always starts with `custom-`. */
+  id: string;
+  /** User-chosen display name. */
+  name: string;
+  isDark: boolean;
+  colors: CustomThemeColors;
+}
+
 export interface AppSettings {
   /**
-   * UI theme id. Stored as a string; validated at runtime against the registry
-   * in src/lib/themes.ts. Old installs may have 'light' / 'dark' / 'system'
-   * — these are still accepted (light/dark map to default Ayu themes).
-   * New values: 'github-light', 'github-dark', 'dracula', 'monokai',
-   * 'solarized-light', 'solarized-dark', 'nord', 'tokyo-night',
-   * 'catppuccin-mocha', 'one-dark', 'gruvbox-dark'.
+   * UI theme id. CURATED set (see src/lib/themes.ts): 'light' (Ayu Light),
+   * 'one-dark', 'simple-light', 'material', 'discord',
+   * 'light-dim-sidebar' — plus 'custom-<id>' for user-created themes.
+   * Legacy ids (pre-curation: dracula, monokai, github-dark, …) are
+   * migrated on load via LEGACY_THEME_FALLBACK.
    */
   theme: string;
+  /**
+   * 4.2 — SmartGit "Automatically select light/dark". When 'auto', the
+   * effective theme follows the OS `prefers-color-scheme` across the
+   * curated poles (light ↔ one-dark); custom themes are kept as-is.
+   * 'manual' keeps the explicit `theme`. Default: 'manual'.
+   */
+  themeMode?: 'manual' | 'auto';
+  /** User-created themes — the Custom Theme editor's persisted output.
+   *  The active theme id references an entry here (`custom-<id>`). */
+  customThemes?: CustomThemeEntry[];
+  /** Left-sidebar tool order (paths, user-defined via Settings → Interface →
+   *  Sidebar & Navigation). Unlisted tools keep their default order. */
+  navOrder?: string[];
+  /** Per-tool hotkey overrides: nav path → 'Ctrl+1'..'Ctrl+9'/'Alt+1'..'Alt+9'
+   *  or 'None' to unbind. Merged over DEFAULT_NAV_HOTKEYS. */
+  navHotkeys?: Record<string, string>;
   fontSize: number;          // Global base font size
   fontSizeTree: number;      // File tree / directory tree font size
   fontSizeList: number;      // Commit lists, branch lists, tag lists
   fontSizeDiff: number;      // Diff viewer (code)
   fontSizeMonospace: number; // Monospace elements (hashes, paths)
+  /**
+   * Left bar (Sidebar) font size in px — controls the sidebar's PRIMARY
+   * text (navigation items, repo switcher). Secondary text inside the
+   * sidebar (repo tree rows, badges, counts) follows at −1.5px. When
+   * unset the sidebar keeps its default rem-based sizing (zero change).
+   * Range 10–18. Applied live via --font-size-sidebar CSS variables.
+   */
+  fontSizeSidebar?: number;
   sidebarWidth: number;
   /**
    * Sidebar visual mode — Discord/Slack-style dim sidebar.
@@ -86,15 +174,31 @@ export interface AppSettings {
    */
   zoomLevel?: number;
   /**
+   * UI language/locale — 'en' | 'ru' | 'zh' | 'de'. Stored in the
+   * IPC-backed settings JSON (persistent file in userData) instead of
+   * localStorage which can be unreliable in some Electron configs.
+   * Falls back to OS language detection when unset.
+   */
+  appLanguage?: string;
+  /**
    * UI contrast level — 100 = default, lower = softer, higher = punchier.
    * Range 50–150. Applied as `filter: contrast(N%)` on the root element via
    * a CSS variable. Useful for low-vision users or for high-glare environments.
    */
   contrast: number;
   defaultCloneDir: string;
+  /**
+   * Default commit author (Settings → Git → "Default commit author").
+   * Written into a NEW repository's local user.name/user.email config
+   * right after git init / git clone, and used as a -c fallback when a
+   * commit fails with "Please tell me who you are". Empty → not applied.
+   */
+  gitUserName?: string;
+  gitUserEmail?: string;
   showReflogInHistory: boolean;
   maxHistoryLoad: number;
-  enableTelemetry: boolean;
+  /** v2.3.5 — max entries in the in-app Back/Forward stack (default 10). */
+  navHistoryLimit: number;
   githubPAT?: string;
   pullStrategy: 'merge' | 'rebase';
   /**
@@ -131,6 +235,47 @@ export interface AppSettings {
   autoStashOnCommonCommands?: boolean;
   /** Include untracked files when stashing (-u flag). */
   includeUntrackedInStash?: boolean;
+  // === SmartGit Manual: Preferences → Commands → Commit message handling ===
+  /**
+   * How to handle lines that look like comments (start with core.commentChar)
+   * in the commit message. 'as-is' — commit untouched; 'ask' — confirm before
+   * stripping; 'strip' — always remove such lines. Default 'ask' (SmartGit).
+   */
+  commitCommentsMode?: 'as-is' | 'ask' | 'strip';
+  /**
+   * What to commit when NOTHING is staged but the working tree has changes:
+   * 'ask' — show the 3-button dialog; 'all-except-untracked' — git add -u;
+   * 'all-including-untracked' — git add -A. Default 'ask' (SmartGit).
+   */
+  commitNothingStaged?: 'ask' | 'all-except-untracked' | 'all-including-untracked';
+  /** Suggest "Add untracked files" banner in the commit panel (default false). */
+  commitSuggestAddUntracked?: boolean;
+  /** Suggest "Stage deletions of missing files" banner (default true). */
+  commitSuggestRemoveMissing?: boolean;
+  /** Commit-message line length guides (SmartGit 50/72). Default 'none'. */
+  commitLineGuides?: 'none' | '50' | '72' | '50+72';
+  // === SmartGit Manual: Preferences → Commands (phase 2) ===
+  /**
+   * Warn before checkout when the target branch changes .gitmodules
+   * (submodule URLs/paths differ). Default true (SmartGit behavior).
+   */
+  warnSubmoduleChangesOnCheckout?: boolean;
+  /**
+   * Show a one-time toast when working-tree rename detection is slow
+   * (threshold: low-level `renames.warnMs`, default 3000). Suggests
+   * disabling "Detect renames". Default true.
+   */
+  warnSlowRenameDetection?: boolean;
+  // === SmartGit Manual: Preferences → User Interface → Confirmation dialogs (4.5) ===
+  /**
+   * Confirmation registry — per dialog id: 'ask' | 'always' | 'never'.
+   * When the user checks "Don't ask again" in a confirmation:
+   *   Confirm  → 'always' (the dialog never shows again, auto-confirm)
+   *   Cancel   → 'never'  (the action is silently skipped)
+   * Settings → Appearance → "Restore all confirmation dialogs" clears the
+   * map so every dialog asks again. Ids live in src/lib/confirmations.ts.
+   */
+  confirmations?: Record<string, 'ask' | 'always' | 'never'>;
   // === SmartGit Manual: External Tools ===
   /** git config diff.tool value (e.g., "vscode-diff"). */
   diffTool?: string;
@@ -153,17 +298,27 @@ export interface AppSettings {
   /** Provider URL (for Ollama: http://localhost:11434). */
   aiUrl?: string;
   /**
-   * Per-provider configuration storage — saves URL + API key + model
-   * SEPARATELY for each provider. When the user switches from OpenAI
-   * to Groq and back, their OpenAI API key and model are preserved.
+   * Multi-provider registry — an UNLIMITED list of configured AI providers
+   * (several Ollama servers on different hosts, multiple OpenAI-compatible
+   * endpoints, cloud presets, ...). Replaces the old "one config per preset
+   * id" aiProviderConfigs model while keeping it in sync (see mirror logic
+   * in src/lib/aiProviders.ts).
    *
-   * Key = provider id (e.g., "openai", "groq", "zai").
-   * Value = { url?, apiKey?, model? } — only the fields the user set.
+   * The active entry is referenced by aiActiveProviderId; its url/apiKey/
+   * model are mirrored into the legacy flat aiUrl/aiApiKey/aiModel fields
+   * so every existing reader (ChangesPage, AiChatPage, AiAssistant)
+   * keeps working unchanged.
    *
-   * The ACTIVE provider's config is ALSO mirrored in the flat
-   * aiUrl/aiApiKey/aiModel fields (for backward compat with code that
-   * reads those directly). When switching providers, the flat fields
-   * are updated from this store.
+   * NOTE: apiKey values are vault-backed — on disk each entry stores only
+   * an empty placeholder; the real key lives in the encrypted vault under
+   * ns 'ai', key 'provider:<entryId>' (see credentialKeys.ts).
+   */
+  aiProviders?: AiProviderEntry[];
+  /** Id of the currently active entry in aiProviders (empty/undefined = none). */
+  aiActiveProviderId?: string;
+  /**
+   * @deprecated Legacy per-preset config (one slot per preset id). Kept in
+   * sync for backward compatibility; new code should read aiProviders.
    */
   aiProviderConfigs?: Record<string, { url?: string; apiKey?: string; model?: string }>;
   /** Custom AI system prompt template with {{branch}}, {{author}}, etc. */
@@ -238,6 +393,14 @@ export interface AppSettings {
   forcePushPolicy?: 'deny' | 'feature-only' | 'allow';
   /** Branches protected from force-push (glob patterns). */
   protectedBranches?: string[];
+  /**
+   * Which git flag a force push uses (Preferences → Commands → Force Push):
+   *   'force' → `git push --force` (default — overwrite unconditionally)
+   *   'lease' → `git push --force-with-lease` (refuse on stale remote-tracking ref)
+   * Applies to every force push in the app: toolbar, Push To…, Branches page,
+   * AI tools, command palette, menu — unless an explicit mode is passed.
+   */
+  forcePushMode?: 'lease' | 'force';
   // === CI/CD integration ===
   /** Jenkins URL for CI status badges. */
   jenkinsUrl?: string;
@@ -276,17 +439,129 @@ export interface AppSettings {
    * 0 disables the periodic check (manual "Check now" still works).
    */
   repoRemoteCheckIntervalSec?: number;
+  /**
+   * WHICH repositories the periodic remote check covers — the scope knob
+   * for the background load (user report: "приложение стало неимоверно
+   * тупить... нет возможности остановить постоянный фетч").
+   *   - 'favorites' (DEFAULT): only repos starred ★ in the sidebar (plus
+   *     the currently open repo) are polled — a sidebar of heavy repos on
+   *     slow volumes no longer spawns `git remote -v` + rev-list walks +
+   *     `status --porcelain` for every repo every cycle.
+   *   - 'all': legacy behavior — every repo in the list.
+   * Manual "Check now" in the sidebar always covers ALL repos.
+   */
+  repoRemoteCheckScope?: 'all' | 'favorites';
+  /**
+   * Periodic auto-push to origin: while the app is open and a repository is
+   * the active one, the local branch's outgoing commits are pushed to its
+   * configured upstream on `origin`. 0 (default) disables the auto-push —
+   * the user must opt in via Settings → Git → "Periodically push to origin".
+   * Min 60s (1 minute) — anything lower would hammer the remote.
+   */
+  autoPushIntervalSec?: number;
+  /**
+   * Master switch for the auto-push. Even when `autoPushIntervalSec` is set,
+   * no pushes happen unless this is true. Default: false.
+   */
+  autoPushEnabled?: boolean;
+  /**
+   * History page auto-refresh interval (seconds). When the History page is
+   * visible and `autoRefreshHistory` is on, the page re-runs `git log` on
+   * this cadence so newly created commits appear without manual refresh.
+   * Default 0 (off) — the previous behavior re-ran git log on every
+   * lastRefresh bump which created an excessive amount of `git log -N`
+   * calls (the user complaint). 0 = disabled; min 30s.
+   */
+  historyAutoRefreshIntervalSec?: number;
+  /** Master switch for History page auto-refresh. Default: false (opt-in). */
+  autoRefreshHistory?: boolean;
+  /**
+   * Changes page "journal" — the recent-commits list shown at the bottom of
+   * the Changes page. Two knobs the user asked for in 'Сделать настраиваемым
+   * из Setting частоту обращения к "git log -20" сейчас летит огромное
+   * кол-во запросов':
+   *
+   *   changesJournalCount   — how many commits to fetch (default 20, max 100,
+   *                           min 5). Lower = fewer bytes parsed + smaller
+   *                           git log output.
+   *   changesJournalIntervalSec — minimum seconds between journal reloads
+   *                                (default 5). Higher = fewer `git log`
+   *                                invocations even when many events fire
+   *                                (file-watcher ticks, commits, stage
+   *                                operations, etc.). 0 = reload on every
+   *                                event (NOT recommended — restores the
+   *                                'огромное кол-во запросов' bug).
+   */
+  changesJournalCount?: number;
+  changesJournalIntervalSec?: number;
+  /**
+   * Git performance settings — applied globally via GIT_CONFIG env override.
+   * All default to true (enabled). The user can disable them in Settings → Git.
+   */
+  /** feature.manyFiles — optimize index for repos with many files. */
+  gitManyFiles?: boolean;
+  /** core.fsmonitor — FileSystem Monitor for fast git status on large repos. */
+  gitFsmonitor?: boolean;
+  /** fetch.writeCommitGraph — commit-graph cache for faster log/blame. */
+  gitWriteCommitGraph?: boolean;
   /** Max number of commands shown in the Output panel (default 20). */
   commandLogLimit?: number;
+  // === Advanced / Low-level Properties (Settings → Advanced) ===
+  /** Commit message line length guide 1 (default 50 — conventional commits
+   *  subject line limit). 0 = disabled. */
+  commitLineLimit1?: number;
+  /** Commit message line length guide 2 (default 72 — git's hard wrap). 0 = disabled. */
+  commitLineLimit2?: number;
+  /** Maximum file size (bytes) for inline diff preview. Files larger than
+   *  this show a "too large" message instead of a potentially multi-MB diff.
+   *  Default: 1,000,000 (1 MB). */
+  maxDiffFileSize?: number;
+  /** Default branch name for new repos (git init). Default: 'main'. */
+  defaultBranchName?: string;
+  /** Commit message encoding. 'utf-8' (default) or 'system'. */
+  commitEncoding?: 'utf-8' | 'system';
+  /** Max loose objects before auto-gc triggers. Default: 2000. */
+  cleanupMaxLooseObjects?: number;
+  /** Allow creating empty commits (git commit --allow-empty). Default: false. */
+  allowEmptyCommits?: boolean;
+  /** Show line numbers in diff viewer. Default: true. */
+  diffShowLineNumbers?: boolean;
+  /** Word-level diff highlighting in the diff viewer. Default: true. */
+  diffWordHighlight?: boolean;
+  // NOTE: customThemeOverrides (raw JSON CSS-var overrides textarea) was
+  // REPLACED by the visual Custom Theme editor (customThemes). The key is
+  // BACK for the v2.3 Zone Colors editor: it stores ZONE-scoped overrides
+  // (--zone-sidebar-bg, --zone-titlebar-bg, …) written by
+  // Settings → Appearance → Zone Colors (lib/themeOverrideCss.ts applies
+  // them). Old raw-JSON values are ignored harmlessly: only --zone-* keys
+  // (and any legacy keys the zone editor preserved) are injected.
+  /**
+   * Zone color overrides on top of the ACTIVE theme (built-in or custom).
+   * Each key colors exactly one UI region — see globals.css zone map.
+   */
+  customThemeOverrides?: Record<string, string>;
   // === Per-remote authorization (Repository Settings → Remotes) ===
   /**
    * HTTP(S) credentials used for push/pull/fetch per remote.
    * Key 1 = absolute repo path, key 2 = remote name.
-   * Stored in the app settings file (userData) — same store for the
-   * Repository Settings dialog and the Remotes tool. Never written to
-   * .git/config or the remote URL; applied per-command via http.extraHeader.
+   * SECURITY: passwords/tokens are stored in the ENCRYPTED vault
+   * (secrets.ts / OS keychain via Electron safeStorage) — this JSON only
+   * keeps usernames. Read paths rehydrate from the vault transparently.
    */
   remoteAuth?: Record<string, Record<string, RemoteCredential>>;
+  // === SSH support (Settings → Security → SSH keys) ===
+  /** Managed SSH keys — METADATA only; passphrases live in the encrypted vault. */
+  sshKeys?: import('./ssh-api.js').SshKeyMeta[];
+  /** Key used when a repo has no per-repo override. undefined → system ssh config. */
+  sshDefaultKeyId?: string;
+  /** Per-repository SSH key override: absolute repo path → SshKeyMeta.id. */
+  sshRepoKeys?: Record<string, string>;
+  /**
+   * Strict host key checking for SSH remotes. false (default) →
+   * StrictHostKeyChecking=accept-new (first connect trusts, mismatches fail);
+   * true → StrictHostKeyChecking=yes (unknown hosts are rejected outright).
+   */
+  sshStrictHostKeyChecking?: boolean;
 }
 
 /** Credentials for one remote of one repository (HTTP(S) basic auth). */
@@ -300,6 +575,14 @@ export interface SettingsApi {
   get: <T = unknown>(key: string) => Promise<T | undefined>;
   set: (key: string, value: unknown) => Promise<void>;
   getAll: () => Promise<Partial<AppSettings>>;
+  /**
+   * Hosts whose TLS certificates PrismGit deliberately does not verify
+   * (GitLab/GitHub API + avatar requests). Written ONLY by the SSL bypass
+   * dialog's confirm; reviewed/removed in Settings → Security → SSL/TLS.
+   */
+  getInsecureSslHosts: () => Promise<string[]>;
+  addInsecureSslHost: (host: string) => Promise<void>;
+  removeInsecureSslHost: (host: string) => Promise<void>;
   getRepos: () => Promise<RepositoryEntry[]>;
   addRepo: (repo: { path: string; name: string }) => Promise<void>;
   removeRepo: (path: string) => Promise<void>;
@@ -315,6 +598,13 @@ export interface SettingsApi {
   addTag: (path: string, tag: string) => Promise<void>;
   removeTag: (path: string, tag: string) => Promise<void>;
   refreshRepoStats: (path: string) => Promise<Partial<RepositoryMetadata>>;
+  /**
+   * Refresh cached metadata (lastCommit, branchCount, commitCount, provider)
+   * for every configured repo. Used by the Sidebar's "refresh" button so the
+   * user can force-reload the whole list at once.
+   * Returns { refreshed: number, errors: Record<path, msg> }.
+   */
+  refreshAllRepoStats: () => Promise<{ refreshed: number; errors: Record<string, string> }>;
 
   // Repository groups (tree in the sidebar)
   getRepoGroups: () => Promise<RepoGroup[]>;
@@ -326,4 +616,37 @@ export interface SettingsApi {
   setRepoGroupExpanded: (id: string, expanded: boolean) => Promise<void>;
   /** Assign a repository to a group (null = ungrouped / root level). */
   setRepoGroup: (repoPath: string, groupId: string | null) => Promise<void>;
+
+  // Folder repository scan (v2.3) — recursive scan of a folder and its
+  // subfolders; groups mirror the folder structure.
+  /**
+   * Dry-run scan: every Git repository found in `root` and its subfolders,
+   * each with its container-folder chain (groupPath).
+   */
+  scanFolderRepos: (root: string, opts?: { maxDepth?: number }) => Promise<ScannedRepository[]>;
+  /**
+   * Scan + add: creates the group tree mirroring the folders, adds new
+   * repos, moves known repos into their groups. Idempotent.
+   */
+  addFolderRepositories: (
+    root: string,
+    opts?: { maxDepth?: number },
+  ) => Promise<AddFolderRepositoriesResult>;
+}
+
+/** One repository found by a folder scan (see scanFolderRepos). */
+export interface ScannedRepository {
+  path: string;
+  name: string;
+  /** Container folder names from the scan root (exclusive) to the repo. */
+  groupPath: string[];
+}
+
+/** Result of addFolderRepositories. */
+export interface AddFolderRepositoriesResult {
+  scanned: ScannedRepository[];
+  added: number;
+  existing: number;
+  groupsCreated: number;
+  rootGroupName: string;
 }

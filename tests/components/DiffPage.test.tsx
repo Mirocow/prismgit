@@ -170,6 +170,18 @@ describe('DiffPage — consumes diffRequest on mount', () => {
     const calls: string[][] = [];
     mockRaw.mockImplementation(async (_repoPath: string, args: string[]) => {
       calls.push(args);
+      // buildDiffArgs probes for a root commit via `git rev-list --parents
+      // -n 1 abc` — the returned line must contain at least one parent
+      // hash so buildDiffArgs takes the `..` (double-dot) branch instead
+      // of the `git show` fallback. The parent hash itself is irrelevant
+      // for this test (we only check the args, not the git output).
+      if (args.includes('rev-list') && args.includes('--parents')) {
+        return 'abc parent0hash\n';
+      }
+      // Simulate the multi-file response so the file-list branch runs.
+      if (args.includes('--name-status')) {
+        return 'M\tfile1.ts\n';
+      }
       return '';
     });
 

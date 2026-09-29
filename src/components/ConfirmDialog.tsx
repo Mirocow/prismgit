@@ -52,10 +52,18 @@ export interface ConfirmDialogOptions {
   hideCancel?: boolean;
   /** Prompt mode only: return an error string to block confirming. */
   validate?: (value: string) => string | null;
+  /**
+   * When set, the dialog shows a checkbox under the message (4.5 —
+   * "Don't ask again" for confirmation dialogs). The checked state is
+   * only reported by confirmDialogEx(); plain confirmDialog() ignores it.
+   */
+  checkbox?: { label: string; defaultChecked?: boolean };
 }
 
 interface Request extends ConfirmDialogOptions {
   resolve: (v: boolean | string | null) => void;
+  /** Set by confirmDialogEx — receives { ok, checked } instead of a plain boolean. */
+  ex?: (v: { ok: boolean; checked: boolean }) => void;
 }
 
 // Module-level bridge between the stateless helpers and the mounted host.
@@ -69,6 +77,28 @@ export function confirmDialog(opts: ConfirmDialogOptions): Promise<boolean> {
   }
   return new Promise<boolean>((resolve) => {
     enqueue!({ ...opts, resolve: (v) => resolve(v === true) });
+  });
+}
+
+/**
+ * confirmDialog with checkbox support (4.5). Resolves { ok, checked }:
+ *   ok      — confirm pressed (cancel / escape / backdrop → false)
+ *   checked — checkbox state at the moment of the answer (false when
+ *             no checkbox option was passed)
+ * Used by src/lib/confirmations.ts to implement "Don't ask again".
+ */
+export function confirmDialogEx(opts: ConfirmDialogOptions): Promise<{ ok: boolean; checked: boolean }> {
+  if (!enqueue) {
+    // Host not mounted (tests) — native fallback, checkbox unreadable.
+    // eslint-disable-next-line no-alert
+    return Promise.resolve({ ok: window.confirm([opts.title, opts.message].filter(Boolean).join('\n\n')), checked: false });
+  }
+  return new Promise<{ ok: boolean; checked: boolean }>((resolve) => {
+    enqueue!({
+      ...opts,
+      resolve: () => { /* superseded by ex */ },
+      ex: (v) => resolve(v),
+    });
   });
 }
 
@@ -87,6 +117,7 @@ export function promptDialog(opts: ConfirmDialogOptions): Promise<string | null>
 export function ConfirmDialogHost() {
   const [req, setReq] = useState<Request | null>(null);
   const [value, setValue] = useState('');
+  const [checked, setChecked] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const confirmBtnRef = useRef<HTMLButtonElement>(null);
@@ -96,6 +127,7 @@ export function ConfirmDialogHost() {
     enqueue = (r) => {
       setReq(r);
       setValue(r.input?.initialValue ?? '');
+      setChecked(r.checkbox?.defaultChecked ?? false);
       setError(null);
     };
     return () => { enqueue = null; };
@@ -114,7 +146,8 @@ export function ConfirmDialogHost() {
 
   useEscapeKey(!!req, () => {
     if (!req) return;
-    req.resolve(req.input ? null : false);
+    if (req.ex) req.ex({ ok: false, checked });
+    else req.resolve(req.input ? null : false);
     setReq(null);
   });
 
@@ -125,6 +158,12 @@ export function ConfirmDialogHost() {
     setReq(null);
   };
 
+  // Unified cancel — works for both plain and ex (checkbox) requests.
+  const cancel = () => {
+    if (req.ex) { req.ex({ ok: false, checked }); setReq(null); return; }
+    finish(req.input ? null : false);
+  };
+
   const handleConfirm = () => {
     if (req.input) {
       const v = value.trim();
@@ -133,17 +172,20 @@ export function ConfirmDialogHost() {
         if (err) { setError(err); return; }
       }
       finish(v);
+    } else if (req.ex) {
+      req.ex({ ok: true, checked });
+      setReq(null);
     } else {
       finish(true);
     }
   };
 
   return (
-    // z-[60] — above page modals (z-50), confirmations can be triggered from
+    // z-60 — above page modals (z-50), confirmations can be triggered from
     // inside another dialog (e.g. Settings rows).
     <div
-      className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-[60]"
-      onMouseDown={() => finish(req.input ? null : false)}
+      className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-60"
+      onMouseDown={() => cancel()}
     >
       <div
         className="panel w-[440px] max-w-[92vw]"
@@ -152,11 +194,11 @@ export function ConfirmDialogHost() {
         aria-modal="true"
       >
         <div className="px-4 pt-4 flex items-start gap-2.5">
-          {req.danger && <AlertTriangle size={16} className="text-status-deleted flex-shrink-0 mt-0.5" />}
+          {req.danger && <AlertTriangle size={16} className="text-status-deleted shrink-0 mt-0.5" />}
           <div className="flex-1 min-w-0">
             <h3 className="text-sm font-semibold">{req.title}</h3>
             {req.message && (
-              <div className="text-xs text-text-secondary mt-1.5 whitespace-pre-line leading-relaxed break-words">
+              <div className="text-xs text-text-secondary mt-1.5 whitespace-pre-line leading-relaxed wrap-break-word">
                 {req.message}
               </div>
             )}
@@ -179,11 +221,23 @@ export function ConfirmDialogHost() {
             {error && <div className="text-2xs text-status-error mt-1.5">{error}</div>}
           </div>
         </div>
-        <div className="flex justify-end gap-2 px-4 py-3">
+        {req.checkbox && (
+          <div className="px-4 pt-1 pb-1">
+            <label className="flex items-center gap-2 text-xs text-text-secondary cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={(e) => setChecked(e.target.checked)}
+              />
+              {req.checkbox.label}
+            </label>
+          </div>
+        )}
+        <div className="flex flex-wrap justify-end gap-2 px-4 py-3">
           {!req.hideCancel && (
             <button
               className="btn btn-secondary text-xs"
-              onClick={() => finish(req.input ? null : false)}
+              onClick={() => cancel()}
             >
               {req.cancelLabel ?? t('common.cancel')}
             </button>

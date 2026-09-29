@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import { X, AlertCircle, Check, RotateCcw, Loader, GitMerge, GitPullRequest, ArrowDown, ArrowUp, Sparkles } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
-import { useGitStore } from '../stores/gitStore';
+import { useGitStore, surfaceConflictedState } from '../stores/gitStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { api } from '../lib/api';
 import { confirmDialog, promptDialog } from './ConfirmDialog';
 import type { LLMProvider } from '../lib/aiCommitMessages';
+import { llmErrorDetail } from '../lib/aiErrors';
 import type { AppSettings } from '../../electron/types/settings-api';
 import { useI18n } from '../lib/i18n';
 
@@ -132,8 +133,26 @@ export function MergePanel({
         if (noFf && strategy === 'merge') opts.noFf = true;
 
         if (strategy === 'rebase') {
-          // Rebase current branch onto target
-          await api.git.rebase(repo.path, targetBranch);
+          // Rebase current branch onto target. Conflict-reaction audit
+          // (v3.6): a conflicted rebase used to die as a RAW error toast
+          // («Merge failed» + git stderr) while the repo sat mid-rebase.
+          // Now the conflict is detected from the repo STATE and the user
+          // is taken to the Changes tool (Continue / Skip / Abort banner)
+          // — the same reaction every pull entry point already had.
+          try {
+            await api.git.rebase(repo.path, targetBranch);
+          } catch (rebaseErr) {
+            const conflicted = await surfaceConflictedState(repo.path, {
+              title: t('toast.git.rebaseConflicts'),
+              detail: t('toast.git.rebaseConflictsHint'),
+            });
+            if (conflicted) {
+              await loadState();
+              onClose();
+              return;
+            }
+            throw rebaseErr; // non-conflict failure → generic catch below
+          }
           toast.success(t('changes.rebasedOnto', { branch: targetBranch }));
           onClose();
           await refreshStatus(repo.path);
@@ -175,7 +194,14 @@ export function MergePanel({
               await api.git.stashPop(repo.path);
               toast.success(t('changes.autoStashRestored'));
             } catch (popErr) {
-              toast.warning(t('changes.autoStashPopFailed'), String(popErr));
+              // Conflict-reaction audit (v3.6): a conflicted auto-stash pop
+              // (stashPop throws with .conflicts now) must land the user in
+              // the Changes resolver, not end as a bare warning toast.
+              const conflicted = await surfaceConflictedState(repo.path, {
+                title: t('stashes.popConflicts'),
+                detail: t('stashes.popConflictsHint'),
+              });
+              if (!conflicted) toast.warning(t('changes.autoStashPopFailed'), String(popErr));
             }
           }
         } else {
@@ -228,7 +254,7 @@ export function MergePanel({
   };
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 bg-bg-elevated border-t border-border-strong shadow-lg z-40 animate-slide-up">
+    <div className="fixed bottom-0 left-0 right-0 bg-zone-popover border-t border-border-strong shadow-lg z-40 animate-slide-up">
       <div className="flex items-center justify-between px-4 py-2 border-b border-border-default">
         <div className="flex items-center gap-2">
           <GitMerge size={14} className="text-accent" />
@@ -389,14 +415,15 @@ export function MergePanel({
                   className="btn btn-secondary text-xs"
                   onClick={async () => {
                     const settings = useSettingsStore.getState().settings;
-                    if (!settings?.aiCommitMessagesEnabled) {
-                      toast.warning(t('changes.aiDisabled'), t('changes.aiEnableHint'));
-                      return;
-                    }
+                    // v2.3.11 — provider first (see ChangesPage.handleAIGenerate):
+                    // the click is the intent; the flag auto-enables.
                     const provider = buildAIProvider(settings);
                     if (!provider) {
-                      toast.warning(t('changes.aiNoProvider'));
+                      toast.warning(t('changes.aiNoProvider'), t('changes.aiSetProviderHint'));
                       return;
+                    }
+                    if (!settings?.aiCommitMessagesEnabled) {
+                      void useSettingsStore.getState().setSetting('aiCommitMessagesEnabled', true);
                     }
                     try {
                       const { generateMergeMessage } = await import('../lib/aiCommitMessages');
@@ -414,7 +441,8 @@ export function MergePanel({
                       // Copy to clipboard for user to paste
                       navigator.clipboard.writeText(message);
                     } catch (e) {
-                      toast.error(t('changes.aiGenerationFailed'), String(e));
+                      // v2.3.12 — friendly detail instead of a raw error dump.
+                      toast.error(t('changes.aiGenerationFailed'), llmErrorDetail(e));
                     }
                   }}
                 >

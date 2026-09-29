@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { NAV_DESCRIPTIONS } from './navItems';
+import { navDescriptions } from './navItems';
 import { useLocation } from 'react-router-dom';
 import { X, BookOpen } from './icons';
 import { useI18n } from '../lib/i18n';
@@ -13,7 +13,7 @@ import { useI18n } from '../lib/i18n';
  * and remembered in localStorage so it doesn't reappear after the user
  * dismisses it.
  *
- * The description text comes from NAV_DESCRIPTIONS (defined in navItems.ts).
+ * The description text comes from navDescriptions() (defined in navItems.ts).
  */
 
 const STORAGE_KEY = 'prismgit-help-dismissed';
@@ -46,7 +46,7 @@ export function HelpBanner() {
 
   // Check if this page has a description AND hasn't been dismissed
   useEffect(() => {
-    const description = NAV_DESCRIPTIONS[path];
+    const description = navDescriptions()[path];
     if (!description) {
       setVisible(false);
       return;
@@ -55,7 +55,7 @@ export function HelpBanner() {
     setVisible(!dismissed.has(path));
   }, [path]);
 
-  const description = NAV_DESCRIPTIONS[path];
+  const description = navDescriptions()[path];
   if (!description || !visible) return null;
 
   const handleDismiss = () => {
@@ -68,10 +68,10 @@ export function HelpBanner() {
       className="flex items-start gap-2 px-3 py-2 bg-accent-muted border-b border-accent/20 text-xs text-text-secondary animate-fade-in"
       role="note"
     >
-      <BookOpen size={14} className="text-accent flex-shrink-0 mt-0.5" />
+      <BookOpen size={14} className="text-accent shrink-0 mt-0.5" />
       <span className="flex-1 leading-relaxed">{description}</span>
       <button
-        className="icon-btn !w-5 !h-5 flex-shrink-0"
+        className="icon-btn !w-5 !h-5 shrink-0"
         onClick={handleDismiss}
         title={t('shell.dismissBanner')}
       >

@@ -6,7 +6,10 @@
  * locales (en/ru/zh/de) with a non-empty translation.
  */
 import { describe, it, expect } from 'vitest';
-import { DOMAINS } from '../../src/i18n/locales';
+// DOMAINS is imported from a test-only module so the production bundle
+// does not have to carry the ru/zh/de dictionaries of every domain.
+// See src/i18n/locales/index.ts for the rationale.
+import { DOMAINS } from '../i18n-domains';
 
 /** Merged per-locale dictionaries built from core + all domains. */
 function merged(loc: 'en' | 'ru' | 'zh' | 'de'): Record<string, string> {

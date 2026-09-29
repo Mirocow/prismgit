@@ -3,15 +3,24 @@ import * as path from 'path';
 import { registerGitIpc } from './ipc/git.js';
 import { registerFsIpc } from './ipc/fs.js';
 import { registerGithubIpc } from './ipc/github.js';
+import { registerGitlabIpc } from './ipc/gitlab.js';
 import { registerAiIpc } from './ipc/ai.js';
 import { registerWindowIpc } from './ipc/window.js';
 import { registerSettingsIpc } from './ipc/settings.js';
 import { registerCommandLogIpc } from './ipc/commandLog.js';
 import { registerVscodeIpc } from './ipc/vscode.js';
+import { registerSshIpc } from './ipc/ssh.js';
+import { registerAvatarIpc } from './ipc/avatar.js';
 import { cleanupTempCopies } from './services/vscode.js';
 import { installGitCommandLogger } from './services/commandLog.js';
 import { registerWatcherIpc, stopAllWatchers } from './services/watcher.js';
 import { SimpleStore } from './services/simpleStore.js';
+import { migratePlaintextSecrets, flushSettings, getSetting } from './services/storage.js';
+import { windowBackgroundForTheme } from './services/themeDark.js';
+import { migrateLegacyGithubToken, flushGithubStore } from './services/github.js';
+import { migrateLegacyGitLabToken, flushGitlabStore } from './services/gitlab.js';
+import { flushSecrets } from './services/secrets.js';
+import { disposeGitPollWorkerAsync, hardKillGitPollWorkerNow } from './services/gitPollProcess.js';
 import { buildAppMenu } from './menu.js';
 import { setMenuLocale, normalizeMenuLocale } from './i18n-menu.js';
 import { resolveResourceIcon } from './appIcons.js';
@@ -35,17 +44,47 @@ const isDev = !!process.env.VITE_DEV_SERVER_URL;
 // throttling saves CPU and battery when the user switches away.
 app.commandLine.appendSwitch('js-flags', '--max-old-space-size=512 --expose-gc');
 
-// Suppress the EGL/GL driver error:
-//   ERROR:gl_display.cc(497) EGL Driver message (Error) eglQueryDeviceAttribEXT: Bad attribute.
-// This is a known Chromium/Electron issue with certain GPU drivers — observed on
-// Linux (NVIDIA) as well as on macOS (ANGLE/Metal EGL device query). The error
-// is cosmetic (doesn't affect functionality) but clutters stderr on every launch.
-// Disabling hardware acceleration eliminates the EGL init path that triggers it.
-// PrismGit is a plain 2D UI (no WebGL/GPU usage anywhere), so software rendering
-// has no noticeable impact on this app.
-// NOTE: must be applied on ALL platforms (not only Linux) — the macOS ANGLE/EGL
-// path produces the same message; keep this call unconditional.
+// ── Suppress Chromium/Electron console errors ────────────────────────────
+//
+// PrismGit is a plain 2D UI (no WebGL, no GPU, no Autofill). The following
+// switches eliminate ALL known Chromium noise that clutters stderr during
+// `make dev` and production:
+//
+// 1. disableHardwareAcceleration() — kills EGL/GL driver errors:
+//      "EGL Driver message (Error) eglQueryDeviceAttribEXT: Bad attribute."
+//    (observed on Linux/NVIDIA and macOS/ANGLE)
+//
+// 2. --disable-features=AutofillServerCommunication — kills:
+//      "Request Autofill.enable failed. 'Autofill.enable' wasn't found"
+//      "Request Autofill.setAddresses failed. 'Autofill.setAddresses' wasn't found"
+//    These appear when DevTools is open — Chromium DevTools tries to enable
+//    the Autofill CDP domain, but Electron doesn't implement it. Disabling
+//    the feature entirely prevents DevTools from even trying.
+//
+// 3. --disable-gpu / --disable-software-rasterizer — kills:
+//      "SharedImageManager::ProduceMemory: Trying to Produce a Memory
+//       representation from a non-existent mailbox."
+//    These GPU compositing errors appear when DevTools opens/closes or
+//    when a BrowserWindow is recreated. Disabling GPU compositing entirely
+//    (we already use software rendering) prevents SharedImageManager from
+//    being involved.
+//
+// 3b. --disable-gpu-compositing — Electron 32 (Chromium 128) STILL runs
+//     the Viz display compositor's SharedImageManager for SOFTWARE frames,
+//     so the mailbox message can leak through --disable-gpu alone (observed
+//     2026-09 on window recreate / panel resize). The switch forces plain
+//     software compositing end-to-end. Zero cost here: hardware
+//     acceleration is already off, so no GPU-composited path existed.
+//
+// 4. --disable-dev-shm-usage — prevents /dev/shm exhaustion warnings on
+//    Linux containers (Docker/CI). Forces Chromium to use /tmp instead.
+//
 app.disableHardwareAcceleration();
+app.commandLine.appendSwitch('disable-features', 'AutofillServerCommunication,Translate,MediaRouter');
+app.commandLine.appendSwitch('disable-gpu');
+app.commandLine.appendSwitch('disable-gpu-compositing');
+app.commandLine.appendSwitch('disable-software-rasterizer');
+app.commandLine.appendSwitch('disable-dev-shm-usage');
 
 // Window state persistence
 interface WindowState {
@@ -59,7 +98,50 @@ const windowStateStore = new SimpleStore({
   defaults: {},
 });
 
+// ── Quit-phase telemetry (PRISMGIT_QUIT_LOG=1) ────────────────────────────
+// Wedged quits are reported as "при закрытии зависает" — this log pinpoints
+// the phase that stalls. Timestamped ms since process start, one line per
+// phase, zero cost when disabled.
+const QUIT_LOG = !!process.env.PRISMGIT_QUIT_LOG;
+export function qlog(msg: string): void {
+  if (QUIT_LOG) console.log(`[quit +${Math.round(process.uptime() * 1000)}ms] ${msg}`);
+}
+
+// ── Main-loop lag telemetry (PRISMGIT_LOOP_LOG=1) ────────────────────────
+// Samples the event loop every 5ms; any >25ms gap means the MAIN loop was
+// blocked (repo-switch freeze triage — cross-reference with the switch
+// timeline from scripts/repo-switch-profile.mjs). Zero cost when disabled.
+if (process.env.PRISMGIT_LOOP_LOG) {
+  let loopPrev = Date.now();
+  setInterval(() => {
+    const now = Date.now();
+    const lag = now - loopPrev - 5;
+    if (lag > 25) {
+      console.log(`[loop ${now}] +${lag}ms block on main`);
+    }
+    loopPrev = now;
+  }, 5);
+}
+
 let mainWindow: BrowserWindow | null = null;
+
+// Command-log batch buffer (see installGitCommandLogger below).
+// Module-scoped so `before-quit` can flush the pending batch.
+let batchTimer: NodeJS.Timeout | null = null;
+let batchedEntries: unknown[] = [];
+
+function flushCommandLogBatch(): void {
+  if (batchTimer) {
+    clearTimeout(batchTimer);
+    batchTimer = null;
+  }
+  if (batchedEntries.length === 0) return;
+  const batch = batchedEntries;
+  batchedEntries = [];
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (!w.isDestroyed()) w.webContents.send('command-log:batch', batch);
+  }
+}
 
 function getWindowState(): WindowState {
   // Guard: mainWindow may be null OR already destroyed by the time the
@@ -100,7 +182,14 @@ function createWindow(): BrowserWindow {
     y: bounds.y,
     minWidth: 1024,
     minHeight: 640,
-    backgroundColor: '#f8f9fa',
+    // BUGFIX "тёмные темы не адаптированы": match the persisted theme so a
+    // dark theme doesn't flash a white native window before the renderer
+    // paints (the renderer keeps it in sync afterwards via
+    // window:setBackgroundColor whenever the theme changes).
+    backgroundColor: windowBackgroundForTheme(
+      getSetting('theme') as string | undefined,
+      (getSetting('customThemes') as import('./types/settings-api.js').CustomThemeEntry[] | undefined) ?? undefined,
+    ),
     frame: false,
     title: 'PrismGit',
     icon: resolveResourceIcon('icon-512.png'),
@@ -156,8 +245,50 @@ function createWindow(): BrowserWindow {
   win.on('unmaximize', saveDebounced);
   win.on('enter-full-screen', saveDebounced);
   win.on('leave-full-screen', saveDebounced);
-  win.on('close', saveWindowState);
+  // ── Close deadline ──────────────────────────────────────────────────────
+  // Chromium's graceful window close must handshake with the RENDERER's JS
+  // thread (beforeunload handlers — e.g. the AI-chat history flush). When the
+  // renderer is mid-longtask (a poll-burst re-render), that handshake stalls
+  // for the WHOLE task — measured 5.9 s with a 6 s task, and user-reported as
+  // "при закрытии приложение намертво зависает". Give the graceful path
+  // CLOSE_DEADLINE_MS; if the window is still alive past it, destroy() it —
+  // destroy bypasses the handshake. The flush only ever ran when the renderer
+  // was responsive anyway, so nothing is lost in the pathological case.
+  const CLOSE_DEADLINE_MS = 800;
+  let closeDeadlineTimer: NodeJS.Timeout | null = null;
+
+  win.on('close', () => {
+    // Arm the ABSOLUTE quit bound FIRST — nothing below may leave it unarmed.
+    // darwin: closing the window does NOT quit the app (it lives in the dock) —
+    // the watchdog is only for real quits (before-quit covers menu/Cmd+Q).
+    if (process.platform !== 'darwin') armQuitWatchdog('window close');
+    qlog('main window close');
+    try {
+      saveWindowState();
+    } catch {
+      // Belt: saveWindowState is internally guarded, but a throw here would
+      // historically have disarmed the close deadline below (the timer is
+      // armed later in this handler) → unbounded renderer handshake.
+      qlog('saveWindowState threw on close — ignored');
+    }
+    if (closeDeadlineTimer == null) {
+      closeDeadlineTimer = setTimeout(() => {
+        closeDeadlineTimer = null;
+        if (!win.isDestroyed()) {
+          qlog(`close deadline (${CLOSE_DEADLINE_MS}ms) hit — destroying window (renderer handshake stalled)`);
+          win.destroy();
+        }
+      }, CLOSE_DEADLINE_MS);
+      // The deadline timer must never keep the process alive on its own.
+      closeDeadlineTimer.unref?.();
+    }
+  });
   win.on('closed', () => {
+    if (closeDeadlineTimer != null) {
+      clearTimeout(closeDeadlineTimer);
+      closeDeadlineTimer = null;
+    }
+    qlog('main window closed');
     mainWindow = null;
     // The keep-alive About window can outlive the main window — on Windows /
     // Linux 'window-all-closed' would then never fire and the app would keep
@@ -169,7 +300,15 @@ function createWindow(): BrowserWindow {
 
   if (isDev) {
     win.loadURL(process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173');
-    win.webContents.openDevTools({ mode: 'detach' });
+    // PERF (dev UX): do NOT auto-open DevTools on every `make dev`.
+    // An attached DevTools window instruments the WHOLE renderer —
+    // every event dispatch, style recalc and console message pays the
+    // inspector tax, which was a large part of "интерфейс тупит" reports
+    // from dev sessions. Use `make dev-debug` (DEBUG=1) or set
+    // PRISMGIT_DEVTOOLS=1 when the DevTools window is actually needed.
+    if (process.env.DEBUG || process.env.PRISMGIT_DEVTOOLS) {
+      win.webContents.openDevTools({ mode: 'detach' });
+    }
   } else {
     win.loadFile(path.join(__dirname, '../dist/index.html'));
   }
@@ -225,18 +364,34 @@ app.whenReady().then(() => {
   // it wraps child_process.spawn so every git process spawned afterwards
   // (simple-git, push/pull helpers, background polls) is captured with its
   // full stdout/stderr and exit code for the Output panel's Commands tab.
+  //
+  // PERFORMANCE: on a busy repo (auto-fetch + watcher refresh + IDE auto-
+  // save triggering watcher) we can see 50+ git spawns per second. Sending
+  // an IPC broadcast per entry saturates the renderer's IPC queue. We now
+  // batch entries 100 ms — the renderer still sees them appear in real-time
+  // (100 ms is below human perception), but IPC traffic drops by ~10×.
   installGitCommandLogger({
     onEntry: (entry) => {
-      for (const w of BrowserWindow.getAllWindows()) {
-        if (!w.isDestroyed()) w.webContents.send('command-log:entry', entry);
+      batchedEntries.push(entry);
+      if (batchTimer === null) {
+        batchTimer = setTimeout(flushCommandLogBatch, 100);
       }
     },
   });
 
   // Register IPC handlers
+  // Legacy secret migration FIRST — before any IPC handler can read or
+  // write settings: plaintext tokens/passwords from old installs move into
+  // the encrypted vault (OS keychain via safeStorage) and are stripped
+  // from the JSON files. Both calls are idempotent.
+  migratePlaintextSecrets();
+  migrateLegacyGithubToken();
+  migrateLegacyGitLabToken();
+
   registerGitIpc();
   registerFsIpc();
   registerGithubIpc();
+  registerGitlabIpc();
   registerAiIpc();
   registerWindowIpc();
   registerSettingsIpc();
@@ -244,6 +399,8 @@ app.whenReady().then(() => {
   registerWatcherIpc();
   registerContextMenuIpc();
   registerVscodeIpc();
+  registerSshIpc();
+  registerAvatarIpc();
   // Stale VS Code temp copies (HEAD/stage snapshots for --diff/--merge) from
   // previous sessions — new ones are written on demand.
   cleanupTempCopies();
@@ -252,6 +409,27 @@ app.whenReady().then(() => {
   Menu.setApplicationMenu(buildAppMenu(() => mainWindow));
 
   mainWindow = createWindow();
+
+  // ── Filter benign Chromium console messages ─────────────────────────────
+  // Even with --disable-features and --disable-gpu, some Chromium internals
+  // still log to the renderer console. These are caught here and suppressed
+  // before they reach the DevTools console output.
+  mainWindow.webContents.on('console-message', (_event, _level, message) => {
+    // Suppress known-benign Chromium noise:
+    //   - Autofill CDP errors (already disabled via --disable-features, but
+    //     some Electron versions still log them)
+    //   - SharedImageManager GPU errors (already disabled via --disable-gpu,
+    //     but some Chromium versions still log them)
+    //   - Deprecation warnings from Chromium internals
+    //   - react-dom's dev-build "Download the React DevTools" banner — it
+    //     prints on EVERY `make dev` session (React dev mode is inherent to
+    //     the Vite dev server); suppressing it keeps the DevTools console
+    //     signal-only. The banner is dev-only noise, never an app problem.
+    const benign = /Autofill\.|SharedImageManager|ProduceMemory|non-existent mailbox|deprecated|Download the React DevTools/i;
+    if (benign.test(message)) {
+      _event.preventDefault();
+    }
+  });
 
   // SmartGit Manual: Command-Line Options
   // Parse process.argv for --open, --log, --blame, --anchor-commit, etc.
@@ -338,15 +516,112 @@ function handleCliArgs(args: string[]) {
 }
 
 app.on('window-all-closed', () => {
+  qlog('window-all-closed');
   stopAllWatchers();
   if (process.platform !== 'darwin') {
+    armQuitWatchdog('window-all-closed');
+    qlog('window-all-closed → app.quit()');
     app.quit();
   }
 });
 
-app.on('before-quit', () => {
-  saveWindowState();
-  stopAllWatchers();
+app.on('will-quit', () => {
+  qlog('will-quit');
+});
+
+app.on('quit', () => {
+  qlog('quit (app lifecycle complete — process teardown next)');
+});
+
+process.on('exit', () => { qlog('process exit'); });
+// beforeExit fires only if the loop drained without an explicit exit —
+// for a wedged app this line NEVER appears, which is itself the diagnosis.
+process.on('beforeExit', (code) => { qlog(`process beforeExit code=${code} (event loop drained)`); });
+
+let quitDisposalComplete = false;
+
+// ── Quit watchdog (v3.7) ───────────────────────────────────────────────────
+// The user's «при закрытии приложения намертво зависает» could not be
+// reproduced on any in-house fixture (prod/dev × repo open × hung fetch ×
+// 24k files — every measured quit: 50–100 ms), which means their machine
+// stalls somewhere our guards don't reach: an OS-level window-teardown stall,
+// a store flush on a slow/AV-scanned disk, an exotic driver, or an older
+// build. A bounded chain is only as strong as its weakest future regression,
+// so the quit is now ABSOLUTELY bounded: the moment ANY quit/close is
+// requested, a one-shot watchdog arms; if the whole graceful chain (renderer
+// handshake ≤800 ms + worker disposal ≤530 ms + synchronous flushes) hasn't
+// finished by QUIT_WATCHDOG_MS, it hard-kills the git worker and its
+// reported children, best-effort-flushes the stores, and calls app.exit(0)
+// — which bypasses EVERY remaining lifecycle handler and tears the process
+// down immediately. Normal quits finish in ~100 ms and never see it fire.
+const QUIT_WATCHDOG_MS = 3_000;
+let quitWatchdogArmed = false;
+function armQuitWatchdog(reason: string): void {
+  if (quitWatchdogArmed) return;
+  quitWatchdogArmed = true;
+  qlog(`quit watchdog armed (${reason}) — hard exit in ≤${QUIT_WATCHDOG_MS} ms whatever happens`);
+  const timer = setTimeout(() => {
+    qlog('quit watchdog FIRED — the bounded quit chain failed somewhere; forcing app.exit(0)');
+    try { hardKillGitPollWorkerNow(); } catch { /* already gone */ }
+    try { stopAllWatchers(); } catch { /* ignore */ }
+    try { flushCommandLogBatch(); } catch { /* ignore */ }
+    try { flushSecrets(); } catch { /* ignore */ }
+    try { flushSettings(); } catch { /* ignore */ }
+    try { flushGithubStore(); } catch { /* ignore */ }
+    try { flushGitlabStore(); } catch { /* ignore */ }
+    try { windowStateStore.flush(); } catch { /* ignore */ }
+    app.exit(0);
+  }, QUIT_WATCHDOG_MS);
+  // Never keep the process alive on its own — only the quit flow does that.
+  timer.unref?.();
+}
+
+app.on('before-quit', (event) => {
+  armQuitWatchdog('before-quit');
+
+  // TEST HOOK (scripts/verify-quit-watchdog.mjs): park the quit FOREVER —
+  // never re-quit, never flush. Reproduces a fully wedged quit chain; the
+  // watchdog is the only way out. Must NEVER be set in production.
+  if (process.env.PRISMGIT_QUIT_SIMULATE_WEDGE) {
+    event.preventDefault();
+    qlog('before-quit → SIMULATED WEDGE (test hook): quit parked forever, watchdog must fire');
+    return;
+  }
+
+  // First pass: PARK the quit until the git worker is verifiably dead.
+  // The old fire-and-forget dispose raced Electron's teardown: 'quit'
+  // completed ~50 ms later, the utilityProcess died WITHOUT running its
+  // kill-children handler, and in-flight `git fetch` chains were orphaned
+  // (verified: hung remote-http helpers, ppid=1, alive for minutes after
+  // the app closed — "после закрытия машина тормозит"). Parking costs at
+  // most WORKER_SHUTDOWN_GRACE_MS (500 ms) and closes the race completely.
+  if (quitDisposalComplete) return; // second (real) pass — let the quit run
+  quitDisposalComplete = true;
+  event.preventDefault();
+  qlog('before-quit → parking quit for worker disposal');
+  const t0 = Date.now();
+  void disposeGitPollWorkerAsync()
+    .catch(() => { /* disposal is best-effort; never block the quit */ })
+    .finally(() => {
+      qlog(`worker disposal complete (${Date.now() - t0} ms) — flushing and re-quitting`);
+      stopAllWatchers();
+      // Flush any pending command-log batch — otherwise the last 100 ms of
+      // git commands would never reach the renderer's Output panel.
+      flushCommandLogBatch();
+      // Flush the debounced store writes — otherwise a quit within 100 ms of
+      // any settings/repo/auth/secrets change could lose it. Each store's
+      // writeNow() is synchronous (tmp-write + rename), so the app is
+      // guaranteed to have flushed before the process exits.
+      flushSecrets();
+      flushSettings();
+      flushGithubStore();
+      flushGitlabStore();
+      // The window-state store lives in this module — flush it too, even
+      // though saveWindowState() schedules a debounced write above.
+      windowStateStore.flush();
+      qlog('before-quit flushes complete → app.quit() (second pass)');
+      app.quit();
+    });
 });
 
 // Expose dialog for renderer
@@ -384,4 +659,11 @@ ipcMain.handle('clipboard:writeText', (_e, text: string) => {
 });
 
 ipcMain.handle('app:getVersion', () => app.getVersion());
+// Full version info for the About panel (Settings → About) — replaces the
+// previously hardcoded "2.0.1" string that drifted from package.json.
+ipcMain.handle('app:versions', () => ({
+  app: app.getVersion(),
+  electron: process.versions.electron || '',
+  node: process.versions.node || '',
+}));
 ipcMain.handle('app:getPlatform', () => process.platform);

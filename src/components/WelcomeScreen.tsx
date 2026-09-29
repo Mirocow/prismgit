@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react';
-import { Folder, Plus, Github, BookOpen, Star, ChevronRight, GitBranch, FileText, History, Download, Search, X } from './icons';
+import { Folder, FolderPlus, Plus, Github, BookOpen, Star, ChevronRight, GitBranch, FileText, History, Download, Search, X } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useI18n } from '../lib/i18n';
+import { addFolderFromPickerFlow } from '../lib/folderScan';
+import appLogo from '../assets/app-logo.png';
 
 export function WelcomeScreen({
   onClone,
@@ -87,15 +89,12 @@ export function WelcomeScreen({
 
         <div className="relative max-w-2xl mx-auto px-6 pt-16 pb-10 text-center">
           <div className="mb-6 flex justify-center">
-            <div
-              className="w-20 h-20 rounded-2xl flex items-center justify-center shadow-lg relative"
-              style={{
-                background: 'linear-gradient(135deg, var(--accent) 0%, var(--accent-purple) 100%)',
-                boxShadow: '0 10px 30px rgba(57, 158, 230, 0.3)',
-              }}
-            >
-              <GitBranch size={42} className="text-white" strokeWidth={2.5} />
-            </div>
+            <img
+              src={appLogo}
+              alt="PrismGit"
+              className="w-20 h-20 rounded-2xl shadow-lg"
+              style={{ boxShadow: '0 10px 30px rgba(57, 158, 230, 0.3)' }}
+            />
           </div>
           <h1 className="text-3xl font-bold text-text-primary mb-3 tracking-tight">
             {t('welcome.title')}
@@ -104,11 +103,22 @@ export function WelcomeScreen({
             {t('welcome.subtitle')}
           </p>
 
-          {/* Three primary actions: Open, Clone, New */}
-          <div className="flex flex-col sm:flex-row gap-3 max-w-lg mx-auto">
+          {/* Four primary actions: Open, Open Folder (recursive scan), Clone, New */}
+          <div className="flex flex-col sm:flex-row sm:flex-wrap gap-3 max-w-lg mx-auto">
             <button className="btn btn-primary justify-center flex-1" onClick={openRepo}>
               <Folder size={16} />
               {t('welcome.openRepo')}
+            </button>
+            {/* v2.3 — recursive folder scan: every repo in the folder and
+                subfolders, grouped by folder name */}
+            <button
+              className="btn btn-secondary justify-center flex-1"
+              onClick={() => void addFolderFromPickerFlow()}
+              title={t('shell.addFolderHint')}
+              data-testid="welcome-add-folder"
+            >
+              <FolderPlus size={16} />
+              {t('shell.addFolder')}
             </button>
             <button
               className="btn btn-secondary justify-center flex-1"
@@ -184,7 +194,7 @@ export function WelcomeScreen({
                       i > 0 ? 'border-t border-border-subtle' : ''
                     }`}
                   >
-                    <div className="w-9 h-9 rounded-lg bg-bg-tertiary border border-border-default flex items-center justify-center flex-shrink-0 group-hover:border-accent group-hover:bg-accent-muted transition-colors">
+                    <div className="w-9 h-9 rounded-lg bg-bg-tertiary border border-border-default flex items-center justify-center shrink-0 group-hover:border-accent group-hover:bg-accent-muted transition-colors">
                       <Folder size={16} className="text-accent" />
                     </div>
                     <div className="flex-1 min-w-0">
@@ -193,10 +203,10 @@ export function WelcomeScreen({
                           {repo.name}
                         </span>
                         {meta?.favorite && (
-                          <Star size={11} className="text-status-modified fill-current flex-shrink-0" />
+                          <Star size={11} className="text-status-modified fill-current shrink-0" />
                         )}
                         {meta?.tags && meta.tags.length > 0 && (
-                          <span className="flex gap-1 flex-shrink-0">
+                          <span className="flex gap-1 shrink-0">
                             {meta.tags.slice(0, 3).map(t => (
                               <span key={t} className="text-2xs text-text-tertiary px-1.5 py-0.5 rounded-full bg-bg-tertiary">
                                 {t}
@@ -215,7 +225,7 @@ export function WelcomeScreen({
                     )}
                     <ChevronRight
                       size={14}
-                      className="text-text-tertiary opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+                      className="text-text-tertiary opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
                     />
                   </button>
                 );

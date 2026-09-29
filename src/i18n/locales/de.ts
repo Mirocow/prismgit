@@ -7,7 +7,9 @@ export const de: Record<string, string> = {
   'common.cancel': 'Abbrechen',
   'common.save': 'Speichern',
   'common.delete': 'Löschen',
+  'common.checkout': 'Auschecken',
   'common.remove': 'Entfernen',
+  'common.skip': 'Überspringen',
   'common.add': 'Hinzufügen',
   'common.create': 'Erstellen',
   'common.edit': 'Bearbeiten',
@@ -15,7 +17,9 @@ export const de: Record<string, string> = {
   'common.refresh': 'Aktualisieren',
   'common.search': 'Suchen',
   'common.clear': 'Leeren',
+  'common.errorDetails': 'Details',
   'common.close': 'Schließen',
+  'common.dismiss': 'Verwerfen',
   'common.copy': 'Kopieren',
   'common.success': 'Erfolg',
   'common.error': 'Fehler',
@@ -46,6 +50,15 @@ export const de: Record<string, string> = {
   'nav.submodules': 'Submodule',
   'nav.subtrees': 'Subtrees',
   'nav.lfs': 'Git LFS',
+
+  // LFS health check
+  'lfs.healthCheckTitle': 'Git LFS ist konfiguriert, aber nicht installiert',
+  'lfs.healthCheckMessage': 'Dieses Repository verwendet Git LFS (.gitattributes hat LFS-Filterregeln), aber git-lfs ist nicht installiert.\n\nDies kann Fehler bei Checkout, Restore und anderen Git-Operationen verursachen. Wählen Sie eine Option:\n\n• LFS-Filter entfernen — entfernt filter=lfs-Zeilen aus .gitattributes (committen Sie die Änderung, um sie dauerhaft zu machen)\n• Überspringen — mit deaktiviertem LFS fortfahren (LFS-verfolgte Dateien zeigen Pointer-Inhalt)',
+  'lfs.removeFilter': 'LFS-Filter entfernen',
+  'lfs.skip': 'Überspringen',
+  'lfs.filterRemoved': '{count} LFS-Filter-Zeile(n) aus .gitattributes entfernt. Committen Sie die Änderung, um sie dauerhaft zu machen.',
+  'lfs.noFilterFound': 'Keine LFS-Filterregeln in .gitattributes gefunden.',
+  'lfs.skipHint': 'LFS übersprungen. Installieren Sie git-lfs von https://git-lfs.com für vollständige LFS-Unterstützung.',
   'nav.notes': 'Notizen',
   'nav.settings': 'Einstellungen',
   'nav.favorites': 'Favoriten',
@@ -184,6 +197,7 @@ export const de: Record<string, string> = {
   'settings.appDescription': 'Globale Anwendungseinstellungen (Erscheinungsbild, Integrationen, AI, CI/CD)',
   'settings.projectDescription': 'Repository-Konfiguration (Git, Remotes, Pull-Strategie, Konfiguration)',
   'settings.appearance': 'Erscheinungsbild',
+  'settings.userInterface': 'Benutzeroberfläche',
   'settings.theme': 'Theme',
   'settings.language': 'Sprache',
   'settings.contrast': 'UI-Kontrast',
@@ -212,6 +226,18 @@ export const de: Record<string, string> = {
   'clone.credentialHelper': 'PrismGit als Credential Helper verwenden',
   'clone.skipSubmodules': 'Submodule-Initialisierung überspringen',
   'clone.clone': 'Klonen',
+  'clone.ssh.title': 'SSH-Verbindung',
+  'clone.ssh.usingProfile': 'Profil: {name}',
+  'clone.ssh.usingKey': 'Verwalteter Schlüssel: {name}',
+  'clone.ssh.usingSystem': 'System-ssh — kein Profil für diesen Host',
+  'clone.ssh.hintSystem': 'Legen Sie unter Einstellungen → Sicherheit → SSH-Verbindungen ein Profil an, um einen verwalteten Schlüssel oder ein Passwort zu verwenden.',
+  'clone.ssh.test': 'Testen',
+  'clone.ssh.testing': 'Teste…',
+  'clone.ssh.ok': 'Verbunden',
+  'clone.ssh.failed': 'Fehlgeschlagen',
+  'clone.targetGroup': 'Sidebar-Gruppe',
+  'clone.targetGroupHint': 'Wo das geklonte Repo im Sidebar-Baum erscheint. Wähle "(Root)", um es auf oberster Ebene hinzuzufügen.',
+  'clone.targetGroupRoot': '(Root — keine Gruppe)',
 
   // Diff
   'diff.unified': 'Unified',
@@ -262,6 +288,23 @@ export const de: Record<string, string> = {
   'vscode.toolNotConfigured': 'Nicht konfiguriert',
   // MED-4 — line-context menu extras
   'common.copied': 'Kopiert',
+  'common.clearFilter': 'Filter zurücksetzen',
   'common.copyFailed': 'Kopieren fehlgeschlagen',
+  'common.copyHash': 'Commit-Hash kopieren',
   'common.copyLineNumber': 'Zeilennummer kopieren ({n})',
+
+  // ── v3.4 localization completion ──
+  'common.lines': 'Zeilen',
+  'common.load': 'Laden',
+  'common.settings': 'Einstellungen',
+
+  // ── v3.4 hardcoded-string sweep ──
+  'common.noRows': 'Keine Zeilen',
+  'common.dismissNotification': 'Benachrichtigung schließen',
+  'common.copyCode': 'Code kopieren',
+  'common.apiKeySaved': 'API-Schlüssel gespeichert',
+  'common.loadingEllipsis': 'Lädt...',
+
+  // ── v3.4 hardcoded-string sweep ──
+  'toolbar.stageAllTooltip': 'Alle Änderungen stagen',
 };

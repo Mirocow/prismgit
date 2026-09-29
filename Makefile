@@ -4,8 +4,11 @@
 # All-in-one entry point for development, build, and packaging.
 #
 # Common targets:
-#   make install       — install dependencies
-#   make dev           — start dev server with HMR
+#   make install       — install dependencies (auto-retries via the public
+#                        registry if a local npm mirror 404s a lockfile tarball)
+#   make dev           — start dev server with HMR (React dev build: slower,
+#                        prints the React DevTools banner — that's normal)
+#   make run           — build once + launch the PRODUCTION app (fast)
 #   make build         — production build (renderer + main)
 #   make package       — package for current OS
 #   make package-mac-arm  — package macOS ARM (Apple Silicon)
@@ -19,6 +22,10 @@
 #   make typecheck     — run TypeScript type check
 #   make test          — run all tests
 #   make test-e2e      — run E2E tests (Playwright)
+#   make perf-repos     — generate synthetic stress repos (flat/deep/log/diff)
+#   make perf-cdp       — CDP memory/DOM/FPS + zombie audit (needs built app)
+#   make perf-readiness — static perf-readiness audit (main-process invariants)
+#   make perf-all       — full perf suite (readiness + repos + cdp + ui + quit)
 #   make help          — show this help
 #
 # Tauri (separate build target, does NOT break Electron):
@@ -118,15 +125,15 @@ help: ## Show this help message
 # =============================================================================
 
 .PHONY: install
-install: ## Install npm dependencies
+install: ## Install npm dependencies (mirror-404 → public-registry retry)
 	@echo "$(COLOR_YELLOW)→ Installing dependencies...$(COLOR_RESET)"
-	$(NPM) install
+	@sh scripts/npm-install-with-retry.sh install
 	@echo "$(COLOR_GREEN)✓ Dependencies installed$(COLOR_RESET)"
 
 .PHONY: install-ci
 install-ci: ## Install dependencies (CI mode, no audit/fund)
 	@echo "$(COLOR_YELLOW)→ Installing dependencies (CI)...$(COLOR_RESET)"
-	$(NPM) ci --no-audit --no-fund
+	@sh scripts/npm-install-with-retry.sh ci --no-audit --no-fund
 	@echo "$(COLOR_GREEN)✓ Dependencies installed$(COLOR_RESET)"
 
 .PHONY: dev
@@ -134,11 +141,24 @@ dev: ## Start development server with HMR
 	@echo "$(COLOR_YELLOW)→ Starting dev server...$(COLOR_RESET)"
 	@echo "  Electron app will open automatically."
 	@echo "  Vite dev server: http://localhost:5173"
+	@echo "  NOTE: dev mode runs React's DEVELOPMENT build — the console prints"
+	@echo "  \"Download the React DevTools…\" (that banner is inherent to React"
+	@echo "  dev builds, NOT a debug flag of this app) and the UI is slower"
+	@echo "  than production. For the FAST app use \"make run\"."
 	$(NPM) run dev
 
 .PHONY: dev-debug
-dev-debug: ## Start dev server with debug logging
+dev-debug: ## Start dev server with debug logging + DevTools window
+	@echo "$(COLOR_YELLOW)→ Starting dev server (DEBUG=1, DevTools attached)...$(COLOR_RESET)"
 	DEBUG=1 $(NPM) run dev
+
+.PHONY: run
+run: build ## Build (if needed) then launch the PRODUCTION app — fast, no dev-server
+	@echo "$(COLOR_YELLOW)→ Launching production build (no dev server, no dev-mode React)...$(COLOR_RESET)"
+	$(NPX) electron .
+
+.PHONY: restart
+restart: run ## Alias of "run"
 
 # =============================================================================
 # Build & Type Check
@@ -356,6 +376,45 @@ test-verify: ## Full verification pipeline (typecheck + test + build + e2e)
 	$(NPM) run build
 	$(NPM) run test:e2e
 	@echo "$(COLOR_GREEN)✓ Full verification passed$(COLOR_RESET)"
+
+# =============================================================================
+# Performance & profiling (Enterprise QA suite)
+# =============================================================================
+
+.PHONY: perf-readiness
+perf-readiness: ## Static perf-readiness audit (no exec/execSync in main, sync-FS ratchet, env guards)
+	@echo "$(COLOR_BOLD)$(COLOR_CYAN)→ Perf readiness audit...$(COLOR_RESET)"
+	node scripts/audit-perf-readiness.mjs
+	@echo "$(COLOR_GREEN)✓ Perf readiness audit complete$(COLOR_RESET)"
+
+.PHONY: perf-repos
+perf-repos: ## Generate synthetic stress repos (flat/deep/log/diff) in /tmp/prismgit-perf-repos
+	@echo "$(COLOR_BOLD)$(COLOR_CYAN)→ Generating synthetic perf repos...$(COLOR_RESET)"
+	node scripts/gen-perf-repos.mjs
+	@echo "$(COLOR_GREEN)✓ Perf repos ready (see scripts/perf-repos-manifest.json)$(COLOR_RESET)"
+
+.PHONY: perf-cdp
+perf-cdp: ## CDP memory/DOM/FPS + zombie-process audit (requires built app + X display)
+	@echo "$(COLOR_BOLD)$(COLOR_CYAN)→ CDP perf metrics (heap/DOM/FPS + zombie audit)...$(COLOR_RESET)"
+	node scripts/perf-cdp-metrics.mjs
+	@echo "$(COLOR_GREEN)✓ CDP perf metrics complete$(COLOR_RESET)"
+
+.PHONY: perf-ui
+perf-ui: ## UI latency profile on the heavy repo (requires built app + X display)
+	@echo "$(COLOR_BOLD)$(COLOR_CYAN)→ UI perf profile (typing/click/scroll latency)...$(COLOR_RESET)"
+	bash scripts/perf-make-heavy-repo.sh
+	node scripts/perf-profile.mjs
+	@echo "$(COLOR_GREEN)✓ UI perf profile complete$(COLOR_RESET)"
+
+.PHONY: perf-quit
+perf-quit: ## Check-all + quit + orphan verification (requires built app + X display)
+	@echo "$(COLOR_BOLD)$(COLOR_CYAN)→ Check-all / quit / orphan verification...$(COLOR_RESET)"
+	node scripts/verify-checkall-quit.mjs
+	@echo "$(COLOR_GREEN)✓ Check-all / quit verification complete$(COLOR_RESET)"
+
+.PHONY: perf-all
+perf-all: perf-readiness perf-repos perf-cdp perf-ui perf-quit ## Full perf suite (readiness + repos + cdp + ui + quit)
+	@echo "$(COLOR_GREEN)✓ Full perf suite complete$(COLOR_RESET)"
 
 # =============================================================================
 # Clean
@@ -658,8 +717,19 @@ install-full: install ## Install npm deps + check Rust + check system deps
 # Quick checks & pre-commit hooks
 # =============================================================================
 
+.PHONY: makefile-lint
+makefile-lint: ## Verify Makefile recipes use TABs (guards 'missing separator' breakage)
+	@out=$$(grep -nE '^ {8}[^ ]|^ {16}[^ ]' $(MAKEFILE_LIST) 2>/dev/null); \
+	if [ -n "$$out" ]; then \
+		echo "$$out" | head -5; \
+		echo "$(COLOR_RED)✗ Makefile: space-indented recipe lines found — recipes MUST start with a TAB$(COLOR_RESET)"; \
+		exit 1; \
+	else \
+		echo "$(COLOR_GREEN)✓ Makefile TAB indentation OK$(COLOR_RESET)"; \
+	fi
+
 .PHONY: quick-check
-quick-check: ## Fast pre-commit check (typecheck + unit tests only)
+quick-check: makefile-lint ## Fast pre-commit check (Makefile tabs + typecheck + unit tests)
 	@echo "$(COLOR_BOLD)$(COLOR_CYAN)→ Quick check (typecheck + unit tests)...$(COLOR_RESET)"
 	@$(NPX) tsc --noEmit
 	@$(NPX) vitest run tests/unit

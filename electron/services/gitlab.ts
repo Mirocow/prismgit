@@ -9,6 +9,16 @@ import * as https from 'https';
 import * as http from 'http';
 import { URL } from 'url';
 import { SimpleStore } from './simpleStore.js';
+import { setSecret, getSecret, deleteSecret } from './secrets.js';
+import { NS_GITLAB } from './credentialKeys.js';
+import type {
+  GitLabMergeRequestDetail,
+  GitLabMRFile,
+  GitLabMRNote,
+  GitLabMRCommit,
+} from '../types/gitlab-api.js';
+import { startApiCall, finishApiCall, sanitizeApiPath } from './commandLog.js';
+import { isInsecureSslHost } from './insecureHosts.js';
 
 export interface GitLabUser {
   id: number;
@@ -51,6 +61,9 @@ export interface GitLabPipeline {
 }
 
 interface GitLabAuthState {
+  /** Token is NO LONGER stored here — it lives in the encrypted vault
+   *  (NS_GITLAB/'pat'). This field is kept for backward-compat reads
+   *  from older PrismGit versions that stored it in plaintext JSON. */
   token?: string;
   baseUrl?: string; // default https://gitlab.com
   user?: GitLabUser;
@@ -62,11 +75,38 @@ const store = new SimpleStore({
 });
 
 function getAuthState(): GitLabAuthState {
-  return (store.get('gitlab') || {}) as GitLabAuthState;
+  const raw = (store.get('gitlab') || {}) as GitLabAuthState;
+  // The PAT never rests in the JSON file — it lives in the encrypted vault.
+  // Read it from the vault and inject it into the returned state so the
+  // rest of the file (apiJson, authWithPAT, etc.) can use it transparently.
+  const token = getSecret(NS_GITLAB, 'pat');
+  return { ...raw, token };
 }
 
 function setAuthState(state: GitLabAuthState): void {
-  store.set('gitlab', state);
+  // Split: token → vault, everything else (baseUrl, user) → JSON file.
+  // The JSON never sees the real token value.
+  const { token, ...rest } = state;
+  store.set('gitlab', rest);
+  if (token) {
+    setSecret(NS_GITLAB, 'pat', token);
+  } else {
+    deleteSecret(NS_GITLAB, 'pat');
+  }
+}
+
+/**
+ * Migration helper — moves any plaintext token found in the old JSON store
+ * into the encrypted vault. Idempotent. Called from main.ts on app-ready.
+ */
+export function migrateLegacyGitLabToken(): void {
+  const raw = (store.get('gitlab') || {}) as GitLabAuthState;
+  if (raw.token) {
+    // Move to vault, clear from JSON.
+    setSecret(NS_GITLAB, 'pat', raw.token);
+    const { token, ...rest } = raw;
+    store.set('gitlab', rest);
+  }
 }
 
 function getBaseUrl(): string {
@@ -77,9 +117,37 @@ async function apiJson<T>(
   endpoint: string,
   options: { method?: string; body?: string; token?: string } = {}
 ): Promise<T> {
+  return apiJsonRequest<T>(endpoint, options, 0);
+}
+
+/**
+ * HTTP(S) request for the GitLab API.
+ *
+ * FOLLOWS 3xx redirects (up to 5 hops). This is REQUIRED for renamed /
+ * transferred projects: GET /projects/<old-url-encoded-path> answers 301 →
+ * /projects/<new-id>, and plain http.request does NOT follow redirects —
+ * the MR list then failed with "GitLab API 301" and the Pull Requests tool
+ * showed an EMPTY list even though open MRs existed (real-world case: this
+ * repo's remote path web/git/gitclient → project web/git/prismgit).
+ *
+ * Redirect rules (browser-like):
+ *   - same host: the PRIVATE-TOKEN header is preserved;
+ *   - cross host: the token is DROPPED (never leak the PAT to a third party);
+ *   - 307/308 keep the method+body; 301/302/303 rewrite non-GET to GET.
+ */
+function apiJsonRequest<T>(
+  endpoint: string,
+  options: { method?: string; body?: string; token?: string },
+  redirects: number,
+): Promise<T> {
   const baseUrl = getBaseUrl();
   const url = endpoint.startsWith('http') ? endpoint : `${baseUrl}/api/v4${endpoint}`;
   const u = new URL(url);
+  // Log the GitLab API call to the Output panel — same pattern as github.ts.
+  // The path includes '/api/v4' so the user can see it's a GitLab API call.
+  const path = sanitizeApiPath(u.pathname + u.search);
+  const method = (options.method || 'GET').toUpperCase();
+  const handle = startApiCall({ provider: 'gitlab', method, path });
   const isHttps = u.protocol === 'https:';
   const lib = isHttps ? https : http;
   const headers: Record<string, string> = {
@@ -99,24 +167,81 @@ async function apiJson<T>(
         path: u.pathname + u.search,
         method: options.method || 'GET',
         headers,
+        // TLS bypass for hosts the user EXPLICITLY marked insecure via the
+        // SslBypassDialog (expired / self-signed corporate GitLab certs break
+        // the API exactly like they break git itself). Traffic stays
+        // TLS-encrypted — only the trust check is dropped for that host.
+        ...(isHttps && isInsecureSslHost(u.hostname) ? { rejectUnauthorized: false } : {}),
       },
       (res) => {
         let data = '';
         res.on('data', (chunk) => (data += chunk));
         res.on('end', () => {
-          if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+          const status = res.statusCode ?? 0;
+          const location = res.headers.location;
+          if (status >= 300 && status < 400 && typeof location === 'string' && location && redirects < 5) {
+            // Follow the redirect: log, then re-request (same-host keeps the
+            // PAT; cross-host drops it — never leak the token).
+            finishApiCall(handle, { status, body: `→ ${location}` });
+            let next: URL;
             try {
+              next = new URL(location, u);
+            } catch {
+              reject(new Error(`GitLab API ${status}: invalid redirect "${location}"`));
+              return;
+            }
+            // TOKEN: pass the RESOLVED token (options.token is usually
+            // undefined — calls rely on getAuthState()). Passing it
+            // explicitly makes the cross-host drop below REAL: the
+            // recursive call would otherwise re-resolve it from the auth
+            // state and leak the PAT to the redirect target.
+            const nextOpts: { method?: string; body?: string; token?: string } = { token };
+            const nextMethod = (options.method || 'GET').toUpperCase();
+            if (status === 307 || status === 308) {
+              nextOpts.method = nextMethod;
+              if (options.body) nextOpts.body = options.body;
+            } else if (nextMethod !== 'GET') {
+              // 301/302/303 on a MUTATION: downgrading POST/PUT to GET
+              // would silently turn the mutation into a read that can
+              // resolve 2xx → false success toast (e.g. addMRComment →
+              // GET notes returns 200, «comment added», nothing posted).
+              // Refuse loudly instead — same doctrine as the conflict
+              // reaction matrix: never report success without an action.
+              finishApiCall(handle, { status, error: `GitLab API ${status}: mutating ${nextMethod} redirected (${location}) — refusing downgrade to GET` });
+              reject(new Error(
+                `GitLab API ${status}: ${nextMethod} request was redirected to "${location}". A redirect on a mutating call would silently turn it into a read — refusing. Re-resolve the project (numeric ID) and retry.`
+              ));
+              return;
+            }
+            if (next.host !== u.host) delete nextOpts.token;
+            resolve(apiJsonRequest<T>(next.toString(), nextOpts, redirects + 1));
+            return;
+          }
+          if (status >= 200 && status < 300) {
+            try {
+              finishApiCall(handle, { status, body: data });
               resolve(data ? JSON.parse(data) : null);
             } catch (e) {
+              finishApiCall(handle, { status, error: `JSON parse error: ${e}` });
               reject(new Error(`JSON parse error: ${e}`));
             }
           } else {
-            reject(new Error(`GitLab API ${res.statusCode}: ${data}`));
+            finishApiCall(handle, { status, error: `GitLab API ${status}` });
+            reject(new Error(`GitLab API ${status}: ${data}`));
           }
         });
       }
     );
-    req.on('error', reject);
+    req.on('error', (e) => {
+      finishApiCall(handle, { status: 0, error: String(e) });
+      reject(e);
+    });
+    // NETWORK TIMEOUT: 15 s hard cap — same rationale as github.ts.
+    // Without this, a hung GitLab connection blocks the IPC handler
+    // forever and the UI shows a permanent spinner.
+    req.setTimeout(15000, () => {
+      req.destroy(new Error('GitLab API request timed out after 15 s'));
+    });
     if (options.body) {
       req.write(options.body);
     }
@@ -141,8 +266,27 @@ export function logout(): void {
   setAuthState({});
 }
 
-export function getAuthStatePublic(): { token?: string; user?: GitLabUser; baseUrl?: string } {
-  return getAuthState();
+/** Flush pending debounced writes (call on app quit). */
+export function flushGitlabStore(): void {
+  store.flush();
+}
+
+/** Public auth state for the renderer. The token is NOT exposed — only
+ *  whether one exists. This matches the GitHub auth shape (getStoredAuthState
+ *  returns { authenticated, user }) and prevents the renderer from ever
+ *  holding the raw PAT. */
+export function getAuthStatePublic(): { authenticated: boolean; user?: GitLabUser; baseUrl?: string; token?: string } {
+  const st = getAuthState();
+  // We keep `token` in the return shape for backward-compat with existing
+  // renderer code that checks `glState.token` — but it's just a boolean
+  // indicator (the real value never crosses the IPC boundary). The
+  // renderer only checks truthiness, never the value.
+  return {
+    authenticated: !!st.token,
+    user: st.user,
+    baseUrl: st.baseUrl,
+    token: st.token ? '***vaulted***' : undefined,
+  };
 }
 
 export async function listProjects(
@@ -152,11 +296,233 @@ export async function listProjects(
   return apiJson<GitLabProject[]>(`/projects?membership=true&page=${page}&per_page=${perPage}&order_by=last_activity_at`);
 }
 
+/**
+ * Look up a single project by its path_with_namespace (e.g. "group/sub/repo").
+ *
+ * This is the GitLab-recommended way to resolve a project from a clone URL:
+ *   GET /projects/:id  where :id is the URL-encoded path_with_namespace.
+ *
+ * For "group/subgroup/repo" the encoded form is "%2Fgroup%2Fsubgroup%2Frepo".
+ * encodeURIComponent doesn't encode forward slashes, so we replace them
+ * manually with %2F.
+ *
+ * This replaces the previous 'page through listProjects and match
+ * path_with_namespace' approach — that could need 5+ pages for users with
+ * many groups, and on a self-hosted GitLab at a private IP, the lookup was
+ * flaky and produced '404 Project Not Found' on listMergeRequests.
+ */
+export async function getProjectByPath(
+  pathWithNamespace: string
+): Promise<GitLabProject> {
+  const encoded = encodeURIComponent(pathWithNamespace).replace(/%2F/gi, '%2F').replace(/\//g, '%2F');
+  return apiJson<GitLabProject>(`/projects/${encoded}`);
+}
+
 export async function listMergeRequests(
   projectId: number,
   state: 'opened' | 'closed' | 'merged' | 'all' = 'opened'
 ): Promise<GitLabMergeRequest[]> {
   return apiJson<GitLabMergeRequest[]>(`/projects/${projectId}/merge_requests?state=${state}`);
+}
+
+/**
+ * Fetch a single MR with full detail (description, merge_status, changes
+ * count). The listMergeRequests endpoint returns a slim version.
+ *
+ * Used by the PR review surface (Reviews page) when the user opens a MR.
+ */
+export async function getMergeRequest(
+  projectId: number,
+  mrIid: number
+): Promise<GitLabMergeRequestDetail> {
+  const mr = await apiJson<GitLabMergeRequestDetail>(
+    `/projects/${projectId}/merge_requests/${mrIid}?include_diverged_commits_count=true`
+  );
+  // Normalize: the MR list uses `description`, the review UI uses `body`.
+  // Populate `body` so the PRReview component can read either field.
+  mr.body = mr.description ?? mr.body ?? '';
+  mr.mergeable = mr.merge_status === 'can_be_merged';
+  mr.draft = mr.work_in_progress;
+  return mr;
+}
+
+/**
+ * Fetch the changed files in a GitLab MR with their unified diff patches.
+ * Maps GitLab's response shape to the GitHub-style GithubPRFile shape so
+ * the renderer can use the same PRReview component for both providers.
+ *
+ * GitLab endpoint: GET /projects/:id/merge_requests/:iid/changes
+ * Returns: { changes: [{ old_path, new_path, diff, new_file, renamed_file, deleted_file }] }
+ */
+export async function listMRChanges(
+  projectId: number,
+  mrIid: number
+): Promise<GitLabMRFile[]> {
+  const resp = await apiJson<{ changes: Array<Record<string, unknown>> }>(
+    `/projects/${projectId}/merge_requests/${mrIid}/changes`
+  );
+  const baseUrl = getBaseUrl();
+  const projectPath = String(projectId); // numeric ID; renderer uses owner/repo for URLs anyway
+  return (resp.changes || []).map((c) => {
+    const newFile = !!c.new_file;
+    const renamedFile = !!c.renamed_file;
+    const deletedFile = !!c.deleted_file;
+    const oldPath = String(c.old_path || '');
+    const newPath = String(c.new_path || '');
+    const diff = String(c.diff || '');
+    // Parse +/- counts from the diff hunk lines.
+    let additions = 0;
+    let deletions = 0;
+    for (const line of diff.split('\n')) {
+      if (line.startsWith('+') && !line.startsWith('+++')) additions++;
+      else if (line.startsWith('-') && !line.startsWith('---')) deletions++;
+    }
+    const status: GitLabMRFile['status'] = newFile
+      ? 'added'
+      : deletedFile
+        ? 'removed'
+        : renamedFile
+          ? 'renamed'
+          : 'modified';
+    return {
+      old_path: oldPath,
+      new_path: newPath,
+      a_mode: String(c.a_mode || ''),
+      b_mode: String(c.b_mode || ''),
+      diff,
+      new_file: newFile,
+      renamed_file: renamedFile,
+      deleted_file: deletedFile,
+      status,
+      filename: deletedFile ? oldPath : newPath,
+      additions,
+      deletions,
+      blob_url: `${baseUrl}/${projectPath}/-/blob/${newPath}`,
+    } satisfies GitLabMRFile;
+  });
+}
+
+/**
+ * Fetch discussion notes (top-level MR thread). GitLab's notes API returns
+ * both user notes AND system notes (e.g. "John assigned this MR to Jane").
+ * We keep all of them here — the renderer can filter `system: true` notes
+ * if it wants to show only human-written comments.
+ *
+ * Mirrors the GitHub listPRIssueComments endpoint.
+ */
+export async function listMRNotes(
+  projectId: number,
+  mrIid: number
+): Promise<GitLabMRNote[]> {
+  const notes = await apiJson<Array<Omit<GitLabMRNote, 'user'>>>(
+    `/projects/${projectId}/merge_requests/${mrIid}/notes?per_page=100&sort=asc&order_by=created_at`
+  );
+  // Normalize: GitLab uses `author.username`, the renderer expects `user.login`.
+  return notes.map((n) => ({
+    ...n,
+    user: {
+      login: n.author.username,
+      avatar_url: n.author.avatar_url,
+    },
+  }));
+}
+
+/**
+ * Fetch the commits that make up the MR.
+ * Maps GitLab's response shape to the GitHub-style GithubPRCommit shape.
+ *
+ * GitLab endpoint: GET /projects/:id/merge_requests/:iid/commits
+ */
+export async function listMRCommits(
+  projectId: number,
+  mrIid: number
+): Promise<GitLabMRCommit[]> {
+  // PAGINATION: GitLab caps this endpoint at 100 per page. MR !6 (v2.2.0)
+  // has 244 commits and the Commits tab badge showed a wrong "100" with no
+  // indication of truncation. Walk pages until a short page (cap: 500 to
+  // bound the payload for gigantic MRs).
+  const PER_PAGE = 100;
+  const raw: Array<Omit<GitLabMRCommit, 'sha' | 'commit' | 'author' | 'committer'>> = [];
+  for (let page = 1; page <= 5; page++) {
+    const batch = await apiJson<Array<Omit<GitLabMRCommit, 'sha' | 'commit' | 'author' | 'committer'>>>(
+      `/projects/${projectId}/merge_requests/${mrIid}/commits?per_page=${PER_PAGE}&page=${page}`
+    );
+    raw.push(...batch);
+    if (batch.length < PER_PAGE) break;
+  }
+  // Normalize to match the GithubPRCommit shape so the renderer can use
+  // the same PRReview component.
+  return raw.map((c) => ({
+    ...c,
+    sha: c.id,
+    commit: {
+      message: c.message || c.title,
+      author: {
+        name: c.author_name,
+        email: c.author_email,
+        date: c.created_at,
+      },
+    },
+    // GitLab's MR commits endpoint doesn't return a linked GitHub-style
+    // `author` object — leave undefined so the renderer falls back to
+    // showing the commit's author_name.
+  }));
+}
+
+/**
+ * Fetch the diff for a specific commit in a GitLab project.
+ *
+ * Uses: GET /projects/:id/repository/commits/:sha/diff
+ *
+ * Returns an array of file diffs — each with old_path, new_path, diff
+ * (unified patch), new_file, renamed_file, deleted_file flags. Same
+ * shape as listMRChanges, so the renderer can reuse the same display.
+ */
+export async function getCommitDiff(
+  projectId: number,
+  commitSha: string
+): Promise<GitLabMRFile[]> {
+  const resp = await apiJson<Array<Record<string, unknown>>>(
+    `/projects/${projectId}/repository/commits/${commitSha}/diff`
+  );
+  const baseUrl = getBaseUrl();
+  const projectPath = String(projectId);
+  return resp.map((c) => {
+    const newFile = !!c.new_file;
+    const renamedFile = !!c.renamed_file;
+    const deletedFile = !!c.deleted_file;
+    const oldPath = String(c.old_path || '');
+    const newPath = String(c.new_path || '');
+    const diff = String(c.diff || '');
+    let additions = 0;
+    let deletions = 0;
+    for (const line of diff.split('\n')) {
+      if (line.startsWith('+') && !line.startsWith('+++')) additions++;
+      else if (line.startsWith('-') && !line.startsWith('---')) deletions++;
+    }
+    const status: GitLabMRFile['status'] = newFile
+      ? 'added'
+      : deletedFile
+        ? 'removed'
+        : renamedFile
+          ? 'renamed'
+          : 'modified';
+    return {
+      old_path: oldPath,
+      new_path: newPath,
+      a_mode: String(c.a_mode || ''),
+      b_mode: String(c.b_mode || ''),
+      diff,
+      new_file: newFile,
+      renamed_file: renamedFile,
+      deleted_file: deletedFile,
+      status,
+      filename: deletedFile ? oldPath : newPath,
+      additions,
+      deletions,
+      blob_url: `${baseUrl}/${projectPath}/-/blob/${newPath}`,
+    } satisfies GitLabMRFile;
+  });
 }
 
 export async function createMergeRequest(

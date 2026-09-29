@@ -3,11 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import {
   Search, GitCommit, GitBranch, Tag, FileText, GitPullRequest, FolderGit, X, ChevronRight,
 } from './icons';
+import { BranchSyncIndicator } from './BranchSyncIndicator';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { cn } from '../lib/utils';
+import { isSymbolicHead } from '../lib/branchFilter';
 import { useI18n } from '../lib/i18n';
 import { formatAbsoluteDate } from '../lib/formatDate';
 import { api, type LogEntry, type BranchInfo, type TagInfo, type StashEntry } from '../lib/api';
@@ -48,6 +50,16 @@ interface SearchResult {
   secondary?: string;
   /** Tertiary text shown on the right (date, type tag). */
   tertiary?: string;
+  /** Optional sync indicator metadata — only present for branch results.
+   *  When set, a BranchSyncIndicator is rendered next to the label. */
+  sync?: {
+    tracking?: string | null;
+    upstream?: string | null;
+    ahead?: number;
+    behind?: number;
+    gone?: boolean;
+    remote?: boolean;
+  };
   /** Action to run when the result is selected (navigates, opens, etc.). */
   action: () => void;
   /** Match score — lower = better. Used to sort within a group. */
@@ -68,12 +80,12 @@ function matchScore(text: string, q: string): number {
 // ── Icon picker per kind ─────────────────────────────────────────────────────
 function KindIcon({ kind }: { kind: ResultKind }) {
   switch (kind) {
-    case 'repo': return <FolderGit size={14} className="flex-shrink-0 opacity-80 text-accent" />;
-    case 'commit': return <GitCommit size={14} className="flex-shrink-0 opacity-80 text-status-renamed" />;
-    case 'branch': return <GitBranch size={14} className="flex-shrink-0 opacity-80 text-accent-purple" />;
-    case 'tag': return <Tag size={14} className="flex-shrink-0 opacity-80 text-status-modified" />;
-    case 'file': return <FileText size={14} className="flex-shrink-0 opacity-80 text-text-secondary" />;
-    case 'stash': return <GitPullRequest size={14} className="flex-shrink-0 opacity-80 text-status-untracked" />;
+    case 'repo': return <FolderGit size={14} className="shrink-0 opacity-80 text-accent" />;
+    case 'commit': return <GitCommit size={14} className="shrink-0 opacity-80 text-status-renamed" />;
+    case 'branch': return <GitBranch size={14} className="shrink-0 opacity-80 text-accent-purple" />;
+    case 'tag': return <Tag size={14} className="shrink-0 opacity-80 text-status-modified" />;
+    case 'file': return <FileText size={14} className="shrink-0 opacity-80 text-text-secondary" />;
+    case 'stash': return <GitPullRequest size={14} className="shrink-0 opacity-80 text-status-untracked" />;
   }
 }
 
@@ -225,7 +237,12 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
     }
 
     // Branches — match by name
+    // Skip symbolic HEAD refs like "origin/HEAD" and "github/HEAD" —
+    // they are pointers to the default branch of the remote, not real
+    // branches. Selecting them in GlobalSearch would attempt to
+    // checkout/merge a non-existent ref.
     for (const b of branches) {
+      if (isSymbolicHead(b.name)) continue;
       const s = matchScore(b.name, q);
       if (s >= 0) {
         out.push({
@@ -234,6 +251,14 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
           label: b.name,
           secondary: b.lastCommit ? `${b.lastCommit.hash.slice(0, 7)} · ${b.lastCommit.message}` : '',
           tertiary: b.current ? 'HEAD' : (b.remote ? 'remote' : ''),
+          sync: {
+            tracking: b.tracking,
+            upstream: b.upstream,
+            ahead: b.ahead,
+            behind: b.behind,
+            gone: b.gone,
+            remote: b.remote,
+          },
           score: s,
           action: () => {
             useSelectionStore.getState().selectBranch(b.name);
@@ -405,7 +430,7 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
 
   return (
     <div
-      className="fixed inset-0 bg-black/40 dark:bg-black/60 flex items-start justify-center pt-[8vh] z-[70] animate-fade-in"
+      className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-start justify-center pt-[8vh] z-70 animate-fade-in"
       onClick={onClose}
     >
       <div
@@ -416,7 +441,7 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
       >
         {/* ─── Search input ─── */}
         <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border-default">
-          <Search size={15} className="text-text-tertiary flex-shrink-0" />
+          <Search size={15} className="text-text-tertiary shrink-0" />
           <input
             ref={inputRef}
             className="flex-1 bg-transparent text-sm outline-none placeholder:text-text-tertiary"
@@ -477,6 +502,17 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
                       onClick={() => execute(r)}
                     >
                       <KindIcon kind={r.kind} />
+                      {r.kind === 'branch' && r.sync && (
+                        <BranchSyncIndicator
+                          tracking={r.sync.tracking}
+                          upstream={r.sync.upstream}
+                          ahead={r.sync.ahead}
+                          behind={r.sync.behind}
+                          gone={r.sync.gone}
+                          remote={r.sync.remote}
+                          size={11}
+                        />
+                      )}
                       <div className="flex-1 min-w-0">
                         <div className="truncate font-medium">{r.label}</div>
                         {r.secondary && (
@@ -484,12 +520,12 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
                         )}
                       </div>
                       {r.tertiary && (
-                        <span className="text-2xs text-text-tertiary flex-shrink-0 px-1.5 py-0.5 rounded bg-bg-tertiary">
+                        <span className="text-2xs text-text-tertiary shrink-0 px-1.5 py-0.5 rounded bg-bg-tertiary">
                           {r.tertiary}
                         </span>
                       )}
                       {row.idx === active && (
-                        <ChevronRight size={12} className="flex-shrink-0 text-text-tertiary" />
+                        <ChevronRight size={12} className="shrink-0 text-text-tertiary" />
                       )}
                     </button>
                   );

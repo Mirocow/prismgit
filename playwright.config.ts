@@ -35,6 +35,19 @@ export default defineConfig({
   reporter: [['list'], ['html', { open: 'never' }]],
   timeout: 60000,
   expect: { timeout: 10000 },
+  // E2E FIX (root cause #5): tests/e2e/accessibility.test.ts audits the
+  // RENDERER at http://localhost:5173 — the config comment claimed the dev
+  // server was running, but nothing ever started it, so every a11y test
+  // failed on navigation. Playwright's webServer starts Vite once per run
+  // (reused when a dev server is already up).
+  webServer: process.env.PRISMGIT_NO_WEBSERVER
+    ? undefined
+    : {
+        command: 'PRISMGIT_E2E_WEBSERVER=1 npx vite --port 5173 --strictPort --host 127.0.0.1',
+        url: 'http://localhost:5173',
+        reuseExistingServer: !process.env.CI,
+        timeout: 120_000,
+      },
   use: {
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',

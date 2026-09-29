@@ -165,7 +165,7 @@ export const RefBadges = memo(function RefBadges({
   const visible = max != null ? parsed.slice(0, max) : parsed;
   const hidden = parsed.length - visible.length;
   return (
-    <div className={cn('flex items-center gap-1 flex-shrink-0', className)}>
+    <div className={cn('flex items-center gap-1 shrink-0', className)}>
       {visible.map((r, i) => (
         <RefBadge key={`${r.raw}-${i}`} parsed={r} size={size} hash={hash} onChanged={onChanged} />
       ))}

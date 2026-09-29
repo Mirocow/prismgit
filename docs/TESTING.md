@@ -90,7 +90,7 @@ physically cannot land without passing the whole gate.
 
 ## Coverage
 
-Coverage is configured in `vitest.config.ts` with thresholds:
+Coverage is configured in `vitest.config.mts` with thresholds:
 
 | Metric | Threshold |
 |--------|-----------|
@@ -299,6 +299,44 @@ the fixtures are missing.
   when a UI regression sweep is needed.
 - Network-dependent operations (GitHub auth, real HTTPS remotes).
   The suites use a local bare remote as `origin` instead.
+
+## Performance & Load Testing (Enterprise QA suite)
+
+All entry points are Make targets; every tool reports a JSON artifact under
+`scripts/` for trend comparison between runs.
+
+| Target | What it does | Source spec |
+|---|---|---|
+| `make perf-repos` | Generates 4 synthetic stress-repo shapes: **flat-wide** (8k+ files in one dir, status-parse volume), **deep-tree** (60+ nesting levels), **high-commit** (5k–200k commits via `git fast-import`, + branch/tag refs), **giant-diff** (40k+ line scattered diff + 1000-file commit). Scales: `--scale ci\|full\|extreme`, or exact `--files/--commits/--depth/--lines`. | QA suite "Block 16" |
+| `make perf-cdp` | Launches the built app on the high-commit repo and measures **JSHeapUsedSize/TotalSize** (CDP `Performance.getMetrics`, `--enable-precision-memory-info`, budget 800 MB), **DOM node count sampled during a scroll storm** (virtual-scroll leak check — must stay bounded), **average FPS** (rAF counter), renderer long tasks, **live-git zombie audit** during rapid page-switch churn (process-tree attribution by walking ppid chains), forced-GC heap retention, and quit wall-time with an orphan check. | QA suite "Blocks 17/20", Phase 7.3 |
+| `make perf-readiness` | Static audit of the main process: forbids `exec`/`execSync`/`spawnSync` in `electron/` (allowlist: intentional Windows `taskkill` tree-kills), ratchets sync-FS call counts against the committed baseline (`scripts/perf-readiness-baseline.json` — only ever lower it by hand), and verifies the positive invariants: `GIT_TERMINAL_PROMPT=0` guards, bounded `maxConcurrentProcesses` pools, fetch `timeout: { block }`, watcher debounce, `--max-count` log pagination. `--strict` fails on ratchet regressions. | QA "final readiness checklist" |
+| `make perf-ui` | The UI latency profiler (`scripts/perf-profile.mjs`): real input Event-Timing latency + long tasks for typing / row clicks / filter / watcher-storm / page navigation / History scrolling on the heavy repo. | pre-existing, wired into the suite |
+| `make perf-quit` | Check-all + quit + orphan verification (`scripts/verify-checkall-quit.mjs`): main IPC ping latency during a full sidebar fetch sweep, git-spawn attribution (worker vs main), quit budget, orphaned git processes. | pre-existing, wired into the suite |
+| `make perf-all` | Everything above in one run. | — |
+
+Notes:
+
+- `perf-cdp`/`perf-ui`/`perf-quit` need a built app (`make build`) and an X
+  display; the scripts default to `DISPLAY=:99` (containers), pass your real
+  display otherwise.
+- The zombie audit samples `ps` densely during churn; on fast local repos git
+  children live ~20 ms and legitimately may not be seen — the hard gates are
+  **lingering after settle** and **orphans surviving the quit**.
+- Current baselines on the ci-scale repos: heap peak ~35 MB, DOM delta < 100
+  nodes under scroll, 60 FPS, quit < 100 ms, zero orphans (see
+  `scripts/perf-cdp-results.json`).
+- **Extreme-scale baselines** (200k-commit / 10k-file 400k-line diff / 180k-file
+  flat): heap peak 34.5 MB, DOM delta 0, 52.9–60 FPS, quit 61–545 ms, zero
+  orphans. Repo-switch into the 180k-file repo: ~4.4–5 s wall on a **2-CPU
+  container** — attributed via `scripts/probe-switch-cpu.mjs` +
+  `scripts/probe-main-git.mjs` to CPU contention (main's own CPU ≤ 21%, only
+  trivial `git stash list` / `git rev-parse HEAD` main-born spawns); the heavy
+  work stays in the git worker + renderer per the architecture. On 8+ core
+  hosts the parallelizable stages overlap, so treat these numbers as the
+  worst-case floor.
+- The 250k-file extreme flat-wide repo needs ~500k inodes (worktree + loose
+  objects) — beyond small containers (655k total). Generate a reduced shape
+  with `--type flat --files 180000` instead, or skip flat at extreme.
 
 ## Best Practices
 

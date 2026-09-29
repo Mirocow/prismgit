@@ -244,13 +244,21 @@ export function AnnotatePage() {
                           e.stopPropagation();
                           setSelectedIdx(realIdx);
                           selectCommit(entry.hash);
+                          // MENU STRUCTURE (v3.4): grouped by domain —
+                          // navigation top-level, tag creation under
+                          // “Управление тегами ▸”, clipboard under
+                          // “Копировать ▸”.
                           const items: ContextMenuItem[] = [
                             { label: t('pages.menuViewInHistory'), clickId: 'view-history' },
-                            { label: t('history.createTag'), clickId: 'create-tag' },
                             { type: 'separator' },
-                            { label: t('history.copyShortHash'), clickId: 'copy-short' },
-                            { label: t('history.copyFullHash'), clickId: 'copy-full' },
-                            { label: t('history.copyMessage'), clickId: 'copy-msg' },
+                            { label: t('ctx.group.tags'), submenu: [
+                              { label: t('history.createTag'), clickId: 'create-tag' },
+                            ] },
+                            { label: t('ctx.group.copy'), submenu: [
+                              { label: t('history.copyShortHash'), clickId: 'copy-short' },
+                              { label: t('history.copyFullHash'), clickId: 'copy-full' },
+                              { label: t('history.copyMessage'), clickId: 'copy-msg' },
+                            ] },
                           ];
                           showContextMenu(items, (action) => {
                             if (action === 'view-history') {
@@ -274,15 +282,15 @@ export function AnnotatePage() {
                         }}
                         title={t('pages.clickSelectHint')}
                       >
-                        {isHEAD && <span className="text-2xs text-accent font-bold flex-shrink-0" style={{ width: 8 }} title="Current branch (HEAD)">{'>'}</span>}
-                        {!isHEAD && <span style={{ width: 8 }} className="flex-shrink-0" />}
+                        {isHEAD && <span className="text-2xs text-accent font-bold shrink-0" style={{ width: 8 }} title={t('pages.currentBranchHead')}>{'>'}</span>}
+                        {!isHEAD && <span style={{ width: 8 }} className="shrink-0" />}
                         {fileCount !== undefined && fileCount > 0 && (
-                          <span className="text-2xs px-1 py-0 rounded bg-accent-muted text-accent flex-shrink-0" style={{ minWidth: 20, textAlign: 'center' }}>
+                          <span className="text-2xs px-1 py-0 rounded bg-accent-muted text-accent shrink-0" style={{ minWidth: 20, textAlign: 'center' }}>
                             {fileCount}
                           </span>
                         )}
                         {entry.refs.length > 0 && (
-                          <div className="flex items-center gap-1 flex-shrink-0">
+                          <div className="flex items-center gap-1 shrink-0">
                             {entry.refs.slice(0, 2).map((ref, i) => {
                               const isTag = ref.startsWith('tag:');
                               const label = ref.replace(/^tag:\s*/, '').replace('HEAD -> ', '');
@@ -294,11 +302,11 @@ export function AnnotatePage() {
                           </div>
                         )}
                         <span className={cn('flex-1 truncate text-xs', isSelected && 'font-medium')}>{entry.subject}</span>
-                        <span className="flex-shrink-0 rounded author-badge text-center"
+                        <span className="shrink-0 rounded author-badge text-center"
                           style={{ backgroundColor: color.bg, width: 24, height: 16, fontSize: 8, lineHeight: '16px' }}>
                           {initials}
                         </span>
-                        <span className="text-2xs text-text-tertiary flex-shrink-0" style={{ width: 70, textAlign: 'right' }}>
+                        <span className="text-2xs text-text-tertiary shrink-0" style={{ width: 70, textAlign: 'right' }}>
                           {formatTime(entry.author.date)}
                         </span>
                       </div>
@@ -312,7 +320,7 @@ export function AnnotatePage() {
 
         {/* Detail panel */}
         <ResizableSplitter direction="horizontal" onResize={(d) => handleDetailResize(-d)} />
-        <div className="bg-bg-secondary overflow-y-auto flex-shrink-0" style={{ width: detailWidth }}>
+        <div className="bg-bg-secondary overflow-y-auto shrink-0" style={{ width: detailWidth }}>
           {selected ? (
             <div className="p-3">
               <div className="text-sm font-medium mb-2">{selected.subject}</div>
@@ -323,7 +331,7 @@ export function AnnotatePage() {
                 </button>
               </div>
               <div className="flex items-center gap-2 mb-3">
-                <span className="flex-shrink-0 rounded author-badge text-center"
+                <span className="shrink-0 rounded author-badge text-center"
                   style={{ backgroundColor: getAuthorColor(selected.author.name).bg, width: 28, height: 18, fontSize: 9, lineHeight: '18px' }}>
                   {getInitials(selected.author.name)}
                 </span>
@@ -368,12 +376,17 @@ export function AnnotatePage() {
                         onContextMenu={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
+                          // MENU STRUCTURE (v3.4): grouped — navigation in
+                          // “Просмотр ▸”, clipboard in “Копировать ▸”.
                           const items: ContextMenuItem[] = [
-                            { label: t('pages.menuViewFileHistory'), clickId: 'file-history' },
-                            { label: t('pages.menuBlameThisFile'), clickId: 'blame' },
-                            { type: 'separator' },
-                            { label: t('pages.menuCopyPath'), clickId: 'copy-path' },
-                            { label: t('pages.menuCopyFullPath'), clickId: 'copy-full-path' },
+                            { label: t('ctx.group.view'), submenu: [
+                              { label: t('pages.menuViewFileHistory'), clickId: 'file-history' },
+                              { label: t('pages.menuBlameThisFile'), clickId: 'blame' },
+                            ] },
+                            { label: t('ctx.group.copy'), submenu: [
+                              { label: t('pages.menuCopyPath'), clickId: 'copy-path' },
+                              { label: t('pages.menuCopyFullPath'), clickId: 'copy-full-path' },
+                            ] },
                           ];
                           showContextMenu(items, (action) => {
                             if (action === 'file-history') {
@@ -401,7 +414,7 @@ export function AnnotatePage() {
                         <span className={cn('flex-1 truncate font-mono text-text-secondary group-hover:text-text-primary',
                           isHighlighted && 'text-accent font-medium')}>{f.path}</span>
                         {!f.binary && (f.additions > 0 || f.deletions > 0) && (
-                          <span className="flex-shrink-0">
+                          <span className="shrink-0">
                             <span className="text-status-added">+{f.additions}</span>
                             <span className="text-status-deleted ml-1">-{f.deletions}</span>
                           </span>

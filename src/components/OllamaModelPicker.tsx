@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useMemo } from 'react';
 import { RefreshCw, Check, AlertCircle, Loader, Search, Cpu, HardDrive, Zap } from './icons';
 import { api } from '../lib/api';
 import { cn } from '../lib/utils';
+import { useI18n } from '../lib/i18n';
 
 /**
  * Ollama model picker — LM Studio-style list with search + metadata.
@@ -50,6 +51,7 @@ export function OllamaModelPicker({
   selectedModel: string;
   onSelect: (model: string) => void;
 }) {
+  const { t } = useI18n();
   const [models, setModels] = useState<OllamaModel[]>([]);
   const [loadedModels, setLoadedModels] = useState<LoadedModel[]>([]);
   const [loading, setLoading] = useState(false);
@@ -173,7 +175,7 @@ export function OllamaModelPicker({
           <input
             type="text"
             className="w-full text-xs pl-7 pr-2 py-1.5 bg-bg-tertiary border border-border-default rounded outline-none focus:border-accent"
-            placeholder="Search models..."
+            placeholder={t('settings.aiGridSearchModels')}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -202,7 +204,7 @@ export function OllamaModelPicker({
                   )}
                 >
                   {/* Selected / warming indicator */}
-                  <span className="w-4 flex-shrink-0 flex items-center justify-center">
+                  <span className="w-4 shrink-0 flex items-center justify-center">
                     {isWarming ? (
                       <Loader size={11} className="animate-spin text-accent" />
                     ) : isSelected ? (
@@ -215,7 +217,7 @@ export function OllamaModelPicker({
                     <div className="flex items-center gap-1.5">
                       <span className="text-xs font-medium text-text-primary truncate">{m.name}</span>
                       {isLoaded && (
-                        <span className="flex items-center gap-0.5 text-3xs px-1 py-0 rounded bg-status-added/15 text-status-added" title="Model is currently loaded in memory (warm) — responds instantly">
+                        <span className="flex items-center gap-0.5 text-3xs px-1 py-0 rounded bg-status-added/15 text-status-added" title={t('settings.aiModelWarm')}>
                           <Zap size={9} />
                           loaded
                         </span>
@@ -224,24 +226,24 @@ export function OllamaModelPicker({
                     {/* Metadata row */}
                     <div className="flex items-center gap-2 text-2xs text-text-tertiary mt-0.5">
                       {paramCount !== '—' && (
-                        <span className="flex items-center gap-0.5" title="Parameter count">
+                        <span className="flex items-center gap-0.5" title={t('settings.aiParamCount')}>
                           <Cpu size={9} />
                           {paramCount}
                         </span>
                       )}
                       {sizeGb && (
-                        <span className="flex items-center gap-0.5" title="File size on disk">
+                        <span className="flex items-center gap-0.5" title={t('settings.aiFileSize')}>
                           <HardDrive size={9} />
                           {sizeGb}
                         </span>
                       )}
                       {m.quantization && (
-                        <span className="px-1 py-0 rounded bg-bg-tertiary text-text-tertiary" title="Quantization">
+                        <span className="px-1 py-0 rounded bg-bg-tertiary text-text-tertiary" title={t('settings.aiQuantization')}>
                           {m.quantization}
                         </span>
                       )}
                       {m.family && (
-                        <span className="px-1 py-0 rounded bg-bg-tertiary text-text-tertiary" title="Model family">
+                        <span className="px-1 py-0 rounded bg-bg-tertiary text-text-tertiary" title={t('settings.aiModelFamily')}>
                           {m.family}
                         </span>
                       )}
@@ -265,7 +267,7 @@ export function OllamaModelPicker({
       {/* Error message */}
       {error && (
         <div className="mt-2 flex items-start gap-1.5 text-2xs text-status-error">
-          <AlertCircle size={11} className="mt-0.5 flex-shrink-0" />
+          <AlertCircle size={11} className="mt-0.5 shrink-0" />
           <span>{error}</span>
         </div>
       )}

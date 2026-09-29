@@ -31,6 +31,10 @@ export const en: Record<string, string> = {
   'branches.checkoutRemoteRowHint': 'Check out as new local branch  (or double-click the row)',
   'branches.checkoutRemoteTitle': "Checkout remote branch '{name}'",
   'branches.checkoutRemoteMessage': "This creates a local branch '{local}' tracking '{remote}' and switches to it.",
+  // 2.1 — checkout that changes .gitmodules
+  'branches.submoduleWarnTitle': 'Submodule configuration will change',
+  "branches.submoduleWarnMessage": "Checking out '{branch}' changes .gitmodules — submodule URLs/paths differ. Continue?",
+
   'branches.deletedRemote': "Deleted remote '{name}'",
   'branches.renamedTo': "Branch renamed to '{name}'",
   'branches.remoteRenamedTo': "Remote renamed to '{name}'",
@@ -95,6 +99,7 @@ export const en: Record<string, string> = {
   'branches.copyUrl': 'Copy URL',
   // Checkout / rebase / merge handlers
   'branches.checkedOutTracking': "Checked out '{local}' (tracking {remote})",
+  'branches.switchedToLocalNote': "Local branch '{local}' already exists — switched to it instead of {remote}.",
   'branches.rebaseOntoTitle': "Rebase onto '{name}'",
   'branches.rebaseOntoMessage': "This rebases your current branch onto '{name}'.",
   'branches.rebaseFailed': 'Rebase failed',
@@ -151,9 +156,16 @@ export const en: Record<string, string> = {
   'branches.aiSuggestNoProvider': 'Configure an AI provider in Settings → AI Commit Messages to use AI Suggest.',
   'branches.aiSuggestFailed': 'AI Suggest failed',
   'branches.localBranches': 'Local Branches',
-  'branches.showingFirst200': 'Showing first 200 of {count} · scroll for more',
+  'branches.showAll': 'Show all {count}',
+  'branches.singleBranchClone': 'Single-branch clone: {name} has more branches than are fetched locally',
+  'branches.fetchAllBranches': 'Fetch all branches',
+  'branches.fetchAllBranchesDone': 'Fetched all branches of {name}',
   'branches.noBranchesFetched': 'No branches fetched yet — hover the header and press',
   'branches.noRemotesConfigured': 'No remotes configured.',
+  'branches.fetchedAllRemotes': 'Fetched all remotes (with prune)',
+  'branches.fetchAllRemotesFailed': 'Fetch all remotes failed',
+  'branches.fetchAllRemotesTooltip': 'Fetch all remotes (git fetch --all --prune)',
+  'branches.addRemoteTooltip': 'Add remote…',
   'branches.addRemoteLink': 'Add remote...',
   'branches.tip': 'Tip: Drag a branch onto another to merge · Right-click for more actions',
   // New branch dialog
@@ -171,7 +183,6 @@ export const en: Record<string, string> = {
   'branches.propertiesMenu': 'Properties...',
   'branches.configureRemote': 'Configure remote...',
   'branches.addNewRemote': 'Add new remote...',
-  'branches.manageRemotes': 'Manage all remotes (Remotes page)',
   'branches.addBranchMenu': 'Add Branch...',
   // Compare branches dialog
   'branches.compareTitle': 'Compare Branches',
@@ -209,7 +220,10 @@ export const en: Record<string, string> = {
   'branches.remoteRefWillBe': 'Remote ref will be',
   'branches.localKeepsName': '— the local branch keeps its name.',
   'branches.setUpstreamCheckbox': 'Set upstream tracking (-u)',
-  'branches.forcePushCheckbox': 'Force push (--force-with-lease)',
+  'branches.forcePushCheckbox': 'Force push',
+  'branches.forcePushMenu': 'Force Push (--force)',
+  'branches.forcePushConfirmTitle': 'Force push {name}',
+  'branches.forcePushConfirmMessage': 'git push --force will overwrite \'{remote}/{name}\' with your local history. Commits on the remote that you have not fetched will be lost. Protected branches are rejected by policy. Continue?',
   // FindObjectDialog
   'branches.findSearchFailed': 'Search failed',
   'branches.findPlaceholder': 'Find branch, tag, or ref...',
@@ -220,6 +234,31 @@ export const en: Record<string, string> = {
   'branches.findSelect': '↵ select',
   'branches.findClose': 'esc close',
   'branches.findResultsCount': '{count} results',
+
+  // ResetDialog mode labels (displayed alongside the git flag, e.g. --soft)
+  'branches.resetModeSoft': 'Soft',
+  'branches.resetModeMixed': 'Mixed',
+  'branches.resetModeHard': 'Hard',
+  'branches.resetModeKeep': 'Keep',
+
+  'branches.notPushed': 'Not pushed',
+  'branches.localOnlyHint': 'Local-only branch — not pushed to any remote. Right-click → Push... to publish with -u.',
+  'branches.unpushed': 'unpushed',
+  'branches.aheadHint': '{n} commit(s) ahead of upstream — Push to publish them.',
+  'branches.synced': 'synced',
+  'branches.syncedHint': 'Up to date with upstream',
+
+  // ── v3.4 localization completion ──
+  'branches.deleteConfirmTitle': 'Delete branch \'{name}\'',
+  'branches.deleteConfirmMessage': 'This removes the branch pointer. Commits reachable from other branches or HEAD are not affected.',
+  'branches.deleteRemoteConfirmTitle': 'Delete remote branch \'{name}\'',
+  'branches.deleteRemoteConfirmMessage': 'The branch is deleted on the remote. Commits stay in your local repository.',
+  'branches.deleteTagTitle': 'Delete tag \'{name}\'',
+  'branches.deleteTagMessage': 'This permanently removes the tag reference. The tagged commit is not affected.',
+  'branches.pushTagTitle': 'Push tag \'{name}\'',
+  'branches.pushTagMessage': 'Push the tag to its remote?',
+  'branches.pushBlockedHint': 'Blocked while a merge/rebase/cherry-pick is in progress',
+  'branches.upstreamGroup': 'Upstream',
 };
 
 export const ru: Record<string, string> = {
@@ -248,6 +287,10 @@ export const ru: Record<string, string> = {
   'branches.checkoutRemoteRowHint': 'Создать локальную ветку с отслеживанием (или двойной клик по строке)',
   'branches.checkoutRemoteTitle': "Переключиться на удалённую ветку '{name}'",
   'branches.checkoutRemoteMessage': "Будет создана локальная ветка '{local}', отслеживающая '{remote}', и выполнено переключение на неё.",
+  // 2.1 — checkout, меняющий .gitmodules
+  'branches.submoduleWarnTitle': 'Конфигурация подмодулей изменится',
+  "branches.submoduleWarnMessage": "Переключение на '{branch}' изменит .gitmodules — отличаются URL/пути подмодулей. Продолжить?",
+
   'branches.deletedRemote': "Удалена удалённая ветка '{name}'",
   'branches.renamedTo': "Ветка переименована в '{name}'",
   'branches.remoteRenamedTo': "Репозиторий переименован в '{name}'",
@@ -312,6 +355,7 @@ export const ru: Record<string, string> = {
   'branches.copyUrl': 'Копировать URL',
   // Checkout / rebase / merge handlers
   'branches.checkedOutTracking': "Переключено на '{local}' (отслеживает {remote})",
+  'branches.switchedToLocalNote': "Локальная ветка '{local}' уже существует — выполнено переключение на неё вместо {remote}.",
   'branches.rebaseOntoTitle': "Перебазировать на '{name}'",
   'branches.rebaseOntoMessage': "Текущая ветка будет перебазирована на '{name}'.",
   'branches.rebaseFailed': 'Не удалось выполнить rebase',
@@ -356,7 +400,7 @@ export const ru: Record<string, string> = {
   'branches.worktreeCreateFailed': 'Не удалось создать worktree',
   'branches.clearSelectionTitle': 'Сбросить множественное выделение веток',
   // Page chrome
-  'branches.countSummary': '{local} локальных · {remote} удалённых · {tags} тегов · {stashes} stash',
+  'branches.countSummary': '{local|локальная|локальные|локальных} · {remote|удалённая|удалённые|удалённых} · {tags|тег|тега|тегов} · {stashes} stash',
   'branches.filterPlaceholder': 'Фильтр...',
   'branches.newButton': 'Новая',
   'branches.nothingMatches': 'Ничего не найдено по фильтру',
@@ -368,9 +412,16 @@ export const ru: Record<string, string> = {
   'branches.aiSuggestNoProvider': 'Настройте AI-провайдера в Настройки → AI сообщения коммитов, чтобы использовать AI Suggest.',
   'branches.aiSuggestFailed': 'AI Suggest не удалось',
   'branches.localBranches': 'Локальные ветки',
-  'branches.showingFirst200': 'Показаны первые 200 из {count} · прокрутите для остальных',
+  'branches.showAll': 'Показать все ({count})',
+  'branches.singleBranchClone': 'Клон в режиме single-branch: у {name} больше веток, чем получено локально',
+  'branches.fetchAllBranches': 'Получить все ветки',
+  'branches.fetchAllBranchesDone': 'Получены все ветки {name}',
   'branches.noBranchesFetched': 'Ветки ещё не забраны — наведите на заголовок и нажмите',
   'branches.noRemotesConfigured': 'Репозитории не настроены.',
+  'branches.fetchedAllRemotes': 'Изменения получены со всех remote (с очисткой)',
+  'branches.fetchAllRemotesFailed': 'Не удалось получить изменения со всех remote',
+  'branches.fetchAllRemotesTooltip': 'Получить изменения со всех remote (git fetch --all --prune)',
+  'branches.addRemoteTooltip': 'Добавить remote…',
   'branches.addRemoteLink': 'Добавить репозиторий...',
   'branches.tip': 'Совет: перетащите ветку на другую для слияния · Правый клик — другие действия',
   // New branch dialog
@@ -388,7 +439,6 @@ export const ru: Record<string, string> = {
   'branches.propertiesMenu': 'Свойства...',
   'branches.configureRemote': 'Настроить репозиторий...',
   'branches.addNewRemote': 'Добавить новый репозиторий...',
-  'branches.manageRemotes': 'Управление всеми репозиториями (страница Remotes)',
   'branches.addBranchMenu': 'Добавить ветку...',
   // Compare branches dialog
   'branches.compareTitle': 'Сравнение веток',
@@ -426,7 +476,10 @@ export const ru: Record<string, string> = {
   'branches.remoteRefWillBe': 'Ссылка на сервере будет',
   'branches.localKeepsName': '— локальная ветка сохраняет имя.',
   'branches.setUpstreamCheckbox': 'Установить отслеживание (-u)',
-  'branches.forcePushCheckbox': 'Принудительная отправка (--force-with-lease)',
+  'branches.forcePushCheckbox': 'Принудительная отправка',
+  'branches.forcePushMenu': 'Принудительный push (--force)',
+  'branches.forcePushConfirmTitle': 'Принудительный push {name}',
+  'branches.forcePushConfirmMessage': 'git push --force перезапишет \'{remote}/{name}\' локальной историей. Неполученные коммиты на сервере будут потеряны. Защищённые ветки отклоняются политикой. Продолжить?',
   // FindObjectDialog
   'branches.findSearchFailed': 'Поиск не удался',
   'branches.findPlaceholder': 'Найти ветку, тег или ссылку...',
@@ -437,6 +490,30 @@ export const ru: Record<string, string> = {
   'branches.findSelect': '↵ выбрать',
   'branches.findClose': 'esc закрыть',
   'branches.findResultsCount': '{count} результатов',
+
+  'branches.resetModeSoft': 'Мягкий',
+  'branches.resetModeMixed': 'Смешанный',
+  'branches.resetModeHard': 'Жёсткий',
+  'branches.resetModeKeep': 'Сохранить',
+
+  'branches.notPushed': 'Не запушена',
+  'branches.localOnlyHint': 'Локальная ветка — не запушена на remote. ПКМ → Push... для публикации с -u.',
+  'branches.unpushed': 'не запушено',
+  'branches.aheadHint': '{n} коммит(ов) впереди upstream — Push для публикации.',
+  'branches.synced': 'синхр.',
+  'branches.syncedHint': 'Синхронизирована с upstream',
+
+  // ── v3.4 localization completion ──
+  'branches.deleteConfirmTitle': 'Удалить ветку \'{name}\'',
+  'branches.deleteConfirmMessage': 'Указатель ветки будет удалён. Коммиты, достижимые из других веток или HEAD, не затрагиваются.',
+  'branches.deleteRemoteConfirmTitle': 'Удалить удалённую ветку \'{name}\'',
+  'branches.deleteRemoteConfirmMessage': 'Ветка будет удалена на remote. Коммиты останутся в локальном репозитории.',
+  'branches.deleteTagTitle': 'Удалить тег \'{name}\'',
+  'branches.deleteTagMessage': 'Ссылка на тег будет удалена навсегда. Помеченный коммит не затрагивается.',
+  'branches.pushTagTitle': 'Отправить тег \'{name}\'',
+  'branches.pushTagMessage': 'Отправить тег на remote?',
+  'branches.pushBlockedHint': 'Недоступно, пока идёт merge/rebase/cherry-pick',
+  'branches.upstreamGroup': 'Upstream (отслеживание)',
 };
 
 export const zh: Record<string, string> = {
@@ -465,6 +542,10 @@ export const zh: Record<string, string> = {
   'branches.checkoutRemoteRowHint': '检出为新的本地分支（或双击该行）',
   'branches.checkoutRemoteTitle': "检出远程分支 '{name}'",
   'branches.checkoutRemoteMessage': "将创建跟踪 '{remote}' 的本地分支 '{local}' 并切换到它。",
+  // 2.1 — checkout 将改变 .gitmodules
+  'branches.submoduleWarnTitle': '子模块配置将发生变化',
+  "branches.submoduleWarnMessage": "检出 '{branch}' 会更改 .gitmodules——子模块 URL/路径不同。是否继续？",
+
   'branches.deletedRemote': "已删除远程分支 '{name}'",
   'branches.renamedTo': "分支已重命名为 '{name}'",
   'branches.remoteRenamedTo': "远程已重命名为 '{name}'",
@@ -529,6 +610,7 @@ export const zh: Record<string, string> = {
   'branches.copyUrl': '复制 URL',
   // Checkout / rebase / merge handlers
   'branches.checkedOutTracking': "已切换到 '{local}'（跟踪 {remote}）",
+  'branches.switchedToLocalNote': "本地分支 '{local}' 已存在——已切换到该分支而非 {remote}。",
   'branches.rebaseOntoTitle': "变基到 '{name}'",
   'branches.rebaseOntoMessage': "当前分支将变基到 '{name}'。",
   'branches.rebaseFailed': '变基失败',
@@ -585,9 +667,16 @@ export const zh: Record<string, string> = {
   'branches.aiSuggestNoProvider': '请在 设置 → AI 提交信息 中配置 AI 提供商以使用 AI 建议。',
   'branches.aiSuggestFailed': 'AI 建议失败',
   'branches.localBranches': '本地分支',
-  'branches.showingFirst200': '显示前 200 个，共 {count} 个 · 滚动查看更多',
+  'branches.showAll': '显示全部（共 {count} 个）',
+  'branches.singleBranchClone': '单分支克隆：{name} 的分支并未全部拉取到本地',
+  'branches.fetchAllBranches': '拉取所有分支',
+  'branches.fetchAllBranchesDone': '已拉取 {name} 的所有分支',
   'branches.noBranchesFetched': '尚未抓取分支 — 悬停在标题上并点击',
   'branches.noRemotesConfigured': '未配置远程。',
+  'branches.fetchedAllRemotes': '已拉取所有远程（含清理）',
+  'branches.fetchAllRemotesFailed': '拉取所有远程失败',
+  'branches.fetchAllRemotesTooltip': '从所有远程拉取（git fetch --all --prune）',
+  'branches.addRemoteTooltip': '添加远程…',
   'branches.addRemoteLink': '添加远程...',
   'branches.tip': '提示：将一个分支拖到另一个上即可合并 · 右键查看更多操作',
   // New branch dialog
@@ -605,7 +694,6 @@ export const zh: Record<string, string> = {
   'branches.propertiesMenu': '属性...',
   'branches.configureRemote': '配置远程...',
   'branches.addNewRemote': '添加新远程...',
-  'branches.manageRemotes': '管理所有远程（Remotes 页面）',
   'branches.addBranchMenu': '新建分支...',
   // Compare branches dialog
   'branches.compareTitle': '比较分支',
@@ -643,7 +731,10 @@ export const zh: Record<string, string> = {
   'branches.remoteRefWillBe': '远程引用将是',
   'branches.localKeepsName': '— 本地分支保留原名。',
   'branches.setUpstreamCheckbox': '设置上游跟踪 (-u)',
-  'branches.forcePushCheckbox': '强制推送 (--force-with-lease)',
+  'branches.forcePushCheckbox': '强制推送',
+  'branches.forcePushMenu': '强制推送 (--force)',
+  'branches.forcePushConfirmTitle': '强制推送 {name}',
+  'branches.forcePushConfirmMessage': 'git push --force 将用本地历史覆盖 \'{remote}/{name}\'，远程上未拉取的提交将丢失。受保护分支会被策略拒绝。是否继续？',
   // FindObjectDialog
   'branches.findSearchFailed': '搜索失败',
   'branches.findPlaceholder': '查找分支、标签或引用...',
@@ -654,6 +745,30 @@ export const zh: Record<string, string> = {
   'branches.findSelect': '↵ 选择',
   'branches.findClose': 'esc 关闭',
   'branches.findResultsCount': '{count} 个结果',
+
+  'branches.resetModeSoft': '软',
+  'branches.resetModeMixed': '混合',
+  'branches.resetModeHard': '硬',
+  'branches.resetModeKeep': '保留',
+
+  'branches.notPushed': '未推送',
+  'branches.localOnlyHint': '仅本地分支 — 未推送到任何远程。右键 → Push... 使用 -u 发布。',
+  'branches.unpushed': '未推送',
+  'branches.aheadHint': '领先 upstream {n} 个提交 — Push 以发布。',
+  'branches.synced': '已同步',
+  'branches.syncedHint': '与 upstream 同步',
+
+  // ── v3.4 localization completion ──
+  'branches.deleteConfirmTitle': '删除分支 \'{name}\'',
+  'branches.deleteConfirmMessage': '这将移除分支指针。可从其他分支或 HEAD 访问的提交不受影响。',
+  'branches.deleteRemoteConfirmTitle': '删除远程分支 \'{name}\'',
+  'branches.deleteRemoteConfirmMessage': '该分支将在远程删除。提交仍保留在本地仓库中。',
+  'branches.deleteTagTitle': '删除标签 \'{name}\'',
+  'branches.deleteTagMessage': '这将永久移除标签引用。被标记的提交不受影响。',
+  'branches.pushTagTitle': '推送标签 \'{name}\'',
+  'branches.pushTagMessage': '将该标签推送到远程？',
+  'branches.pushBlockedHint': '已有 merge/rebase/cherry-pick 进行中，暂被阻止',
+  'branches.upstreamGroup': '上游分支',
 };
 
 export const de: Record<string, string> = {
@@ -682,6 +797,10 @@ export const de: Record<string, string> = {
   'branches.checkoutRemoteRowHint': 'Als neuen lokalen Branch auschecken (oder Zeile doppelklicken)',
   'branches.checkoutRemoteTitle': "Remote-Branch '{name}' auschecken",
   'branches.checkoutRemoteMessage': "Erstellt einen lokalen Branch '{local}', der '{remote}' trackt, und wechselt zu ihm.",
+  // 2.1 — Checkout, der .gitmodules ändert
+  'branches.submoduleWarnTitle': 'Submodul-Konfiguration wird sich ändern',
+  "branches.submoduleWarnMessage": "Das Auschecken von '{branch}' ändert .gitmodules — Submodul-URLs/Pfade weichen ab. Fortfahren?",
+
   'branches.deletedRemote': "Remote-Branch '{name}' gelöscht",
   'branches.renamedTo': "Branch umbenannt in '{name}'",
   'branches.remoteRenamedTo': "Remote umbenannt in '{name}'",
@@ -746,6 +865,7 @@ export const de: Record<string, string> = {
   'branches.copyUrl': 'URL kopieren',
   // Checkout / rebase / merge handlers
   'branches.checkedOutTracking': "'{local}' ausgecheckt (trackt {remote})",
+  'branches.switchedToLocalNote': "Lokaler Branch '{local}' existiert bereits — zu ihm gewechselt statt zu {remote}.",
   'branches.rebaseOntoTitle': "Auf '{name}' rebasen",
   'branches.rebaseOntoMessage': "Der aktuelle Branch wird auf '{name}' rebased.",
   'branches.rebaseFailed': 'Rebase fehlgeschlagen',
@@ -802,9 +922,16 @@ export const de: Record<string, string> = {
   'branches.aiSuggestNoProvider': 'Konfigurieren Sie einen AI-Provider unter Einstellungen → KI-Commit-Nachrichten, um AI Vorschlagen zu nutzen.',
   'branches.aiSuggestFailed': 'AI Vorschlagen fehlgeschlagen',
   'branches.localBranches': 'Lokale Branches',
-  'branches.showingFirst200': 'Erste 200 von {count} · weiter scrollen für mehr',
+  'branches.showAll': 'Alle {count} anzeigen',
+  'branches.singleBranchClone': 'Single-Branch-Klon: {name} hat mehr Branches als lokal geholt wurden',
+  'branches.fetchAllBranches': 'Alle Branches holen',
+  'branches.fetchAllBranchesDone': 'Alle Branches von {name} geholt',
   'branches.noBranchesFetched': 'Noch keine Branches geholt — mit der Maus über den Titel fahren und',
   'branches.noRemotesConfigured': 'Keine Remotes konfiguriert.',
+  'branches.fetchedAllRemotes': 'Alle Remotes abgerufen (mit Prune)',
+  'branches.fetchAllRemotesFailed': 'Abruf aller Remotes fehlgeschlagen',
+  'branches.fetchAllRemotesTooltip': 'Alle Remotes abrufen (git fetch --all --prune)',
+  'branches.addRemoteTooltip': 'Remote hinzufügen…',
   'branches.addRemoteLink': 'Remote hinzufügen...',
   'branches.tip': 'Tipp: Branch auf einen anderen ziehen, um zu mergen · Rechtsklick für mehr Aktionen',
   // New branch dialog
@@ -822,7 +949,6 @@ export const de: Record<string, string> = {
   'branches.propertiesMenu': 'Eigenschaften...',
   'branches.configureRemote': 'Remote konfigurieren...',
   'branches.addNewRemote': 'Neuen Remote hinzufügen...',
-  'branches.manageRemotes': 'Alle Remotes verwalten (Remotes-Seite)',
   'branches.addBranchMenu': 'Branch hinzufügen...',
   // Compare branches dialog
   'branches.compareTitle': 'Branches vergleichen',
@@ -860,7 +986,10 @@ export const de: Record<string, string> = {
   'branches.remoteRefWillBe': 'Remote-Referenz wird',
   'branches.localKeepsName': '— der lokale Branch behält seinen Namen.',
   'branches.setUpstreamCheckbox': 'Upstream-Tracking setzen (-u)',
-  'branches.forcePushCheckbox': 'Push erzwingen (--force-with-lease)',
+  'branches.forcePushCheckbox': 'Push erzwingen',
+  'branches.forcePushMenu': 'Force-Push (--force)',
+  'branches.forcePushConfirmTitle': 'Force-Push {name}',
+  'branches.forcePushConfirmMessage': 'git push --force überschreibt \'{remote}/{name}\' mit der lokalen History. Nicht abgerufene Commits auf dem Remote gehen verloren. Geschützte Branches werden per Richtlinie abgelehnt. Fortfahren?',
   // FindObjectDialog
   'branches.findSearchFailed': 'Suche fehlgeschlagen',
   'branches.findPlaceholder': 'Branch, Tag oder Referenz finden...',
@@ -871,4 +1000,28 @@ export const de: Record<string, string> = {
   'branches.findSelect': '↵ auswählen',
   'branches.findClose': 'esc schließen',
   'branches.findResultsCount': '{count} Ergebnisse',
+
+  'branches.resetModeSoft': 'Soft',
+  'branches.resetModeMixed': 'Mixed',
+  'branches.resetModeHard': 'Hard',
+  'branches.resetModeKeep': 'Keep',
+
+  'branches.notPushed': 'Nicht gepusht',
+  'branches.localOnlyHint': 'Lokaler Branch — nicht zu Remote gepusht. Rechtsklick → Push... zum Veröffentlichen mit -u.',
+  'branches.unpushed': 'ungepusht',
+  'branches.aheadHint': '{n} Commit(s) vor Upstream — Push zum Veröffentlichen.',
+  'branches.synced': 'synchr.',
+  'branches.syncedHint': 'Mit Upstream synchronisiert',
+
+  // ── v3.4 localization completion ──
+  'branches.deleteConfirmTitle': 'Branch \'{name}\' löschen',
+  'branches.deleteConfirmMessage': 'Der Branch-Zeiger wird entfernt. Commits, die von anderen Branches oder HEAD erreichbar sind, bleiben unberührt.',
+  'branches.deleteRemoteConfirmTitle': 'Remote-Branch \'{name}\' löschen',
+  'branches.deleteRemoteConfirmMessage': 'Der Branch wird im Remote gelöscht. Commits bleiben im lokalen Repository.',
+  'branches.deleteTagTitle': 'Tag \'{name}\' löschen',
+  'branches.deleteTagMessage': 'Die Tag-Referenz wird dauerhaft entfernt. Der getaggte Commit bleibt unberührt.',
+  'branches.pushTagTitle': 'Tag \'{name}\' pushen',
+  'branches.pushTagMessage': 'Den Tag zum Remote pushen?',
+  'branches.pushBlockedHint': 'Blockiert, solange ein Merge/Rebase/Cherry-pick läuft',
+  'branches.upstreamGroup': 'Upstream',
 };

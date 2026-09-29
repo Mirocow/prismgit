@@ -5,6 +5,263 @@ All notable changes to PrismGit are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.12] - 2026-09-29
+
+### Fixed — OpenRouter free models: readable errors + an automatic way around 429 («из бесплатных доступна только openrouter/free»)
+- The raw `Error: Error: OpenAI chat error 429: {"error":{…}}` wall is gone: every LLM call site (assistant chat, AI chat page, commit messages batch + streaming, the main-process IPC path) now throws a structured `LLMApiError`, and the UI renders a localized title + the provider's actual message (OpenRouter hides it in `error.metadata.raw` — «google/gemma-…:free is temporarily rate-limited upstream») + the remedy, instead of stringified JSON with a double "Error: " prefix
+- **429 on a `:free` model now retries automatically through `openrouter/free`** — the meta-router that picks any available free model across all providers, which is exactly why it was «the only one that worked». One retry per request, announced by an info toast (the switch is visible, never silent); a paid model 429ing (your own key quota) still surfaces as a readable error — no silent quality downgrade
+- The OpenRouter preset's default model `meta-llama/llama-3.1-8b-instruct:free` (long gone upstream) is now `openrouter/free`, and the description explains when specific `:free` models make sense (they still work — and are auto-retried via the router on 429)
+- The provider editor's model dropdown now marks FREE models (OpenRouter pricing 0 / `:free` / the router itself) with a green badge and gains a «Free only» filter (on by default for OpenRouter) — the fetchable list is hundreds of mostly-paid entries
+- Errors also cross the Electron IPC boundary in one piece: the message carries a parseable `[kind status]` marker, so main-process failures get the same friendly rendering
+
+## [2.3.11] - 2026-09-29
+
+### Fixed — the AI assistant worked nowhere out of the box («AI assistant в комитах и не только не работает»)
+- Diagnosed by walking EVERY AI surface against a mock LLM server (scripts/diagnose-ai.mjs): the pipeline itself was fine (commit messages, assistant panel, chat page all answered) — what was broken was the GATING: `aiCommitMessagesEnabled` defaults to OFF, and it disabled not only the Changes «AI» button but also the toolbar Sparkles (the whole assistant chat, which has nothing to do with commit messages). Every AI control looked dead with no visible way in
+- The Changes «AI» button and the Merge-panel AI action are now always clickable: no provider → an actionable toast; provider configured → the click itself turns the feature on (auto-suggest + the `@ai` placeholder follow) instead of bouncing the user to Settings
+- The toolbar Sparkles opens the assistant unconditionally — the panel handles the empty state itself
+- Adding the FIRST provider (Settings → AI → «Add provider») now auto-enables the flag — previously the buttons stayed dead even after setup («настроил провайдера, а кнопка всё равно не работает»)
+- New visible no-provider banners in the assistant panel and the AI chat page — «ИИ-провайдер не настроен» + a «Настроить» button that deep-links straight to Settings → AI (`#/settings?tab=ai` now selects the tab); before, the only signal was a transient toast AFTER typing a message
+- Everything live-verified end-to-end (scripts/verify-v2311ai.mjs, 16 checks): out-of-the-box guidance, the full mock-LLM pipeline, and the complete setup loop — add a provider through the real dialog → the flag flips → the commit message generates from the just-added provider
+
+## [2.3.10] - 2026-09-29
+
+### Fixed — the theme system: what Settings promises is what you see («темы там просто ад»)
+- The audit the user asked for («предлагаю самому построить пару тем и посмотреть что реально изменяется»): two extreme signal-color custom themes + six built-ins were pushed through the live app, screenshot-diffed against the baseline — every theme-blind region is now fixed
+- **light-dim-sidebar was silently broken since the Tailwind v4 migration**: the dark-sidebar override block was deleted and its orphaned selector glued itself to the `simple-light` block — the "VS Code dark sidebar" theme rendered a WHITE sidebar (0.4% pixel diff vs plain light) and simple-light tokens leaked into it. The dark block is restored (verified live: aside bg #1e1e1e, light text, 16% diff)
+- **Built-in themes had partial token sets**: hover/active/focus and status synonyms fell through to the Ayu base — a Material indigo button hovered to AYU BLUE, Discord showed Ayu cyan info / gold warnings. All five `[data-theme]` blocks now define the full 59-token canonical set (pinned by tests)
+- **Theme-blind UI regions**: status badges (hardcoded Ayu rgba — identical in all 8 probe themes), 3-way conflict washes (fixed VS Code palette), ghost alignment rows, .btn-primary's blue shadow halo and .btn-danger's fixed hover now derive from the theme tokens via `color-mix()`; the "Active" chip on accent uses `--text-inverse` instead of white
+- **Syntax highlighting**: `.text-function`/`.tok-function` referenced the NON-EXISTENT `--accent-blue` variable — function names rendered uncolored in every theme; now `--accent-light-blue` with a fallback
+- **Custom themes**: `--border-subtle` was inverted for dark themes (mixed toward white — brighter than the default border), and nothing derived focus/info/link/tag/graph/scrollbar/diff-line/word tints — the compiler now derives the full family from the 13 editor inputs, so a custom theme colors code syntax too (status colors → the accent-green/yellow/red/purple/cyan family)
+
+## [2.3.8] - 2026-09-29
+
+### Added — a layout toggle for the BOTTOM panel (Command Log), the third button of the VS Code hero row
+- The user asked for the missing one: «кнопку для нижнего сайдбар?» — the VS Code reference row is sidebar-left / **layout-panel** / sidebar-right, and the middle button had no counterpart in PrismGit: the bottom Command Log panel was only reachable via the Terminal button / Ctrl+Shift+U / the StatusBar chip — its visibility was an App-level `useState` the toolbar could not touch
+- The flag moved into `uiLayoutStore` (the same migration v2.3.4 did for the sidebar rail and the History detail pane) with localStorage persistence, so the panel's open state now survives restarts; every legacy entry point (Terminal button, native menu Ctrl+Shift+U, StatusBar chip, panel ✕, error auto-open with the 30s snooze) drives the same store flag
+- The new header-corner button sits BETWEEN the two sidebar toggles and renders the exact upstream codicons `layout-panel` (bottom strip filled — panel open) / `layout-panel-off` (hollow divider-only — hidden), 16×16 fill at 16px, with localized tooltips in all four languages
+
+## [2.3.7] - 2026-09-29
+
+### Changed — sidebar collapse toggles now match the VS Code reference exactly
+- The user pointed at the VS Code UI docs hero («вот посмотри как должны выглядеть кнопки сворачивания сайдбаров справа на картике»): its top-right row is the title-bar **layout toggles** — codicon-style rounded boxes whose panel strip is **filled while the panel is open** and a hollow divider-only variant while it is collapsed. Pixel-level forensics of the reference confirmed the exact icons (`layout-sidebar-left`, `layout-panel`, `layout-sidebar-right-off`, `layout`)
+- The header-corner toggles in PrismGit (left sidebar / right detail panel, right of «Customize toolbar») previously used lucide-style panel icons with fold arrows — they now render the **exact upstream codicon path data** (microsoft/vscode-codicons, 16×16 fill) at the VS Code codicon size, with the same state semantics: open → filled strip, collapsed → hollow variant. The in-panel chevrons (sidebar rail, History pane) keep their affordance
+
+## [2.3.6] - 2026-09-29
+
+### Fixed — 3-way: a stripe appeared on the middle pane when clicked or focused
+- The follow-up report: «полоса появляется при клике на среднюю панель или при фокусе ее» — a bright vertical band showed up along the pane edges the moment you clicked into the Result pane (or focused it), then vanished on blur. Root cause (proven live via computed-style + pixel-diff): the Result pane is a **pane-sized textarea**, and the app's global focus rules painted a 2px accent ring around it — Chromium matches `:focus-visible` for text inputs even on a **mouse click**, so the ring fired on every click
+- Worse, the same global rule set `position: relative`, hijacking the overlay's `absolute` layout: the textarea **collapsed to its intrinsic `cols` width (385→201px)** — the click placed the caret on the wrong character
+- Fix: in a code editor the **caret is the focus indicator** (VS Code shows no ring either) — the ring/border/shadow are suppressed for the merge editor via a dedicated `merge-editor-input` opt-out class, plus inline `outline: none` / `position: absolute` that no future global rule can override. Keyboard focus rings everywhere else (buttons, inputs, dialogs) are untouched
+
+## [2.3.5] - 2026-09-29
+
+### Fixed — 3-way: the «stripe in the center pane» was the conflict markers
+- The `<<<<<<<` / `=======` / `>>>>>>>` marker lines in the Result pane carried a full-width RED 35% band — at a mid-file conflict that read exactly as «полоса по центру центральной панели» (and red suggests ERROR). Markers are structural noise, not content: they now render with a neutral tertiary background + dimmed text, while the ours/theirs CONTENT lines keep their green/blue signal — softened to 20% so the block reads as one quiet highlighted region instead of aggressive stripes
+
+### Changed — Back/Forward is project-scoped with a configurable depth
+- Switching the open repository now WIPES the navigation stack (the history never crossed projects again — «кнопки вперед назад должны работать только в рамках проекта»)
+- The stack holds **10 steps by default** (was an unbounded 60) and the count is configurable in Settings → «Сайдбар и навигация» → «Шагов в истории Назад/Вперёд» (5–100); the oldest entries drop out beyond the limit
+
+### Fixed — History: author/date filters now run SERVER-SIDE
+- The user's report: type an author, press Refresh — nothing changed; the commits only appeared after scrolling the whole history in. Root cause: the author/date filters ran CLIENT-SIDE over the first loaded 100-commit page — the author's commits beyond page 1 were invisible to the filter. Now `git log --author=<pattern> --since/--until` runs on the refresh itself (case-insensitive, matched against «Name <email>»), paging keeps the filters, and the filter re-applies automatically 300ms after typing (debounced — one rev-walk, not one per keystroke)
+- Fixed a latent argv-ordering bug while at it: `--grep`/`--author`/`--since`/`--until` are now always pushed BEFORE the `-- <file>` pathspec separator (options after `--` are treated as paths — author+file and grep+file combinations silently returned empty before)
+
+## [2.3.4] - 2026-09-29
+
+### Fixed — the spacing bug that made three rounds of "wider spacing" invisible
+- **Root cause (cascade bug): the app's own `* { margin: 0; padding: 0 }` reset compiled into `@layer utilities` AFTER Tailwind's `space-y-*` rules** — Tailwind v4 emits space utilities through `:where()` (specificity 0), so the reset silently beat EVERY `space-y-*`/`space-x-*` utility app-wide: margins between siblings never rendered at all. That is why Settings/dialog spacing never visibly changed in v2.3.1–v2.3.3 no matter how far the classes were bumped. The redundant reset is removed (Tailwind's preflight already zeroes margins in `@layer base`) — every `space-*` class now renders as designed, in every tool and dialog
+- On top of the fix, Settings spacing is widened: main panels `space-y-8` (32px), secondary panels 6/5, reorder lists 2.5
+
+### Fixed — «!» hints never showed their content
+- The InfoHint tooltip literally never displayed: the stacked variant `group-hover:group-focus:block` requires hover AND focus simultaneously (and the button swallows mousedown, so focus never lands) — replaced with `group-hover:block group-focus-within:block`. The «!» markers now show their explanation text on hover and on keyboard focus
+
+### Added — VS Code-style collapse toggles in the toolbar corner
+- Two layout toggles to the RIGHT of the «Customize toolbar» button: collapse/expand the left sidebar (48px icon rail) and the right commit-details panel. Both flags moved to a shared `uiLayoutStore` (same localStorage keys — saved state survives); the toolbar, the sidebar rail and the History pane stay in sync
+
+### Fixed — LFS tool buttons were hover-only
+- The file rows' «File history» and lock buttons now rest at 60% opacity (always visible), matching the Search tool fix from v2.3.3
+
+### Added — the AI Assistant can use EVERY tool (18/18 sidebar tools)
+- 10 new tool engines registered (41 total): `get_reflog` (Reflog), `list_submodules` + `submodule_update` (Submodules), `lfs_overview` + `lfs_sync` (LFS), `bisect` (the whole state machine: status/start/good/bad/skip/reset/log), `gitflow_overview` (flow config + branches by type + current branch's role), `recyclable_commits` (lost commits), `list_reviews` (distributed review threads from git notes), `list_pull_requests` (GitHub PRs / GitLab MRs with provider detection + auth guidance)
+- The system prompt teaches the model when to reach for each engine (rules 24–27), including the bisect loop ("test the candidate, then reply good/bad")
+
+## [2.3.3] - 2026-09-29
+
+### Fixed — Search tool: buttons were invisible until hover
+- **Every remaining hover-only action button in the Search tool is now always visible** (resting at 60% opacity, full on hover): commit-result rows (open in browser, copy hash), file-result rows (Changes / Diff / Blame / History) and the content group headers (Diff / Blame / History) — v2.3.2 had converted only the «Commit»/«Changes» buttons and the per-match rows; the rest stayed `opacity-0` until the mouse happened to pass over them (found by the user "by accident")
+- Verified live on the 20k-commit fixture: all 15 button kinds rest at opacity 0.6 with zero hover-only elements left; the «Commit» blame-lookup jump still lands on History with the file-filter chip
+- Guarded by a source-pin test (no `opacity-0` left in the Search page)
+
+## [2.3.2] - 2026-09-29
+
+### Fixed — 3-way merge editor (live-tested on a real conflict)
+- **The panes' splitters were dead**: a 1px-wide divider with height 0 inside its sticky wrapper — invisible, ungrabbable (mousedown landed on the neighbouring pane). Now a REAL 6px divider with a visible center grip, ±5px hit area and accent hover; drag verified live (panes resize, headers follow)
+- **Pane headers misaligned with the body columns** as soon as a pane was resized (headers were fixed thirds); they now mirror leftPct/rightPct exactly
+- The center pane's editing and highlight layers re-verified live on a real conflict fixture (typing, highlight follow, no foreign stripe)
+
+### Added — background fetch PAUSE
+- The sidebar's refresh spinner is now a fetch control: click the RUNNING spinner to stop the background fetch cycle; a Play button resumes it. A StatusBar «Фетч» Pause/Play toggle does the same from anywhere
+- While paused, every poll cycle is skipped (timer, window-focus resume, initial check); manual «Check now» still works
+
+### Added — VS Code-style panel collapse
+- The console now collapses via a chevron in ITS OWN panel header (was: status-bar toggle only, with an ✕); the StatusBar toggle got the matching PanelBottomClose/PanelBottomOpen icons. Left sidebar and the History details pane keep their header-corner chevrons
+
+### Added — Back/Forward remembers tool STATE
+- Each history entry carries a snapshot of the global selection (commit, file, branch, tag, path filter). Back/Forward restores it, so returning to History re-selects the commit you were reading; cross-tool jumps mark themselves so the outgoing entry is not polluted with the incoming tool's state
+
+### Added — Search: jump to THE COMMIT that made the change
+- Every content hit has a «Коммит» button: blame-lookup finds the commit that introduced the found line, then opens History with that commit selected AND the graph pre-filtered to the file. The Blame/History/Diff buttons are now ALWAYS visible (were hover-only — invisible to the user)
+
+### Added — Settings: favorites are sortable
+- Settings → «Сайдбар и навигация» gained an «Избранные инструменты» block: ↑/↓ reorders the sidebar's Favorites section (persisted), ✕ removes an entry; the favorites list moved from Sidebar-local state into a store so Settings and the sidebar share it
+
+### Improved — theme editor zones & text contrast
+- Every swatch has a «!» hint explaining WHERE its color lands; hovering a swatch highlights that zone in the live preview
+- Text tokens are contrast-checked against the main background: a warning chip with the ratio + a one-click «Читаемо» fix below 4.5:1
+- The confusing «Панель» zone renamed to «Панели и консоль» (RU); the preview's button label now uses the same auto-computed readable-on-accent color the compiled theme applies (was the main background color — invisible on light accents)
+
+### Changed — settings rows spacing
+- The sidebar-navigation tool rows (and their favorites block) use wider spacing per the «расстояние между строками инструментов» request
+
+
+## [2.3.1] - 2026-09-29
+
+### Fixed — the «app lags on every tool» report (measured, then fixed)
+- **All read-only git commands now execute in the dedicated git worker process** instead of the Electron main loop. The main process is the IPC broker for every renderer call — while it streamed git output, every tool's clicks and refreshes queued behind it. Measured on a 20k-commit/31-branch fixture: opening History blocked the main loop for 119ms on Linux (multiplied ×3-5 on macOS process spawns); after the router, no tool blocks it longer than 2.4ms. In-flight coalescing and the 1s meta TTL are unchanged; vitest keeps the in-process path, so all 2017 tests observe identical behaviour
+- **Worker-origin git spawns are reported back to the Operations console** — the command log shows ALL git activity with durations regardless of which process ran it (39 of 47 commands on the fixture ran in the worker)
+- `git remote -v` (the slowest command in the History-open burst, 384ms) is now 60s-cached — the remote set only changes through observed git writes
+- **PR/Reviews GitLab projectId heal watchdog** backed off: a rejected token or unreachable GitLab used to retry the network every 1.5s for as long as the page was open (~40 requests/minute); failures now double the delay up to 30s, success resets it
+- **Bisect page 3s polling** runs only while a bisect is actually in progress (was: every 3s whenever the tool was open)
+
+### Added — Search results navigate to the commit that made the change
+- Every content hit (git grep) row gained per-line actions: **Blame at that line** (scrolls to and flash-highlights the found line, shows who introduced it), **History of the file** (pre-filtered to it — «фильтровать сразу по файлу»), and **Diff**; the file-group header carries the full Changes/Diff/Blame/History set
+- History-from-Search now filters the graph by the file (path-filter chip) and can pre-select the commit
+- One-shot `blameFocusLine` in the selection store powers the focused blame jump (consumed once, cleared on repo switch)
+
+### Added — AI assistant learned the Search and Blame tools
+- New `search_code` tool (git grep — the Search tool's content engine) and `blame_file` tool (line-annotated blame grouped into commit blocks) — registered in the chat toolset with selection guidance («кто внёс эту строку?» → blame_file; «где используется X?» → search_code → read_file)
+
+### Fixed — History filters vs. search interplay
+- Activating a chip/author/date filter while a text search is active now **clears the search** — the filter operates over ALL commits instead of intersecting with the found subset («нет возможности отфильтровать за все коммиты»)
+- Every filter input (History, Branches, Changes) gained a **✕ clear button** + Esc-to-clear — the search no longer feels stuck
+
+### Changed — breathing room in dialogs and settings
+- Dialog form groups and settings rows/list rows use wider spacing (space-y-4, taller list rows)
+
+
+## [2.3.0] - 2026-09-29
+
+### Added — Browser-style Back/Forward navigation
+- **Back/Forward buttons in the toolbar** + Alt+Left / Alt+Right keyboard navigation. A dedicated nav-history stack records the user's trail only (app-internal auto-jumps like repo-open are recorded too — they are part of what Back should undo), with forward-tail truncation like a real browser
+- Listed in the Keyboard Shortcuts overlay (Navigation group)
+
+### Added — VS Code-style panel collapse
+- **Left sidebar** folds into a 48px icon rail (tool icons + live Changes count bubble + theme/settings pinned to the bottom); one click on the expand arrow restores the previous width. Persisted across restarts
+- **History commit-details pane** (right sidebar) collapses to a 24px strip so the commit graph takes the full width
+
+### Added — Custom themes + curated theme set
+- **Theme picker curated to 6** (Ayu Light, One Dark, Simple, Material, Discord, Light+dark-sidebar) — the 21 other themes are gone; saved picks migrate automatically to their curated replacement
+- **Visual Custom Theme editor** («Создать тему…»): 15 color inputs (surfaces, TEXT colors, accent, borders, status colors, sidebar background) + light/dark flag + live pseudo-window preview. Custom themes apply via their own `data-theme="custom-*"` CSS with derived hover/inverse/border shades — text colors change in every tool
+- The sidebar-background token is how the «dark sidebar + light main window» look is built (VS Code-style), readable sidebar text computed automatically
+- Replaces the raw-JSON «Custom Theme Overrides» textarea (power-user only) — the old settings key is ignored harmlessly
+
+### Added — Hotkeys for every sidebar tool + configurable order
+- Every tool now has exactly one hotkey: Ctrl+1..9 (daily drivers) + Alt+1..9 (the rest — previously Alt+1..6 just duplicated Ctrl+1..6)
+- **Settings → Interface → «Sidebar & Navigation»**: reorder tools (↑/↓, persisted), reassign any hotkey from a dropdown of free slots ('—' unbinds; a stolen combo bumps its previous owner), reset to defaults
+- Hotkeys work from text inputs now (browser-like — Ctrl+number never types a digit)
+
+### Added — Commit context in History
+- **«Ветки, содержащие коммит»** — branch badges in the commit detail card (`git branch --contains` + `-r`, cached per SHA); clicking a local badge walks that branch
+- **Author click-to-filter** — click the author name in the detail card to filter the graph by that author; a copy button gives «Name <email>» in one click
+
+### Fixed — Counters, take two
+- **Branches summary** now shows repo-wide totals (search-filtered counts disagreed with the Tags/Stashes tools while a filter was active)
+- **History «С тегами (N)» chip** is computed over the filtered set — with an active text/author/date filter the chip equals exactly what the Tagged filter will show (was: whole-pool count)
+- **Repo info dialog** lists local AND remote branch counts separately («Локальные ветки: N / Удалённые: M») — `git branch -r` count added to the stats job
+- Dead loaders removed from History (stashes/reflog state loaded on every history refresh for sections that no longer exist — one wasted `git stash list` spawn per refresh)
+
+### Fixed — 401 toast barrage from stale integrations
+- A rejected GitHub token (401 Bad credentials) on the Pull Requests page is now an AUTH problem, not a load failure: zero error toasts, the in-page sign-in gate renders, and subsequent mounts early-return (one request per session instead of 3+)
+- In-flight/last-key guard on loadPRs — provider detection flipping `loading` twice no longer re-fires the fetch; the Refresh button is the explicit retry (force)
+
+### Changed — Settings de-duplicated and explained
+- **Two «External Tools» panels merged into one** (the diff.tool/merge.tool name inputs moved next to the commands they configure)
+- **Commit line guides**: the dead numeric inputs (commitLineLimit1/2) removed — the Commands select is the single owner
+- **«!» info hitboxes** (hover tooltips) on the settings users actually get confused by: background-check interval + scope, reflog limit, contrast, sidebar & navigation
+- Hardcoded EN sub-headers in the AI panel localized (Context size / Tool limits / AI guard)
+
+## [2.2.0] - 2026-09-28
+
+### Added — Every conflicted operation now REACTS
+- **Uniform conflict reaction matrix** — pull (merge/rebase/ff-only strategies), merge, rebase, cherry-pick, revert, stash pop/apply, git-flow finish (×4 flows), squash-to-branch, patch 3-way merge and the AI auto-stash pop ALL navigate to the Changes conflict resolver with the in-progress banner («Слияние/Rebase/Применяется» + Continue / Skip / Abort), a Conflicts section and an operation-specific warning toast
+- **Git-Flow never continues past a conflict** — finish flows stop at a conflicted merge: no tag, no branch delete, no push while conflicted
+- **Stash pop/apply is honest** — simple-git resolves conflicted `git stash pop|apply` as success; a post-op status check now detects the conflicted shape, throws a typed error with `.conflicts`, keeps the stash entry and surfaces the resolver (was: success toast + cleared selection while the tree filled with markers)
+- Live-verified: `scripts/verify-conflict-reactions.mjs` — 17/17 checks in the running app (RU)
+
+### Added — Push rejection recovery (remote conflicts)
+- **PushRejectionDialog** — pushes that git rejects open a dialog classified by cause, with per-cause recovery: non-fast-forward → «Стянуть и слить» + automatic push retry; stale force-with-lease → fetch + re-lease retry; protected branch → create MR/PR; policy blocks explained. Wired into all push catch sites (toolbar push/sync/Push-To, Changes commit&push, git-flow finish)
+- **IPC error filter fixed** — the wrap() in `electron/ipc/git.ts` kept only `error:/fatal:` lines: `! [rejected]` and `remote: GitLab:` lines were STRIPPED before the renderer, so no dialog could ever open. Now rejected]/remote:/hint: lines pass through
+- **PR/MR conflict badges** — GitLab `merge_status` / GitHub `mergeable` shown as row badges and in the review header; Merge button disabled with tooltip when unmergeable
+- Live-verified: `scripts/verify-push-rejections.mjs` — 16/16 in the running app (non-FF dialog + pull-merge auto-retry, force-with-lease, stale-lease fetch-retry)
+
+### Added — Squash a group of commits to another branch
+- Select a commit range in History (or a PR/MR group from Pull Requests/Reviews) and land it on another branch as ONE commit — existing branch or NEW branch, with full conflict handling in the dialog
+- Supersedes the old-API squash suite with a conflict-aware one; whole-PR squash E2E kept compatible
+
+### Added — Secrets manager (Settings → Security)
+- **Stored secrets section** — every entry of the encrypted vault is listed (metadata only: namespace, name, encrypted flag) grouped by category: access tokens, repository/remote passwords, AI provider keys, GitHub, SSH passphrases
+- **Copy / Replace / Delete per entry** — values are never rendered; "copy" reveals a single value straight to the clipboard, "replace" stores a new value, "delete" removes the entry (with confirmation)
+- **Add secret** — manually register a secret (token, remote password for a repo path + remote name, etc.) that is stored encrypted from the first byte
+- New IPC: `credentials:list` / `credentials:set` / `credentials:delete` / `credentials:reveal`
+
+### Added — Default commit author (Settings → Git)
+- **"Default commit author"** (gitUserName / gitUserEmail) in Settings → Project → Git, with "Apply to current repository" button
+- New repositories created or cloned with PrismGit automatically get the identity written into their local `user.name` / `user.email` — no more "Please tell me who you are" on the first commit
+- `commit()` retries once with the default identity as `-c` overrides when git refuses the commit because no identity is configured anywhere; the error otherwise explains where to set it
+
+### Fixed — Counters (user-visible numbers audit)
+- **History «Tagged (N)» chip** — N is now the TAGGED-COMMITS-IN-VIEW count (exactly what the filter shows for the current branch selection); the tooltip carries both numbers (in-view + repo-wide). Was: allTags.length — a tag on a branch outside the view made the chip disagree with the rows
+- **Per-commit «Теги на этом коммите (N)»** — counts only the tags pointing at the commit (two tags on one commit → (2), names listed)
+- **Branches summary Russian grammar** — new opt-in plural pipe in t(): `{name|one|few|many}` picks a CLDR plural form («1 локальная · 2 локальные · 5 локальных · 6 тегов»); en/zh/de keep plain placeholders and render byte-identically
+- **Sidebar follows the startup locale** — nav labels/groups were frozen at module-load time, so a RU profile first launch showed an English sidebar until a manual refresh; NAV_ITEMS is now evaluated per render (sidebar, command palette, help banners)
+- Cross-tool counter sync: deleting a tag in Tags updates the History chip immediately
+- Live-verified: `scripts/verify-counters.mjs` — 17/17 in the running app vs git CLI ground truth
+
+### Fixed — "Failed to save settings" (gpg.program)
+- Repository Settings → Signing could not be saved: simple-git blocks `git config gpg.program` (and other "unsafe" keys) unless `allowUnsafeGpgProgram` is enabled. `configSet` / `configUnset` now detect the plugin rejection and retry the write on an instance with config-write flags enabled — explicit user edits in a GUI client are intent
+- The Signing tab no longer writes `gpg.program` unconditionally: empty fields are UNSET from `.git/config` instead of written (also fixes un-cleareable user.signingkey and the dangerous `user.name=""` write that would break every commit with "empty ident name not allowed")
+
+### Fixed — GitLab / PR surfaces
+- **Create MR from a GitLab repo now works** — the Pull Requests create dialog called the GitHub REST API even for GitLab repos (guaranteed failure while the README promised «create» for both providers); it is now wired to the long-existing `gitlab:createMergeRequest` IPC — verified live by creating the v2.2.0 release MR through the app
+- **GitLab apiJson follows 3xx redirects** — renamed/moved projects (gitclient → prismgit) broke the MR list with silent 404s
+- **Pull Requests row actions are visible and understandable** — hover-revealed cryptic icons → always-visible labeled buttons + right-click menu (Open in Reviews / browser / Squash / Copy group)
+
+### Fixed — Install / packaging
+- **`make install` survives a local npm mirror 404** — `scripts/npm-install-with-retry.sh` wraps npm install/ci, reads the outcome from npm's own output (tee eats exit codes), and on E404 auto-retries once with `--registry=https://registry.npmjs.org`; EBADENGINE gets a friendly Node-upgrade hint; a killed run can never fake success
+- deb-packaging metadata + production-package smoke E2E — packaging that survives real-world machines
+
+### Fixed — Stability
+- **Quit watchdog** — close can no longer hang: 3 s hard watchdog, worker children never orphaned
+- **Repo switch freeze killed** — status, workdir watch and raw reads run in the git worker; density fix (v3.6)
+- **Remote-check fetch storm** — boost loop broken, hung fetches killed, poll decoupled from the foreground queue; remote-status fetch moved to a dedicated utilityProcess
+- **Render isolation** — per-keystroke/per-token/per-frame re-renders isolated; the 5 s full-tree re-render storm from status refreshes removed
+- **i18n layout** — interface no longer breaks on RU/DE string lengths
+
+### Changed — Performance: slow git operations after LFS problems
+- Network commands (fetch / pull / push / ls-remote) no longer run on the shared per-repo simple-git instance (`maxConcurrentProcesses: 2`) that every local operation uses — a slow or hung network command (unreachable LFS-enabled server, credential dialog waiting for input, huge fetch) used to occupy the 2 queue slots and stall ALL git operations of the repository
+- All network commands run with `GIT_TERMINAL_PROMPT=0` — an unanswered credential prompt fails fast with a clear error instead of hanging invisibly (matches the push path)
+
+### Changed — Dependencies (all at latest)
+- **simple-git 3 → 4** — named-import migration; the new environment guard tamed (`allowEnvironment` contract for GIT_* keys, empirically pinned by probe)
+- vite 8.3, vitest 5, @types/node 26, @tauri-apps/* 2.12 (React 19 / Electron 44 / TypeScript 7 / Tailwind 4 were already current)
+
+### Tests
+- **1963 passing** (was 1009 at 2.1.0) / 0 failed / 34 environment-dependent skips; tsc clean
+- New layers: conflict reaction integration suite (real bare remote, true divergence), push-rejection scenarios (non-FF, stale lease, pre-receive protected emulation), counters E2E, i18n plural engine, squash-to-branch conflict-aware API, enterprise QA perf suite (monster-repo generator, CDP memory/DOM/FPS + zombie audit)
+- `tests/integration/gitService.identityConfig.test.ts` — gpg.program set/unset, identity on init, commit fallback, no-identity error message
+- `scripts/secrets-smoke.cjs` extended with secrets-manager round-trip checks (list metadata-only, set+reveal, delete)
+
 ## [2.1.0] - 2026-09-13
 
 ### Added — AI Assistant overhaul

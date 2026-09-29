@@ -7,7 +7,9 @@ export const en: Record<string, string> = {
   'common.cancel': 'Cancel',
   'common.save': 'Save',
   'common.delete': 'Delete',
+  'common.checkout': 'Checkout',
   'common.remove': 'Remove',
+  'common.skip': 'Skip',
   'common.add': 'Add',
   'common.create': 'Create',
   'common.edit': 'Edit',
@@ -15,7 +17,9 @@ export const en: Record<string, string> = {
   'common.refresh': 'Refresh',
   'common.search': 'Search',
   'common.clear': 'Clear',
+  'common.errorDetails': 'Details',
   'common.close': 'Close',
+  'common.dismiss': 'Dismiss',
   'common.copy': 'Copy',
   'common.success': 'Success',
   'common.error': 'Error',
@@ -46,6 +50,15 @@ export const en: Record<string, string> = {
   'nav.submodules': 'Submodules',
   'nav.subtrees': 'Subtrees',
   'nav.lfs': 'Git LFS',
+
+  // LFS health check
+  'lfs.healthCheckTitle': 'Git LFS is configured but not installed',
+  'lfs.healthCheckMessage': 'This repository uses Git LFS (.gitattributes has LFS filter rules), but git-lfs is not installed on your system.\n\nThis can cause errors with checkout, restore, and other git operations. Choose an option:\n\n• Remove LFS filter — removes filter=lfs lines from .gitattributes (commit the change to make it permanent)\n• Skip — continue with LFS disabled (LFS-tracked files show pointer content)',
+  'lfs.removeFilter': 'Remove LFS filter',
+  'lfs.skip': 'Skip',
+  'lfs.filterRemoved': 'Removed {count} LFS filter line(s) from .gitattributes. Commit the change to make it permanent.',
+  'lfs.noFilterFound': 'No LFS filter rules found in .gitattributes.',
+  'lfs.skipHint': 'LFS skipped. Install git-lfs from https://git-lfs.com for full LFS support.',
   'nav.notes': 'Notes',
   'nav.settings': 'Settings',
   'nav.favorites': 'Favorites',
@@ -184,6 +197,7 @@ export const en: Record<string, string> = {
   'settings.appDescription': 'Global application preferences (appearance, integrations, AI, CI/CD)',
   'settings.projectDescription': 'Per-repository configuration (Git, remotes, pull strategy, config)',
   'settings.appearance': 'Appearance',
+  'settings.userInterface': 'User interface',
   'settings.theme': 'Theme',
   'settings.language': 'Language',
   'settings.contrast': 'UI Contrast',
@@ -212,6 +226,18 @@ export const en: Record<string, string> = {
   'clone.credentialHelper': 'Use PrismGit as credential helper',
   'clone.skipSubmodules': 'Skip submodule initialization',
   'clone.clone': 'Clone',
+  'clone.ssh.title': 'SSH connection',
+  'clone.ssh.usingProfile': 'Profile: {name}',
+  'clone.ssh.usingKey': 'Managed key: {name}',
+  'clone.ssh.usingSystem': 'System ssh — no profile for this host',
+  'clone.ssh.hintSystem': 'Add a profile in Settings → Security → SSH connections to use a managed key or password.',
+  'clone.ssh.test': 'Test',
+  'clone.ssh.testing': 'Testing…',
+  'clone.ssh.ok': 'Connected',
+  'clone.ssh.failed': 'Failed',
+  'clone.targetGroup': 'Sidebar group',
+  'clone.targetGroupHint': 'Where the cloned repo will appear in the Sidebar tree. Pick "(root)" to add it to the top level.',
+  'clone.targetGroupRoot': '(root — no group)',
 
   // Diff
   'diff.unified': 'Unified',
@@ -262,6 +288,23 @@ export const en: Record<string, string> = {
   'vscode.toolNotConfigured': 'Not configured',
   // MED-4 — line-context menu extras
   'common.copied': 'Copied',
+  'common.clearFilter': 'Clear filter',
   'common.copyFailed': 'Copy failed',
+  'common.copyHash': 'Copy commit hash',
   'common.copyLineNumber': 'Copy line number ({n})',
+
+  // ── v3.4 localization completion ──
+  'common.lines': 'lines',
+  'common.load': 'Load',
+  'common.settings': 'Settings',
+
+  // ── v3.4 hardcoded-string sweep ──
+  'common.noRows': 'No rows',
+  'common.dismissNotification': 'Dismiss notification',
+  'common.copyCode': 'Copy code',
+  'common.apiKeySaved': 'API key saved',
+  'common.loadingEllipsis': 'Loading...',
+
+  // ── v3.4 hardcoded-string sweep ──
+  'toolbar.stageAllTooltip': 'Stage all changes',
 };

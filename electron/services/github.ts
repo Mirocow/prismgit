@@ -2,7 +2,11 @@ import * as https from 'https';
 import * as http from 'http';
 import { URL } from 'url';
 import { SimpleStore } from './simpleStore.js';
-import type { GithubUser, GithubRepository, GithubPullRequest } from '../types/github-api.js';
+import { setSecret, getSecret, deleteSecret } from './secrets.js';
+import { NS_GITHUB } from './credentialKeys.js';
+import type { GithubUser, GithubRepository, GithubPullRequest, GithubPRFile, GithubPRComment, GithubPRCommit } from '../types/github-api.js';
+import { startApiCall, finishApiCall, sanitizeApiPath } from './commandLog.js';
+import { isInsecureSslHost } from './insecureHosts.js';
 
 interface AuthState {
   token?: string;
@@ -15,16 +19,41 @@ const store = new SimpleStore({
 });
 
 function getAuthState(): AuthState {
-  return (store.get('github') || {}) as AuthState;
+  const raw = (store.get('github') || {}) as AuthState;
+  // The PAT never rests in the JSON file — it lives in the encrypted vault.
+  const token = getSecret(NS_GITHUB, 'pat');
+  return { ...raw, token };
 }
 
 function setAuthState(state: AuthState): void {
-  store.set('github', state);
+  // Token → vault (or delete when empty); profile stays in the JSON file.
+  if (state.token) setSecret(NS_GITHUB, 'pat', state.token);
+  else deleteSecret(NS_GITHUB, 'pat');
+  store.set('github', { user: state.user });
+}
+
+/**
+ * One-time migration: older builds stored the GitHub PAT as plaintext in
+ * prismgit-github.json. Move it into the encrypted vault and strip the file.
+ * Idempotent; called from main.ts after app ready.
+ */
+export function migrateLegacyGithubToken(): void {
+  const raw = (store.get('github') || {}) as AuthState;
+  if (typeof raw.token === 'string' && raw.token) {
+    setSecret(NS_GITHUB, 'pat', raw.token);
+    store.set('github', { user: raw.user });
+  }
 }
 
 async function httpsJson<T>(url: string, options: https.RequestOptions & { token?: string; body?: string } = {}): Promise<T> {
+  // Log the GitHub API call to the Output panel. The path is everything
+  // after the host (so '/repos/owner/repo/pulls/5?state=open' stays short
+  // and readable). Sanitize to redact any tokens that might be in the URL.
+  const u = new URL(url);
+  const path = sanitizeApiPath(u.pathname + u.search);
+  const method = (options.method || 'GET').toUpperCase();
+  const handle = startApiCall({ provider: 'github', method, path });
   return new Promise<T>((resolve, reject) => {
-    const u = new URL(url);
     const isHttps = u.protocol === 'https:';
     const lib = isHttps ? https : http;
     const headers: Record<string, string> = {
@@ -43,24 +72,41 @@ async function httpsJson<T>(url: string, options: https.RequestOptions & { token
         path: u.pathname + u.search,
         method: options.method || 'GET',
         headers,
+        // TLS bypass for hosts the user EXPLICITLY marked insecure via the
+        // SslBypassDialog — see gitlab.ts apiJsonRequest for the contract.
+        ...(isHttps && isInsecureSslHost(u.hostname) ? { rejectUnauthorized: false } : {}),
       },
       (res) => {
         let data = '';
         res.on('data', (chunk) => (data += chunk));
         res.on('end', () => {
-          if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+          const status = res.statusCode ?? 0;
+          if (status >= 200 && status < 300) {
             try {
+              finishApiCall(handle, { status, body: data });
               resolve(data ? JSON.parse(data) : null);
             } catch (e) {
+              finishApiCall(handle, { status, error: `Failed to parse JSON: ${e}` });
               reject(new Error(`Failed to parse JSON: ${e}`));
             }
           } else {
-            reject(new Error(`GitHub API ${res.statusCode}: ${data}`));
+            finishApiCall(handle, { status, error: `GitHub API ${status}` });
+            reject(new Error(`GitHub API ${status}: ${data}`));
           }
         });
       }
     );
-    req.on('error', reject);
+    // NETWORK TIMEOUT: 15 s hard cap so a hung connection (GitHub
+    // maintenance, flaky proxy, dead captive portal) cannot block the IPC
+    // handler forever. Without this, the renderer-side `await` hangs
+    // indefinitely and the UI shows a permanent spinner.
+    req.setTimeout(15000, () => {
+      req.destroy(new Error('GitHub API request timed out after 15 s'));
+    });
+    req.on('error', (e) => {
+      finishApiCall(handle, { status: 0, error: String(e) });
+      reject(e);
+    });
     if (options.body) req.write(options.body);
     req.end();
   });
@@ -140,6 +186,152 @@ export async function listPullRequests(
   );
 }
 
+/**
+ * Fetch a single PR with full metadata: body/description, comments count,
+ * additions/deletions/changed_files, mergeable status, draft flag, labels.
+ *
+ * The listPullRequests endpoint returns a slim version without these stats
+ * (they're expensive for GitHub to compute). When the user opens a PR in
+ * the detail view, we call this to get the full picture.
+ */
+export async function getPullRequest(
+  owner: string,
+  repo: string,
+  prNumber: number
+): Promise<GithubPullRequest> {
+  const { token } = getAuthState();
+  if (!token) throw new Error('Not authenticated with GitHub');
+  return httpsJson<GithubPullRequest>(
+    `https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}`,
+    { token }
+  );
+}
+
+/**
+ * Fetch the list of files changed in a PR — filename, status (added/modified/
+ * removed/renamed), additions/deletions, and the unified diff patch.
+ *
+ * Used by the PR detail view to show what files the PR touches. The patch
+ * field is optional because GitHub omits it for files >300 lines of diff
+ * (it returns a 406 if we ask, so we just don't show the inline diff for
+ * those — the user can click through to GitHub for the full diff).
+ */
+export async function listPRFiles(
+  owner: string,
+  repo: string,
+  prNumber: number
+): Promise<GithubPRFile[]> {
+  const { token } = getAuthState();
+  if (!token) throw new Error('Not authenticated with GitHub');
+  return httpsJson<GithubPRFile[]>(
+    `https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}/files?per_page=100`,
+    { token }
+  );
+}
+
+/**
+ * Fetch the issue-style discussion comments on a PR — top-level thread,
+ * NOT line-by-line review comments (those come from listPRComments).
+ *
+ * GitHub treats every PR as an issue, so this hits the issues comments
+ * endpoint. Combined with listPRComments (review-side comments), the UI
+ * can render the full discussion thread.
+ */
+export async function listPRIssueComments(
+  owner: string,
+  repo: string,
+  prNumber: number
+): Promise<GithubPRComment[]> {
+  const { token } = getAuthState();
+  if (!token) throw new Error('Not authenticated with GitHub');
+  return httpsJson<GithubPRComment[]>(
+    `https://api.github.com/repos/${owner}/${repo}/issues/${prNumber}/comments?per_page=100`,
+    { token }
+  );
+}
+
+/**
+ * Fetch the commits that make up a PR — message, author, date, SHA.
+ *
+ * Useful for the PR review surface so the user can see WHAT was done in
+ * the PR, not just the file-level diff. Each commit links back to GitHub
+ * for the full commit details.
+ */
+export async function listPRCommits(
+  owner: string,
+  repo: string,
+  prNumber: number
+): Promise<GithubPRCommit[]> {
+  const { token } = getAuthState();
+  if (!token) throw new Error('Not authenticated with GitHub');
+  return httpsJson<GithubPRCommit[]>(
+    `https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}/commits?per_page=250`,
+    { token }
+  );
+}
+
+/**
+ * Fetch files changed in a specific commit (not the whole PR).
+ *
+ * Uses GitHub's commit API:
+ *   GET /repos/:owner/:repo/commits/:sha
+ *
+ * This returns a commit object with a `files` array containing filename,
+ * status, additions, deletions, and patch for each file changed in that
+ * specific commit. This is more reliable than the compare API because:
+ *   - Works for the first commit in a repo (no parent needed)
+ *   - Works for merge commits (shows files from all parents)
+ *   - Doesn't require `~1` refspec notation (which the compare API may
+ *     not support)
+ *
+ * The response shape differs slightly from listPRFiles — the `files`
+ * array has `sha` as null and `blob_url`/`raw_url` may be missing. We
+ * normalize to GithubPRFile shape so the renderer doesn't need to branch.
+ */
+export async function getCommitFiles(
+  owner: string,
+  repo: string,
+  commitSha: string
+): Promise<GithubPRFile[]> {
+  const { token } = getAuthState();
+  if (!token) throw new Error('Not authenticated with GitHub');
+  // Use the commits API which returns files directly.
+  // GitHub limits this to 300 files per commit — if there are more,
+  // we'd need the compare API as a fallback. In practice 300 is plenty.
+  const result = await httpsJson<{
+    files?: Array<{
+      sha?: string;
+      filename: string;
+      status: string;
+      additions: number;
+      deletions: number;
+      changes: number;
+      patch?: string;
+      blob_url?: string;
+      raw_url?: string;
+      contents_url?: string;
+      previous_filename?: string;
+    }>;
+  }>(
+    `https://api.github.com/repos/${owner}/${repo}/commits/${commitSha}`,
+    { token }
+  );
+  // Normalize to GithubPRFile shape — fill in missing fields with defaults.
+  return (result.files ?? []).map((f) => ({
+    sha: f.sha ?? '',
+    filename: f.filename,
+    status: (f.status as GithubPRFile['status']) ?? 'modified',
+    additions: f.additions,
+    deletions: f.deletions,
+    changes: f.changes,
+    patch: f.patch,
+    blob_url: f.blob_url ?? '',
+    raw_url: f.raw_url ?? '',
+    contents_url: f.contents_url ?? '',
+    previous_filename: f.previous_filename,
+  }));
+}
+
 export async function logout(): Promise<void> {
   store.delete('github');
 }
@@ -156,7 +348,34 @@ export interface CommitCheckStatus {
 /**
  * Fetch check-run summaries for a batch of commits (max ~25 per call to stay
  * within the API rate limits and keep latency acceptable).
+ *
+ * PERFORMANCE: previously this ran a sequential `for...of await` — 25 SHAs
+ * × ~200 ms per request = 5 s wall time on a busy PR. Now runs with
+ * bounded concurrency 5 → ~1 s wall time. A per-SHA in-memory cache (the
+ * checks for a given commit SHA are immutable) further avoids re-fetching
+ * SHAs we've already seen in this session.
  */
+const checkRunCache = new Map<string, CommitCheckStatus>();
+const MAX_CONCURRENT_CHECK_RUNS = 5;
+
+async function runWithBoundedConcurrency<T, R>(
+  items: T[],
+  worker: (item: T) => Promise<R>,
+  concurrency: number
+): Promise<void> {
+  let cursor = 0;
+  const workers: Promise<void>[] = [];
+  for (let i = 0; i < Math.min(concurrency, items.length); i++) {
+    workers.push((async () => {
+      while (cursor < items.length) {
+        const idx = cursor++;
+        await worker(items[idx]);
+      }
+    })());
+  }
+  await Promise.all(workers);
+}
+
 export async function getCheckRuns(
   owner: string,
   repo: string,
@@ -166,7 +385,18 @@ export async function getCheckRuns(
   if (!token) throw new Error('Not authenticated with GitHub');
   const batch = shas.slice(0, 25);
   const results: Record<string, CommitCheckStatus> = {};
+
+  // 1) Serve everything we've already cached in this session (immutable per SHA).
+  const todo: string[] = [];
   for (const sha of batch) {
+    const cached = checkRunCache.get(sha);
+    if (cached) results[sha] = cached;
+    else todo.push(sha);
+  }
+  if (todo.length === 0) return results;
+
+  // 2) Fetch the remaining SHAs with bounded concurrency 5.
+  await runWithBoundedConcurrency(todo, async (sha) => {
     try {
       const json = await httpsJson<{
         total_count?: number;
@@ -184,21 +414,26 @@ export async function getCheckRuns(
       } else if (runs.length > 0) {
         conclusion = 'success';
       }
-      results[sha] = {
+      const status: CommitCheckStatus = {
         sha,
         status: runs.length > 0 ? 'completed' : 'none',
         conclusion,
         totalChecks: json.total_count ?? runs.length,
       };
+      results[sha] = status;
+      checkRunCache.set(sha, status);
     } catch (e) {
       if (/404/.test(String(e))) {
         // No checks for this commit (or private API mismatch) — mark as none
-        results[sha] = { sha, status: 'none', totalChecks: 0 };
+        const status: CommitCheckStatus = { sha, status: 'none', totalChecks: 0 };
+        results[sha] = status;
+        checkRunCache.set(sha, status);
       } else {
         throw e;
       }
     }
-  }
+  }, MAX_CONCURRENT_CHECK_RUNS);
+
   return results;
 }
 
@@ -212,6 +447,13 @@ export function getStoredAuthState(): { authenticated: boolean; user?: GithubUse
 
 export function getStoredToken(): string | undefined {
   return getAuthState().token;
+}
+
+/**
+ * Flush pending debounced writes (call on app quit).
+ */
+export function flushGithubStore(): void {
+  store.flush();
 }
 
 // ============================================================
@@ -361,8 +603,9 @@ export async function listPRComments(
   body: string;
   path?: string;
   line?: number;
-  user: { login: string };
+  user: { login: string; avatar_url?: string };
   created_at: string;
+  commit_id?: string;
 }>> {
   const { token } = getAuthState();
   if (!token) throw new Error('Not authenticated with GitHub');

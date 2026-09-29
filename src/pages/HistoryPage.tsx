@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Avatar } from '../components/Avatar';
+import { BranchSyncIndicator } from '../components/BranchSyncIndicator';
 import { CommitFileTree } from '../components/CommitFileTree';
 import { DiffViewer } from '../components/DiffViewer';
 import { FilterInput } from '../components/FilterInput';
@@ -14,24 +15,31 @@ import {
   GitBranch,
   GitMerge,
   GitPullRequest,
+  PanelRightClose, PanelRightOpen,
   Pencil,
-  PlugConnected,
-  PlugDisconnected,
+  Plus,
   RefreshCw,
   RotateCcw,
   StickyNote,
   Tag as TagIcon,
+  Trash,
   Undo,
   X
 } from '../components/icons';
 import { RepoStateBanner } from '../components/RepoStateBanner';
+import { HistoryCommitRow, type HistoryRowSyncInfo } from '../components/history/HistoryCommitRow';
+import { SquashToBranchDialog } from '../components/SquashToBranchDialog';
 import { ResizableSplitter, useResizableWidth } from '../components/ResizableSplitter';
 import { CommitHashLink } from '../components/StatusBar';
 import type { BugtraqConfig, CommitCheckStatus } from '../lib/api';
-import { api, type BranchInfo, type CommitFile, type LogEntry, type RecyclableCommit, type StashEntry } from '../lib/api';
+import { api, type BranchInfo, type CommitFile, type LogEntry } from '../lib/api';
 import { formatTime, getAuthorColor, getInitials } from '../lib/authorBadges';
+// NOTE: getInitials/getAuthorColor are still used by the detail panel below;
+// the per-row usages moved into components/history/HistoryCommitRow.tsx.
 import { linkifyCommitMessage } from '../lib/bugtraq';
 import { buildFileMenu, runFileAction } from '../lib/fileContextMenu';
+import { filterSymbolicHeads } from '../lib/branchFilter';
+import { fetchIncomingHashes } from '../lib/incomingCommits';
 import { bezierPath, BRANCH_COLORS, computeGraph, laneColor } from '../lib/gitGraph';
 import { createAncestryResolver } from '../lib/graphAncestry';
 import { useI18n } from '../lib/i18n';
@@ -41,15 +49,16 @@ import { useContextMenu, type ContextMenuItem } from '../lib/useContextMenu';
 import { useLazyList } from '../lib/useLazyList';
 import { cn, copyToClipboard, shortHash } from '../lib/utils';
 import { useAuthStore } from '../stores/authStore';
-import { useGitStore } from '../stores/gitStore';
-import { useOperationLogStore } from '../stores/operationLogStore';
+import { useGitStore, surfaceConflictedState } from '../stores/gitStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
+import { useUiLayoutStore } from '../stores/uiLayoutStore';
 import { useSelectionStore } from '../stores/selectionStore';
+import { useSettingsStore } from '../stores/settingsStore';
 import { useToastActions } from '../stores/toastStore';
 
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 import { useEscapeKey } from '../hooks/useEscapeKey';
-const ROW_HEIGHT = 28;
+const ROW_HEIGHT = 32;
 const LANE_WIDTH = 24;
 const GRAPH_PAD = 8;
 
@@ -85,6 +94,14 @@ export function HistoryPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
+  // ── Multi-selection (group squash to another branch) ──
+  // Shift+click = range from the anchor row; Ctrl/Cmd+click = toggle single
+  // rows; plain click = single select (clears the group). Stored as HASHES
+  // so the selection survives index shifts when new commits land on top.
+  const [multiSel, setMultiSel] = useState<ReadonlySet<string>>(new Set());
+  const anchorHashRef = useRef<string | null>(null);
+  // The squash-to-branch dialog payload (ordered oldest → newest).
+  const [squashDialog, setSquashDialog] = useState<{ commits: LogEntry[] } | null>(null);
   const [search, setSearch] = useState('');
   // Debounced search — avoids re-filtering on every keystroke for large repos.
   // The filter runs on `debouncedSearch` (updated 250ms after typing stops).
@@ -102,6 +119,32 @@ export function HistoryPage() {
   const [loadingNested, setLoadingNested] = useState(false);
   const [showNested, setShowNested] = useState(true);
   const [tagsHere, setTagsHere] = useState<{ name: string; annotated: boolean; tagger?: string; date?: string; message?: string }[]>([]);
+  // Branches containing the selected commit («какой ветке принадлежит
+  // коммит»): `git branch --contains` + `-r --contains`. Cached per SHA like
+  // tagsHere — the answer is immutable for a given hash.
+  const [branchesHere, setBranchesHere] = useState<{ local: string[]; remote: string[] }>({ local: [], remote: [] });
+  const branchesHereCache = useRef<Map<string, { local: string[]; remote: string[] }>>(new Map());
+  // PERFORMANCE: per-hash caches for the four IPC calls fired on commit
+  // selection (commitFiles, mergeNestedCommits, tagsAt, notesShow). These
+  // results are IMMUTABLE for a given commit SHA, so caching them avoids
+  // re-fetching when the user j/k's back to a commit they've already seen
+  // — eliminates 100-300 ms lag per keystroke on large repos.
+  const commitFilesCache = useRef<Map<string, CommitFile[]>>(new Map());
+  const nestedCommitsCache = useRef<Map<string, LogEntry[]>>(new Map());
+  const tagsHereCache = useRef<Map<string, { name: string; annotated: boolean; tagger?: string; date?: string; message?: string }[]>>(new Map());
+  // Debounce timer for the 4-IPC batch on commit selection — without this,
+  // holding `j` (or rapid arrow navigation) fires 4 IPC calls per keystroke
+  // which queue behind each other on the simple-git subprocess pool.
+  const commitSelectionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // MEMORY FIX: clear per-commit caches when switching repos.
+  useEffect(() => {
+    commitFilesCache.current.clear();
+    nestedCommitsCache.current.clear();
+    tagsHereCache.current.clear();
+    branchesHereCache.current.clear();
+  }, [repo.path]);
+
   const [showFiles, setShowFiles] = useState(true);
   const [filesPage, setFilesPage] = useState(0);
   const [filesViewMode, setFilesViewMode] = useState<'list' | 'tree'>('list');
@@ -123,6 +166,15 @@ export function HistoryPage() {
     const g = globalAuthorFilter ?? '';
     setAuthorFilterLocal((prev) => (prev === g ? prev : g));
   }, [globalAuthorFilter]);
+  // v2.3.5 — debounced mirror of the author filter for the SERVER-SIDE git
+  // log --author: typing "thomisus" fires one rev-walk 300ms after the last
+  // keystroke instead of one spawn per character. The client-side `filtered`
+  // pass keeps using the INSTANT value (typing feels live).
+  const [debouncedAuthorFilter, setDebouncedAuthorFilter] = useState(authorFilter);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedAuthorFilter(authorFilter), 300);
+    return () => clearTimeout(timer);
+  }, [authorFilter]);
   // "Recent" smart-view preset (last 7 days) — date-based, independent of author filter
   const [recentActive, setRecentActive] = useState(false);
   // "Tagged" smart-view preset — show only commits that have at least one tag
@@ -156,16 +208,20 @@ export function HistoryPage() {
   // Hash lookup: when the search query looks like a commit hash prefix and no loaded
   // commit matches, resolve it via git (works for commits outside the loaded window).
   const [hashHit, setHashHit] = useState<LogEntry | null>(null);
-  // SmartGit Log groups: besides the commit graph the Log window shows
-  // Local/Remote commits (the graph itself), Stashes and Recyclable Commits.
-  // Stashes are shown by default; Recyclable commits are opt-in (SmartGit
-  // manual: "Recyclable Commits checkbox").
-  const [stashes, setStashes] = useState<StashEntry[]>([]);
-  const [recyclable, setRecyclable] = useState<RecyclableCommit[]>([]);
-  const [showStashes, setShowStashes] = useState(true);
-  const [showRecyclable, setShowRecyclable] = useState(false);
+  // NOTE: the old SmartGit-Log "groups" (stashes rows + recyclable rows
+  // rendered inside the graph) were removed in 1b48f6f, but their state +
+  // loaders survived and kept running `git stash list` on EVERY history
+  // load — dead weight (and one more spawn per refresh). Stashes live in
+  // the Stashes tool; recyclable commits in the Recyclable tool.
   const [cpBusyHash, setCpBusyHash] = useState<string | null>(null);
   const { width: detailWidth, handleResize: handleDetailResize } = useResizableWidth(320, 200, 600);
+  // Right detail pane collapse (VS Code-style): the commit-details sidebar
+  // folds away to a 24px strip so the graph takes the full width (the user's
+  // «кнопок сворачивания сайдбаров … правого»). Persisted.
+  // v2.3.4: the flag lives in uiLayoutStore (localStorage under the SAME
+  // key) so the Toolbar's corner toggle can flip it too.
+  const detailCollapsed = useUiLayoutStore((s) => s.detailCollapsed);
+  const toggleDetailCollapsed = useUiLayoutStore((s) => s.toggleDetail);
   const showContextMenu = useContextMenu();
 
   // ===== SmartGit integrations =====
@@ -220,7 +276,21 @@ export function HistoryPage() {
       // scroll via loadMore(). Previously this loaded up to 500 commits
       // upfront, hiding anything older — the user could not scroll back to
       // the first commit. With paging, the user can scroll indefinitely.
-      const logOpts: { maxCount: number; skip?: number; all?: boolean; branch?: string; branches?: string[]; file?: string; follow?: boolean } = { maxCount: PAGE_SIZE };
+      // v2.3.5: author/date filters go SERVER-SIDE (git log --author/--since/
+      // --until) — the user's report: with an author set, Refresh re-ran the
+      // UNFILTERED log and the client-side pass only saw the first 100
+      // commits (the author's work beyond page 1 required scrolling the
+      // whole history in first). The client-side filters stay (idempotent,
+      // and they hold the exact end-of-day date semantics).
+      const logOpts: { maxCount: number; skip?: number; all?: boolean; branch?: string; branches?: string[]; file?: string; follow?: boolean; author?: string; since?: string; until?: string } = { maxCount: PAGE_SIZE };
+      if (debouncedAuthorFilter.trim()) logOpts.author = debouncedAuthorFilter.trim();
+      if (dateFrom) logOpts.since = dateFrom;
+      if (dateTo) {
+        // end-of-day for --until: the client check adds +1d, so the server
+        // pre-narrow uses the next day's midnight exclusive window.
+        const toTs = new Date(dateTo).getTime();
+        if (!isNaN(toTs)) logOpts.until = new Date(toTs + 86400000).toISOString().slice(0, 10);
+      }
       // Resolve which refs to walk commits from. Priority:
       //   1. Multi-branch selection (Ctrl+click in Branches page).
       //   2. 'head+upstream' — default: HEAD branch + its remote-tracking
@@ -242,8 +312,12 @@ export function HistoryPage() {
         //   - commits reachable from origin/<branch> (incoming/pushed work)
         // Local-only commits are drawn solid; remote-only as dashed/hollow
         // (the existing incomingHashes logic tags them).
-        const currentBranch = status?.current;
-        const upstream = status?.tracking;
+        // RACE FIX: read status at CALL TIME from the store, not from
+        // the closure. This avoids re-creating loadHistory on every
+        // status change (which would cause an infinite git log loop).
+        const currentStatus = useGitStore.getState().status;
+        const currentBranch = currentStatus?.current;
+        const upstream = currentStatus?.tracking;
         const refs: string[] = [];
         if (currentBranch) refs.push(currentBranch);
         if (upstream && upstream !== currentBranch) refs.push(upstream);
@@ -267,53 +341,80 @@ export function HistoryPage() {
       }
       const result = await api.git.log(repo.path, logOpts);
       setEntries(result);
+      // TAG SYNC: refs may have changed since the last load (tag created /
+      // deleted / edited via the context menu, the tag section, or a RefBadge
+      // menu — all paths funnel through loadHistory). The per-commit
+      // tagsHere cache is cleared so the details panel re-fetches the tags
+      // of the selected commit; the allTags counter ("Tagged (N)" chip)
+      // reloads in the background. Without this, the tag section kept
+      // showing DELETED tags / missing NEW ones until the user switched
+      // commits or repos (stale-cache bug).
+      tagsHereCache.current.clear();
+      branchesHereCache.current.clear();
+      void api.git.tags(repo.path).then((tags) => setAllTags(tags.map((tg) => ({ name: tg.name, hash: tg.hash })))).catch(() => {});
       // If we got fewer than PAGE_SIZE commits, there are no more to load.
       // Otherwise assume more exist (we'll discover the end on the next fetch).
       setHasMore(result.length >= PAGE_SIZE);
       // Compute incoming commits: reachable from remote-tracking refs
-      // (refs/remotes/*) but NOT from any local branch (refs/heads/*).
-      // These are "not yet pulled" commits — drawn dashed/hollow in graph.
+      // but NOT from the local branch(es). Drawn dashed/hollow in graph.
+      //
+      // Scope depends on the view (see lib/incomingCommits.ts):
+      //   - head+upstream: `git rev-list <current>..<upstream>` — commits
+      //     the upstream has that the CURRENT branch lacks. The global
+      //     `--remotes --not --branches` variant is contaminated when ANY
+      //     other local branch (backup/feature) contains the remote
+      //     commits, which made incoming commits render as plain local
+      //     history after `git reset --hard` (user-reported).
+      //   - other views: the global set (remote-only w.r.t. all branches).
       //
       // Run AFTER setEntries so the commit list renders immediately — the
       // incoming hashes are only used to TINT the rows that are remote-only,
       // which is a visual nicety the user can wait ~200ms for. Doing these
       // calls before setEntries was delaying the first paint by 500ms-2s on
-      // large repos (rev-list --remotes --not --branches walks the entire
-      // commit graph). Now: entries paint first, then incoming hashes
-      // trickle in and update the row styling.
+      // large repos (rev-list walks the entire commit graph). Now: entries
+      // paint first, then incoming hashes trickle in and update the styling.
+      const incomingScope = (
+        branchFilter === 'head+upstream'
+          ? { mode: 'head+upstream' as const, currentBranch: status?.current, upstream: status?.tracking }
+          : { mode: 'global' as const }
+      );
       void (async () => {
         try {
-          // Run both rev-lists in parallel — they're independent and
-          // previously ran sequentially, doubling latency.
-          // localList is fetched but not currently used (kept for parity
-          // with the original code which also computed it; may be needed
-          // when we add "local-only" tinting in a future iteration).
-          const [, remoteOnly] = await Promise.all([
-            api.git.raw(repo.path, ['rev-list', '--branches']),
-            api.git.raw(repo.path, ['rev-list', '--remotes', '--not', '--branches']),
-          ]);
-          // Commits reachable from remote-tracking branches but NOT from local branches
-          // = commits that exist on the remote but haven't been pulled yet
-          const incoming = new Set<string>();
-          for (const line of remoteOnly.trim().split('\n')) {
-            if (line.trim()) incoming.add(line.trim());
-          }
-          setIncomingHashes(incoming);
+          // PERF (v3): this block used to ALSO run `rev-list --branches`
+          // (full local-branch graph walk) whose result was discarded —
+          // a pure waste of one subprocess + graph walk on every History
+          // load (500ms+ on the 4.7k-commit live repo). Removed.
+          // Scope-aware rev-list (lib/incomingCommits.ts): in head+upstream
+          // view this is `<current>..<upstream>`. The global
+          // `--remotes --not --branches` variant is contaminated when ANY
+          // other local branch (backup/feature) contains the remote
+          // commits — which made incoming commits render as plain local$
+          // history after `git reset --hard` (user-reported).
+          //
+          // fetchIncomingHashes VALIDATES the refs first (one TTL-cached
+          // `for-each-ref`, shared with log()'s validation): when the
+          // upstream ref is gone (branch deleted on the remote — git status
+          // still reports `tracking: 'origin/v2'`), the old code spawned a
+          // `git rev-list v2..origin/v2` that died with
+          // "fatal: ambiguous argument 'v2..origin/v2'" and logged
+          // "Error occurred in handler for 'git:raw'" in the main process
+          // on EVERY History load. Now the set is simply empty (nothing to
+          // pull from a deleted remote branch) and no failing subprocess
+          // is spawned at all.
+          const hashes = await fetchIncomingHashes(
+            repo.path,
+            incomingScope,
+            (p, args) => api.git.raw(p, args),
+          );
+          // Commits reachable from the remote side but not from the local
+          // branch = commits that exist on the remote but haven't been pulled yet
+          setIncomingHashes(hashes);
         } catch {
           setIncomingHashes(new Set());
         }
       })();
       // Load branches for the filter dropdown — also non-blocking.
       void api.git.branches(repo.path).then(setBranches).catch(() => {});
-      // SmartGit Log groups — stashes and (opt-in) recyclable commits load
-      // alongside the graph; failures degrade to empty sections.
-      // Stashes are shown by default — load eagerly.
-      api.git.stashList(repo.path).then((s) => setStashes(s)).catch(() => setStashes([]));
-      // Recyclable commits are opt-in (showRecyclable=false by default) —
-      // defer the expensive `git reflog --all` + `git rev-list --all` calls
-      // until the user actually expands that section.
-      // (Previously fired on every History page open, blocking UI for seconds
-      //  on large repos for data the user wasn't viewing.)
       setSelectedIdx(0);
       // Preserve an existing global selection when it is still visible in the
       // (re)loaded log — clobbering it with the first commit broke other tools
@@ -331,12 +432,47 @@ export function HistoryPage() {
       }
     } catch (e) { toast.error(t('toast.history.loadFailed'), String(e)); }
     finally { setLoading(false); }
-    // NOTE: status?.current / status?.tracking are intentionally in the
-    // deps — when the user switches branches (or pulls/fetches new
-    // upstream commits), the head+upstream filter needs to re-resolve to
-    // the new branch name. Without these deps, switching from 'main' to
-    // 'feature/x' would still show 'main' history.
-  }, [repo.path, toast, branchFilter, selectedBranches, globalPathFilter, selectCommit, status?.current, status?.tracking]);
+    // NOTE on deps — the graph must reload whenever the WALKED REFS move,
+    // not only when their NAMES change:
+    //   - status?.current / status?.tracking — branch switch changes the
+    //     refs the head+upstream filter resolves.
+    //   - status?.head — `git reset --hard`, commit, amend, rebase, pull all
+    //     move HEAD without changing the branch name. Without this dep the
+    //     graph kept the pre-reset decorations after a hard reset and remote
+    //     commits still rendered as if merged into the local branch
+    //     (user-reported). The watcher re-runs `git status` on .git/refs
+    //     changes, which now flows into a graph reload.
+    //   - status?.ahead / status?.behind — a background fetch moves
+    //     refs/remotes/* without moving HEAD; the divergence counters are
+    //     what changes then, and the graph must pick up the new incoming
+    //     commits + moved origin/<branch> label.
+    //
+    // RACE FIX (kept from v3): these deps are all PRIMITIVES compared by
+    // value (Object.is) — the watcher replaces the whole `status` object
+    // every tick, but the effect only re-runs when one of these VALUES
+    // actually changes. So there is no 5s-tick loop, and no refresh loop is
+    // possible at all: `git log` / `git rev-list` are read-only and do not
+    // touch .git/index or refs (the old "вечный рефреш" loop came from
+    // status→log chains on WRITE commands, now dispatched as one-shot
+    // `smartgit:history-refresh` events). Branch-name / upstream reads
+    // inside the effect still use call-time `useGitStore.getState().status`
+    // (see RACE FIX above) so they can never be stale even mid-render.
+  }, [repo.path, toast, branchFilter, selectedBranches, globalPathFilter, selectCommit, status?.current, status?.tracking, status?.head, status?.ahead, status?.behind, debouncedAuthorFilter, dateFrom, dateTo]);
+
+  // Prune the multi-selection when the underlying entries change (history
+  // reload / rebase / filter): hashes that are no longer visible are dropped
+  // so the group never points at stale commits. Identity-stable no-op when
+  // nothing needs pruning (avoids re-render loops).
+  useEffect(() => {
+    if (multiSel.size === 0) return;
+    const alive = new Set<string>();
+    for (const e of entries) if (multiSel.has(e.hash)) alive.add(e.hash);
+    if (alive.size !== multiSel.size) setMultiSel(alive);
+    if (anchorHashRef.current && !entries.some((e) => e.hash === anchorHashRef.current)) {
+      anchorHashRef.current = null;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entries]);
 
   // ── Lazy-load older commits on scroll ───────────────────────────────────
   // When the user scrolls near the bottom of the commit list, fetch the
@@ -356,10 +492,19 @@ export function HistoryPage() {
       // Snapshot the current entries length — we'll skip past these.
       const currentLen = entries.length;
       if (currentLen === 0) return; // nothing loaded yet — let loadHistory handle it
-      const logOpts: { maxCount: number; skip: number; all?: boolean; branch?: string; branches?: string[]; file?: string; follow?: boolean } = {
+      const logOpts: { maxCount: number; skip: number; all?: boolean; branch?: string; branches?: string[]; file?: string; follow?: boolean; author?: string; since?: string; until?: string } = {
         maxCount: PAGE_SIZE,
         skip: currentLen,
       };
+      // v2.3.5 — keep the SERVER-SIDE author/date filters in sync with
+      // loadHistory (paging walks the FILTERED set; otherwise page 2 of the
+      // unfiltered history would append foreign commits).
+      if (debouncedAuthorFilter.trim()) logOpts.author = debouncedAuthorFilter.trim();
+      if (dateFrom) logOpts.since = dateFrom;
+      if (dateTo) {
+        const toTs = new Date(dateTo).getTime();
+        if (!isNaN(toTs)) logOpts.until = new Date(toTs + 86400000).toISOString().slice(0, 10);
+      }
       if (selectedBranches.size > 0) {
         logOpts.branches = Array.from(selectedBranches);
       } else if (branchFilter === 'head+upstream') {
@@ -401,22 +546,7 @@ export function HistoryPage() {
     } finally {
       setLoadingMore(false);
     }
-  }, [loadingMore, hasMore, loading, entries.length, repo.path, branchFilter, selectedBranches, globalPathFilter, toast, status?.current, status?.tracking]);
-
-  // Recyclable commits are opt-in — only load `git reflog --all` + `git rev-list --all`
-  // when the user expands the section. Previously this fired on every History
-  // page open and could block the UI for seconds on large repos.
-  useEffect(() => {
-    if (!showRecyclable) {
-      setRecyclable([]);
-      return;
-    }
-    let cancelled = false;
-    api.git.recyclableCommits(repo.path)
-      .then((r) => { if (!cancelled) setRecyclable(r); })
-      .catch(() => { if (!cancelled) setRecyclable([]); });
-    return () => { cancelled = true; };
-  }, [showRecyclable, repo.path]);
+  }, [loadingMore, hasMore, loading, entries.length, repo.path, branchFilter, selectedBranches, globalPathFilter, debouncedAuthorFilter, dateFrom, dateTo, toast, status?.current, status?.tracking]);
 
   useEffect(() => { loadHistory(); }, [loadHistory]);
 
@@ -438,6 +568,40 @@ export function HistoryPage() {
     window.addEventListener('smartgit:history-refresh', handler);
     return () => window.removeEventListener('smartgit:history-refresh', handler);
   }, [loadHistory]);
+
+  // RACE FIX: reload history ONLY when the branch name actually changes
+  // (not on every status refresh). We track the previous branch name in
+  // a ref to detect real changes vs. status object identity changes.
+  const prevBranchRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const currentBranch = status?.current;
+    if (prevBranchRef.current !== currentBranch) {
+      prevBranchRef.current = currentBranch;
+      loadHistory();
+    }
+  }, [status?.current, loadHistory]);
+
+  // User-configurable periodic auto-refresh — Settings → Git →
+  // "Auto-refresh History page". When enabled, re-runs `git log` on this
+  // cadence so new commits appear without manual refresh. When disabled
+  // (default), NO periodic `git log` calls happen — the previous behaviour
+  // re-ran git log on every lastRefresh bump which the user reported as
+  // "летит огромное кол-во запросов". Min interval 30s.
+  const autoRefreshHistory = useSettingsStore((s) => s.settings.autoRefreshHistory ?? false);
+  const historyRefreshSec = useSettingsStore((s) => s.settings.historyAutoRefreshIntervalSec ?? 0);
+  useEffect(() => {
+    if (!autoRefreshHistory) return;
+    if (!Number.isFinite(historyRefreshSec) || historyRefreshSec <= 0) return;
+    const ms = Math.max(30, historyRefreshSec) * 1000;
+    const id = setInterval(() => {
+      // Only refresh when the document is visible — no point re-running
+      // git log in a background tab.
+      if (document.visibilityState === 'visible') {
+        loadHistory();
+      }
+    }, ms);
+    return () => clearInterval(id);
+  }, [autoRefreshHistory, historyRefreshSec, loadHistory]);
 
   // Background fetch removed — it caused a double refresh on History open.
   // The initial loadHistory() already loads the log; the background fetch
@@ -463,6 +627,31 @@ export function HistoryPage() {
     return entries;
   }, [entries, hashHit]);
 
+  // PERFORMANCE (P8): precompute lowercased variants of subject/author/email/
+  // hash once when entries change. The previous `filtered` useMemo called
+  // `.toLowerCase()` on every entry for every filter pass — for 1000 commits
+  // × 6 filter passes × every keystroke, that was ~6000 string allocations
+  // per keystroke. Now we build one parallel array of lowercased strings
+  // when `searchPool` changes, and filter passes just index into it.
+  const searchPoolLower = useMemo(() => searchPool.map(e => ({
+    subject: e.subject.toLowerCase(),
+    authorName: e.author.name.toLowerCase(),
+    authorEmail: e.author.email.toLowerCase(),
+    hash: e.hash.toLowerCase(),
+  })), [searchPool]);
+
+  // v3.8 — «Поиск должен сбрасываться когда ищешь в фильтрах»: activating a
+  // chip/author/date filter while a text search is active clears the SEARCH,
+  // so the filter operates over ALL commits instead of intersecting with the
+  // search's found subset (which made filters feel broken — "нельзя
+  // отфильтровать за все коммиты, только по выведенному").
+  const clearSearchIfActive = useCallback(() => {
+    if (search || debouncedSearch) {
+      setSearch('');
+      setDebouncedSearch('');
+    }
+  }, [search, debouncedSearch]);
+
   const filtered = useMemo(() => {
     let result = searchPool;
     // Text search (subject, author, hash) — supports regex.
@@ -472,29 +661,33 @@ export function HistoryPage() {
       if (useRegex) {
         try {
           const re = new RegExp(debouncedSearch, 'i');
-          result = result.filter(e =>
+          result = result.filter((e, i) =>
             re.test(e.subject) || re.test(e.author.name) || re.test(e.hash)
           );
         } catch {
-          // Invalid regex — fall back to literal
-          result = result.filter(e =>
-            e.subject.toLowerCase().includes(q) ||
-            e.author.name.toLowerCase().includes(q) ||
-            e.hash.toLowerCase().includes(q)
+          // Invalid regex — fall back to literal (use precomputed lowercase)
+          result = result.filter((_, i) =>
+            searchPoolLower[i].subject.includes(q) ||
+            searchPoolLower[i].authorName.includes(q) ||
+            searchPoolLower[i].hash.includes(q)
           );
         }
       } else {
-        result = result.filter(e =>
-          e.subject.toLowerCase().includes(q) ||
-          e.author.name.toLowerCase().includes(q) ||
-          e.hash.toLowerCase().includes(q)
+        // Literal search — use precomputed lowercase strings (no per-keystroke toLowerCase)
+        result = result.filter((_, i) =>
+          searchPoolLower[i].subject.includes(q) ||
+          searchPoolLower[i].authorName.includes(q) ||
+          searchPoolLower[i].hash.includes(q)
         );
       }
     }
-    // Author filter
+    // Author filter — uses precomputed lowercase (author.name + author.email)
     if (authorFilter.trim()) {
       const a = authorFilter.toLowerCase();
-      result = result.filter(e => e.author.name.toLowerCase().includes(a) || e.author.email.toLowerCase().includes(a));
+      result = result.filter((_, i) =>
+        searchPoolLower[i].authorName.includes(a) ||
+        searchPoolLower[i].authorEmail.includes(a)
+      );
     }
     // Path filter — would require server-side git log -- path; we filter client-side by commitFiles lookup
     // For simplicity here we just leave path filter as a UI hint (the actual filtering happens via api.git.log with file option).
@@ -515,6 +708,18 @@ export function HistoryPage() {
     }
     return result;
   }, [searchPool, debouncedSearch, authorFilter, pathFilter, dateFrom, dateTo, useRegex, taggedActive]);
+
+  // Tagged-commits-in-view — EXACTLY the row count the Tagged filter will
+  // show right now. Computed over `filtered` (not the raw pool): with a
+  // text/author/date filter active, the tagged rows THAT SURVIVE the filter
+  // are what the click produces — the chip used to count the whole pool and
+  // disagreed with the rows ("chip says 4, filter shows 2"). The tooltip
+  // still carries BOTH numbers: in-view + repo-wide total.
+  const taggedInView = useMemo(
+    () => filtered.reduce(
+      (n, e) => n + (e.refs.some(r => r.startsWith('tag:') || r.includes('refs/tags/')) ? 1 : 0), 0),
+    [filtered],
+  );
 
   // Auto-scroll to the globally selected commit (set here or from another tool —
   // e.g. a tag click in Tags page). See the index-space warning above.
@@ -614,13 +819,18 @@ export function HistoryPage() {
         }
       } else if (e.key === 'Escape') {
         e.preventDefault();
+        // Clear the group selection first; a second Esc clears the detail row.
+        if (multiSel.size > 0) {
+          setMultiSel(new Set());
+          return;
+        }
         setSelectedIdx(null);
         selectCommit(null);
       }
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [filtered, selectedIdx, selectCommit]);
+  }, [filtered, selectedIdx, selectCommit, multiSel.size]);
 
   // Debounced hash-prefix lookup: resolves commits outside the loaded log window
   // (log is capped at maxCount, so an old commit's hash would otherwise never match).
@@ -719,22 +929,81 @@ export function HistoryPage() {
     setFilesPage(0); // Reset pagination when commit changes
     const selected = filtered[selectedIdx];
     if (!selected) return;
-    setLoadingFiles(true);
-    api.git.commitFiles(repo.path, selected.hash)
-      .then(setCommitFiles)
-      .catch(() => setCommitFiles([]))
-      .finally(() => setLoadingFiles(false));
-    // Merge-commit enrichment: nested commits brought in by the merge +
-    // annotated-tag metadata for tags pointing at this commit. Both are
-    // empty/fast for regular commits, so they run on every selection.
-    setLoadingNested(true);
-    api.git.mergeNestedCommits(repo.path, selected.hash)
-      .then(setNestedCommits)
-      .catch(() => setNestedCommits([]))
-      .finally(() => setLoadingNested(false));
-    api.git.tagsAt(repo.path, selected.hash)
-      .then(setTagsHere)
-      .catch(() => setTagsHere([]));
+    const hash = selected.hash;
+
+    // 1) Serve immediately from per-hash cache if we've already fetched
+    //    this commit in this session (results are immutable per SHA).
+    const cachedFiles = commitFilesCache.current.get(hash);
+    const cachedNested = nestedCommitsCache.current.get(hash);
+    const cachedTags = tagsHereCache.current.get(hash);
+    const cachedBranches = branchesHereCache.current.get(hash);
+    if (cachedFiles) setCommitFiles(cachedFiles);
+    if (cachedNested) setNestedCommits(cachedNested);
+    if (cachedTags) setTagsHere(cachedTags);
+    if (cachedBranches) setBranchesHere(cachedBranches);
+
+    // 2) Debounce the IPC batch 100 ms — when the user holds `j` or uses
+    //    arrow navigation, each keystroke otherwise fires 4 IPC calls that
+    //    queue up behind each other on the simple-git subprocess pool.
+    //    The trailing keystroke's commit is the one the user actually wants
+    //    to see; intermediate ones are skipped.
+    if (commitSelectionTimer.current) clearTimeout(commitSelectionTimer.current);
+    commitSelectionTimer.current = setTimeout(async () => {
+      // Re-check current selection — user may have moved on during the 100 ms.
+      const current = filtered[selectedIdx];
+      if (!current || current.hash !== hash) return;
+
+      if (!cachedFiles) {
+        setLoadingFiles(true);
+        try {
+          const files = await api.git.commitFiles(repo.path, hash);
+          commitFilesCache.current.set(hash, files);
+          // Only apply if we're STILL on this commit (stale-write guard).
+          if (filtered[selectedIdx]?.hash === hash) setCommitFiles(files);
+        } catch {
+          if (filtered[selectedIdx]?.hash === hash) setCommitFiles([]);
+        } finally {
+          setLoadingFiles(false);
+        }
+      }
+      if (!cachedNested) {
+        setLoadingNested(true);
+        try {
+          const nested = await api.git.mergeNestedCommits(repo.path, hash);
+          nestedCommitsCache.current.set(hash, nested);
+          if (filtered[selectedIdx]?.hash === hash) setNestedCommits(nested);
+        } catch {
+          if (filtered[selectedIdx]?.hash === hash) setNestedCommits([]);
+        } finally {
+          setLoadingNested(false);
+        }
+      }
+      if (!cachedTags) {
+        try {
+          const tags = await api.git.tagsAt(repo.path, hash);
+          tagsHereCache.current.set(hash, tags);
+          if (filtered[selectedIdx]?.hash === hash) setTagsHere(tags);
+        } catch {
+          if (filtered[selectedIdx]?.hash === hash) setTagsHere([]);
+        }
+      }
+      if (!cachedBranches) {
+        try {
+          const bc = await api.git.branchesContaining(repo.path, hash);
+          branchesHereCache.current.set(hash, bc);
+          if (filtered[selectedIdx]?.hash === hash) setBranchesHere(bc);
+        } catch {
+          if (filtered[selectedIdx]?.hash === hash) setBranchesHere({ local: [], remote: [] });
+        }
+      }
+    }, 100);
+
+    return () => {
+      if (commitSelectionTimer.current) {
+        clearTimeout(commitSelectionTimer.current);
+        commitSelectionTimer.current = null;
+      }
+    };
   }, [selectedIdx, repo.path, filtered]);
 
   // GitHub Actions CI badges (Standard Window "My History" feature) — only for
@@ -797,18 +1066,18 @@ export function HistoryPage() {
                 : null;
     if (!state) return false;
     const title =
-      state === 'merge' ? 'Merge in progress'
-        : state === 'rebase' ? 'Rebase in progress'
-          : state === 'cherry-pick' ? 'Cherry-pick in progress'
-            : state === 'revert' ? 'Revert in progress'
-              : 'Bisect in progress';
+      state === 'merge' ? t('history.blockedBy.mergeInProgress')
+        : state === 'rebase' ? t('history.blockedBy.rebaseInProgress')
+          : state === 'cherry-pick' ? t('history.blockedBy.cherryPickInProgress')
+            : state === 'revert' ? t('history.blockedBy.revertInProgress')
+              : t('history.blockedBy.bisectInProgress');
     // Offer an in-place Abort button — the user shouldn't have to leave
     // History just to discard a stale merge.
     const abortNow = await confirmDialog({
       title,
-      message: `Another HEAD-moving operation would discard the in-progress ${state}.\n\nFinish it first on the Changes page, or Abort it now.`,
-      confirmLabel: `Abort ${state} now`,
-      cancelLabel: 'Go to Changes',
+      message: t('history.blockedBy.message', { state }),
+      confirmLabel: t('history.blockedBy.abortNow', { state }),
+      cancelLabel: t('history.blockedBy.goToChanges'),
       danger: true,
     });
     if (abortNow) {
@@ -820,7 +1089,7 @@ export function HistoryPage() {
           case 'revert': await api.git.revertAbort(repo.path); break;
           case 'bisect': await api.git.bisectReset(repo.path); break;
         }
-        toast.success(`${state[0].toUpperCase() + state.slice(1)} aborted`);
+        toast.success(t('history.blockedBy.aborted', { state }));
         await refreshStatus(repo.path);
         await loadHistory();
       } catch (e) { toast.error(t('toast.merge.abortStateFailed', { state }), String(e)); }
@@ -834,19 +1103,26 @@ export function HistoryPage() {
   const handleCherryPick = async (entry: { hash: string; subject: string }) => {
     if (await blockedByRepoState()) return;
     if (!(await confirmDialog({
-      title: `Cherry-pick ${shortHash(entry.hash)}`,
-      message: `Apply the changes from this commit onto your current branch?\n\nCommit: "${entry.subject}"`,
-      confirmLabel: 'Cherry-pick',
+      title: t('history.cherryPickTitle', { hash: shortHash(entry.hash) }),
+      message: t('history.cherryPickMessage', { subject: entry.subject }),
+      confirmLabel: t('history.cherryPickAction'),
     }))) return;
     setCpBusyHash(entry.hash);
     try {
       const result = await api.git.cherryPick(repo.path, [entry.hash]);
       if (result.conflicts.length > 0) {
-        toast.warning(`${result.conflicts.length} conflicts`, 'Resolve them on the Changes page, then press Continue');
+        // Conflict-reaction audit (v3.6): the toast-only reaction left the
+        // user in History with a conflicted cherry-pick in progress and no
+        // visible next step. Same state-based reaction as pull now: land on
+        // the Changes tool where the conflicts + Continue/Abort banner live.
+        await surfaceConflictedState(repo.path, {
+          title: t('toast.git.cherryPickConflicts'),
+          detail: t('toast.git.cherryPickConflictsHint'),
+        });
       } else if (result.empty) {
         toast.warning(
-          'The cherry-pick is empty — changes are already applied',
-          'Resolve it on the Changes page: Skip (drop) or Commit Empty'
+          t('history.cherryPickEmpty'),
+          t('history.cherryPickEmptyDetail')
         );
       } else if (result.error) {
         toast.error(t('toast.cherryPick.failed'), result.error);
@@ -865,14 +1141,20 @@ export function HistoryPage() {
   const handleRevert = async (entry: LogEntry) => {
     if (await blockedByRepoState()) return;
     if (!(await confirmDialog({
-      title: `Revert ${shortHash(entry.hash)}`,
-      message: `Create a NEW commit that undoes the changes from this commit?\n\nOriginal commit: "${entry.subject}"`,
-      confirmLabel: 'Revert',
+      title: t('history.revertTitle', { hash: shortHash(entry.hash) }),
+      message: t('history.revertMessage', { subject: entry.subject }),
+      confirmLabel: t('history.revertAction'),
     }))) return;
     try {
       const result = await api.git.revert(repo.path, [entry.hash]);
-      if (result.conflicts.length > 0) toast.warning(`${result.conflicts.length} conflicts`);
-      else toast.success(t('toast.revert.reverted'));
+      if (result.conflicts.length > 0) {
+        // Conflict-reaction audit (v3.6): navigate to the resolver instead
+        // of a transient count-only toast.
+        await surfaceConflictedState(repo.path, {
+          title: t('toast.git.revertConflicts'),
+          detail: t('toast.git.revertConflictsHint'),
+        });
+      } else toast.success(t('toast.revert.reverted'));
       await refreshStatus(repo.path); await loadHistory();
     } catch (e) { toast.error(t('toast.revert.failed'), String(e)); }
   };
@@ -880,11 +1162,11 @@ export function HistoryPage() {
   const handleReset = async (hash: string, mode: 'soft' | 'mixed' | 'hard' | 'keep') => {
     if (await blockedByRepoState()) return;
     if (!(await confirmDialog({
-      title: `Reset to ${shortHash(hash)} (${mode})`,
+      title: t('history.resetTitle', { hash: shortHash(hash), mode }),
       message: mode === 'hard'
-        ? 'WARNING: all uncommitted changes will be lost!'
-        : `Move the current branch to ${shortHash(hash)} using a ${mode} reset.`,
-      confirmLabel: 'Reset',
+        ? t('history.resetHardWarning')
+        : t('history.resetMessage', { hash: shortHash(hash), mode }),
+      confirmLabel: t('history.resetAction'),
       danger: mode === 'hard',
     }))) return;
     try {
@@ -897,22 +1179,34 @@ export function HistoryPage() {
   const handleRebase = async (hash: string) => {
     if (await blockedByRepoState()) return;
     if (!(await confirmDialog({
-      title: 'Rebase current branch',
-      message: `Replay your current branch's commits on top of ${shortHash(hash)}?\nMay cause conflicts.`,
-      confirmLabel: 'Rebase',
+      title: t('history.rebaseTitle'),
+      message: t('history.rebaseMessage', { hash: shortHash(hash) }),
+      confirmLabel: t('history.rebaseAction'),
     }))) return;
     try {
       await api.git.rebase(repo.path, hash);
       toast.success(t('toast.merge.rebaseStarted'));
       await refreshStatus(repo.path); await loadHistory();
-    } catch (e) { toast.error(t('toast.merge.rebaseFailed'), String(e)); }
+    } catch (e) {
+      // Conflict-reaction audit (v3.6): a conflicted rebase left the repo
+      // mid-rebase with only a raw error toast — the user had no Continue /
+      // Skip / Abort surface offered. Detect from the repo state (git
+      // streams CONFLICT to stdout; message matching is brittle) and land
+      // on the Changes tool banner, exactly like a conflicted pull.
+      const conflicted = await surfaceConflictedState(repo.path, {
+        title: t('toast.git.rebaseConflicts'),
+        detail: t('toast.git.rebaseConflictsHint'),
+      });
+      if (!conflicted) toast.error(t('toast.merge.rebaseFailed'), String(e));
+      await refreshStatus(repo.path); await loadHistory();
+    }
   };
 
   // Full commit diff via git diff <hash>^..<hash> — rendered in the compare modal
   const handleShowCommitDiff = async (entry: LogEntry) => {
     try {
       const result = await api.git.diffCommit(repo.path, entry.hash);
-      setCompareDiff({ result, title: `Commit ${shortHash(entry.hash)} vs parent` });
+      setCompareDiff({ result, title: t('history.commitVsParent', { hash: shortHash(entry.hash) }) });
     } catch (e) { toast.error(t('toast.history.commitDiffFailed'), String(e)); }
   };
 
@@ -921,7 +1215,7 @@ export function HistoryPage() {
     try {
       const res = await api.vscode.openCommitPatch(repo.path, entry.hash);
       if (res.ok) toast.success(t('toast.vscode.opened'));
-      else toast.error(res.detail || 'VS Code CLI not found — install VS Code or set its path in Settings → External Tools');
+      else toast.error(res.detail || t('history.vscodeCliNotFound'));
     } catch (e) { toast.error(t('toast.vscode.openFailed'), String(e)); }
   };
 
@@ -929,9 +1223,9 @@ export function HistoryPage() {
   // splits the commit by staging parts and continuing via the Rebase panel.
   const handleStartSplitCommit = async (entry: LogEntry) => {
     if (!(await confirmDialog({
-      title: `Split ${shortHash(entry.hash)}`,
-      message: "This starts an interactive rebase stopped at this commit ('edit').\nThen: reset parts of the commit, stage pieces, commit repeatedly, and press Continue in the Rebase panel.",
-      confirmLabel: 'Split',
+      title: t('history.splitTitle', { hash: shortHash(entry.hash) }),
+      message: t('history.splitMessage'),
+      confirmLabel: t('history.splitAction'),
     }))) return;
     try {
       const res = await api.git.splitCommit(repo.path, entry.hash);
@@ -957,7 +1251,7 @@ export function HistoryPage() {
   const handleOpenSplitOff = (entry: LogEntry) => {
     setSplitOffEntry(entry);
     setSplitOffSelected(new Set());
-    setSplitOffMessage(`Split from "${entry.subject}"`);
+    setSplitOffMessage(t('history.splitOffInitialMsg', { subject: entry.subject }));
     setShowSplitOff(true);
     api.git.commitFiles(repo.path, entry.hash)
       .then(setSplitOffFileList)
@@ -981,9 +1275,9 @@ export function HistoryPage() {
   const handleCheckout = async (hash: string) => {
     if (await blockedByRepoState()) return;
     if (!(await confirmDialog({
-      title: `Checkout ${shortHash(hash)}`,
-      message: "This puts you in detached HEAD state — you won't be on any branch.",
-      confirmLabel: 'Checkout',
+      title: t('history.checkoutTitle', { hash: shortHash(hash) }),
+      message: t('history.checkoutMessage'),
+      confirmLabel: t('history.checkoutAction'),
     }))) return;
     try {
       await api.git.checkout(repo.path, hash);
@@ -1011,13 +1305,13 @@ export function HistoryPage() {
 
   const handleEditAuthor = async (entry: LogEntry) => {
     const value = await promptDialog({
-      title: 'Edit Commit Author',
-      message: `Author of ${shortHash(entry.hash)} — current: ${entry.author.name} <${entry.author.email}>`,
+      title: t('history.editAuthorTitle'),
+      message: t('history.editAuthorMessage', { hash: shortHash(entry.hash), author: entry.author.name, email: entry.author.email }),
       input: { initialValue: `${entry.author.name} <${entry.author.email}>` },
     });
     if (!value) return;
     const m = value.match(/^([^<]+)<([^>]+)>\s*$/);
-    if (!m) { toast.error(t('toast.git.invalidFormat'), 'Use: Name <email>'); return; }
+    if (!m) { toast.error(t('toast.git.invalidFormat'), t('history.authorFormatHint')); return; }
     try {
       await api.git.editCommitAuthor(repo.path, entry.hash, m[1].trim(), m[2].trim());
       toast.success(t('toast.edit.authorUpdated'));
@@ -1028,8 +1322,8 @@ export function HistoryPage() {
   const handleAddNote = async (entry: LogEntry) => {
     const existing = await api.git.notesShow(repo.path, 'commits', entry.hash).catch(() => null);
     const message = await promptDialog({
-      title: existing ? 'Edit Note' : 'Add Note',
-      message: `Git note on ${shortHash(entry.hash)} (category commits)`,
+      title: existing ? t('history.editNoteTitle') : t('history.addNoteTitle'),
+      message: t('history.noteMessage', { hash: shortHash(entry.hash) }),
       input: { initialValue: existing ?? '' },
     });
     if (message === null) return;
@@ -1042,22 +1336,22 @@ export function HistoryPage() {
     }
     try {
       await api.git.notesAdd(repo.path, 'commits', entry.hash, message.trim(), true);
-      toast.success('Note saved');
+      toast.success(t('history.noteSaved'));
       await loadHistory();
-    } catch (e) { toast.error('Save note failed', String(e)); }
+    } catch (e) { toast.error(t('history.saveNoteFailed'), String(e)); }
   };
 
   const handleFormatPatch = async (entry: LogEntry) => {
     const outDir = await promptDialog({
-      title: 'Format Patch',
-      message: `Write a .patch file for ${shortHash(entry.hash)} to`,
+      title: t('history.formatPatchTitle'),
+      message: t('history.formatPatchMessage', { hash: shortHash(entry.hash) }),
       input: { initialValue: `${repo.path}/patches` },
     });
     if (!outDir) return;
     try {
       const files = await api.git.formatPatch(repo.path, { outputDir: outDir, commit: entry.hash });
-      await confirmDialog({ title: 'Format Patch', message: `Written:\n${files.join('\n')}`, confirmLabel: 'Close', hideCancel: true });
-    } catch (e) { toast.error('Format patch failed', String(e)); }
+      await confirmDialog({ title: t('history.formatPatchTitle'), message: t('history.formatPatchWritten', { files: files.join('\n') }), confirmLabel: t('history.closeAction'), hideCancel: true });
+    } catch (e) { toast.error(t('history.formatPatchFailed'), String(e)); }
   };
 
   const handleOpenInBrowser = async () => {
@@ -1067,9 +1361,74 @@ export function HistoryPage() {
     try {
       const info = await api.git.extractRepoInfo(repo.path);
       if (info.webUrl) api.app.openExternal(`${info.webUrl}/commit/${selected.hash}`);
-      else toast.info('No remote URL');
+      else toast.info(t('history.noRemoteUrl'));
     } catch (e) { toast.error(t('toast.generic.failed'), String(e)); }
   };
+
+  // ── RENDER-PERF: stable row callbacks for the memoized HistoryCommitRow ──
+  // Every scroll frame re-renders the visible window; with unstable
+  // callbacks every row would re-render on every frame, defeating the
+  // memo. The ref-indirection keeps identity stable while always calling
+  // the freshest closure.
+  const rowSelectHandler = useCallback((idx: number, hash: string, mods: { shift: boolean; toggle: boolean }) => {
+    if (mods.shift) {
+      // Range from the anchor (last plain/ctrl click) to this row.
+      const anchor = anchorHashRef.current ?? useSelectionStore.getState().selectedCommitHash ?? hash;
+      let aIdx = filtered.findIndex((e) => e.hash === anchor);
+      if (aIdx < 0) aIdx = idx;
+      const from = Math.min(aIdx, idx);
+      const to = Math.max(aIdx, idx);
+      const set = new Set<string>();
+      for (let i = from; i <= to; i++) {
+        const e = filtered[i];
+        if (e) set.add(e.hash);
+      }
+      setMultiSel(set);
+      setSelectedIdx(idx);
+      selectCommit(hash);
+      return;
+    }
+    if (mods.toggle) {
+      setMultiSel((prev) => {
+        const next = new Set(prev);
+        if (next.has(hash)) next.delete(hash); else next.add(hash);
+        return next;
+      });
+      anchorHashRef.current = hash;
+      setSelectedIdx(idx);
+      selectCommit(hash);
+      return;
+    }
+    // Plain click: single select, clear the group, move the anchor.
+    anchorHashRef.current = hash;
+    setMultiSel((prev) => (prev.size === 0 ? prev : new Set<string>()));
+    setSelectedIdx(idx);
+    selectCommit(hash);
+  }, [selectCommit, filtered]);
+  // ── Group squash-to-branch (History multi-selection) ──
+  // The dialog expects OLDEST → NEWEST; `filtered` is newest-first, so we
+  // reverse the visible order and keep only the selected hashes.
+  const openSquashToBranchDialog = useCallback(() => {
+    if (multiSel.size < 2) return;
+    const sel = new Set(multiSel);
+    const ordered = [...filtered].reverse().filter((e) => sel.has(e.hash));
+    if (ordered.length < 2) return;
+    setSquashDialog({ commits: ordered });
+  }, [filtered, multiSel]);
+  // Typed lazily-assigned ref (showCommitContextMenu is defined below —
+  // a direct useRef(showCommitContextMenu) would hit the TDZ).
+  const ctxMenuRef = useRef<(e: React.MouseEvent, entry: LogEntry, idx: number) => void>(() => {});
+  const rowContextMenuHandler = useCallback((e: React.MouseEvent, entry: LogEntry, idx: number) => {
+    ctxMenuRef.current(e, entry, idx);
+  }, []);
+  // Sync info for the FIRST row's working-tree badge — primitives in,
+  // stable object identity out (only changes when the values change, so a
+  // status refresh re-renders at most ONE row, not the whole window).
+  const firstRowSync = useMemo<HistoryRowSyncInfo | null>(() => (
+    status?.current && status?.tracking
+      ? { current: status.current, tracking: status.tracking, ahead: status.ahead ?? 0, behind: status.behind ?? 0 }
+      : null
+  ), [status?.current, status?.tracking, status?.ahead, status?.behind]);
 
   const showCommitContextMenu = async (e: React.MouseEvent, entry: LogEntry, idx: number) => {
     e.preventDefault();
@@ -1082,58 +1441,119 @@ export function HistoryPage() {
       commitTags = await api.git.tagsAt(repo.path, entry.hash);
     } catch { /* ignore — empty tag list */ }
 
-    const items: ContextMenuItem[] = [
+    // MENU STRUCTURE (v3.4): items are LOGICALLY GROUPED by domain —
+    // “Управление тегами ▸ create / edit / delete”, “Сбросить к этому
+    // коммиту ▸ soft/mixed/hard/keep”, “Копировать ▸ …” — with the 2-3 most
+    // frequent actions (cherry-pick, revert, checkout) staying top-level.
+    // The old menu was a FLAT 30-item list where the 5 reset variants and
+    // per-tag edit/delete pairs buried everything else.
+    const items: ContextMenuItem[] = [];
+    // Group squash (History multi-selection): right-clicking a row INSIDE a
+    // 2+ group offers to carry the whole group to another branch as ONE commit.
+    if (multiSel.size >= 2 && multiSel.has(entry.hash)) {
+      items.push(
+        { label: t('history.squashGroupToBranch', { count: multiSel.size }), clickId: 'squash-to-branch' },
+        { type: 'separator' },
+      );
+    }
+    items.push(
       { label: t('history.cherryPick'), clickId: 'cherry-pick' },
       { label: t('history.revertCommit'), clickId: 'revert' },
       { type: 'separator' },
+      // ── Управление тегами: создание / редактирование / удаление ──
+      {
+        label: t('ctx.group.tags'),
+        submenu: (() => {
+          const tagItems: ContextMenuItem[] = [
+            { label: t('history.createTagHere'), clickId: 'create-tag' },
+          ];
+          // Per-tag Edit/Delete for every tag pointing at this commit.
+          // Annotated tags can be edited (message); lightweight tags can
+          // only be deleted.
+          if (commitTags.length > 0) {
+            tagItems.push({ type: 'separator' });
+            for (const tag of commitTags) {
+              tagItems.push({
+                label: tag.annotated
+                  ? t('history.editTag', { name: tag.name })
+                  : t('history.tagLightweight', { name: tag.name }),
+                clickId: `edit-tag:${tag.name}`,
+              });
+              tagItems.push({
+                label: t('history.deleteTag', { name: tag.name }),
+                clickId: `delete-tag:${tag.name}`,
+              });
+            }
+          }
+          return tagItems;
+        })(),
+      },
+      // ── Управление ветками ──
+      {
+        label: t('ctx.group.branches'),
+        submenu: [
+          { label: t('history.createBranchHere'), clickId: 'create-branch' },
+        ],
+      },
+      { type: 'separator' },
+      // ── Сброс: 5 режимов в одном подменю ──
+      {
+        label: t('ctx.group.reset'),
+        submenu: [
+          { label: t('history.resetToThis'), clickId: 'reset-header', enabled: false },
+          { type: 'separator' },
+          { label: t('history.resetSoft'), clickId: 'reset-soft' },
+          { label: t('history.resetMixed'), clickId: 'reset-mixed' },
+          { label: t('history.resetHard'), clickId: 'reset-hard' },
+          { label: t('history.resetKeep'), clickId: 'reset-keep' },
+        ],
+      },
+      // ── Заметки ──
+      {
+        label: t('ctx.group.notes'),
+        submenu: [
+          { label: t('history.addNote'), clickId: 'add-note' },
+          { label: t('history.showNote'), clickId: 'show-note' },
+          { label: t('history.removeNote'), clickId: 'remove-note' },
+        ],
+      },
+      { type: 'separator' },
       { label: t('history.checkoutDetached'), clickId: 'checkout' },
-      { type: 'separator' },
-      { label: t('history.resetToThis'), clickId: 'reset-header' },
-      { label: t('history.resetSoft'), clickId: 'reset-soft' },
-      { label: t('history.resetMixed'), clickId: 'reset-mixed' },
-      { label: t('history.resetHard'), clickId: 'reset-hard' },
-      { label: t('history.resetKeep'), clickId: 'reset-keep' },
-      { type: 'separator' },
       { label: t('history.rebaseOnto'), clickId: 'rebase' },
       { type: 'separator' },
-      { label: t('history.createTagHere'), clickId: 'create-tag' },
-      { label: t('history.createBranchHere'), clickId: 'create-branch' },
-    ];
-    // If tags point at this commit, add Edit/Delete actions for each.
-    // Annotated tags can be edited (message); lightweight tags can only be deleted.
-    if (commitTags.length > 0) {
-      items.push({ type: 'separator' });
-      for (const tag of commitTags) {
-        const label = tag.annotated
-          ? t('history.editTag', { name: tag.name })
-          : t('history.tagLightweight', { name: tag.name });
-        items.push({ label, clickId: `edit-tag:${tag.name}` });
-        items.push({ label: t('history.deleteTag', { name: tag.name }), clickId: `delete-tag:${tag.name}` });
-      }
-    }
-    items.push(
-      { type: 'separator' },
-      { label: t('history.openInDiff'), clickId: 'open-in-diff' },
-      { label: t('history.compareWithWT'), clickId: 'compare-wt' },
-      { label: t('history.showFullDiff'), clickId: 'show-commit-diff' },
-      { label: t('history.openPatchInVSCode'), clickId: 'open-vscode-patch' },
-      { type: 'separator' },
-      { label: t('history.splitOffFiles'), clickId: 'split-off' },
-      { label: t('history.startInteractiveEdit'), clickId: 'split-commit' },
-      { type: 'separator' },
-      { label: t('history.addNote'), clickId: 'add-note' },
-      { label: t('history.showNote'), clickId: 'show-note' },
-      { label: t('history.removeNote'), clickId: 'remove-note' },
-      { type: 'separator' },
-      { label: t('history.copyShortHash'), clickId: 'copy-short' },
-      { label: t('history.copyFullHash'), clickId: 'copy-full' },
-      { label: t('history.copyCommitMessage'), clickId: 'copy-msg' },
-      { type: 'separator' },
-      { label: t('history.editCommitMessage'), clickId: 'edit-msg' },
-      { label: t('history.editCommitAuthor'), clickId: 'edit-author' },
+      // ── Просмотр и сравнение ──
+      {
+        label: t('ctx.group.view'),
+        submenu: [
+          { label: t('history.openInDiff'), clickId: 'open-in-diff' },
+          { label: t('history.compareWithWT'), clickId: 'compare-wt' },
+          { label: t('history.showFullDiff'), clickId: 'show-commit-diff' },
+          { label: t('history.openPatchInVSCode'), clickId: 'open-vscode-patch' },
+          { label: t('history.openInBrowser'), clickId: 'browser' },
+        ],
+      },
+      // ── Копировать ──
+      {
+        label: t('ctx.group.copy'),
+        submenu: [
+          { label: t('history.copyShortHash'), clickId: 'copy-short' },
+          { label: t('history.copyFullHash'), clickId: 'copy-full' },
+          { label: t('history.copyCommitMessage'), clickId: 'copy-msg' },
+        ],
+      },
+      // ── Изменить коммит ──
+      {
+        label: t('ctx.group.editCommit'),
+        submenu: [
+          { label: t('history.editCommitMessage'), clickId: 'edit-msg' },
+          { label: t('history.editCommitAuthor'), clickId: 'edit-author' },
+          { type: 'separator' },
+          { label: t('history.splitOffFiles'), clickId: 'split-off' },
+          { label: t('history.startInteractiveEdit'), clickId: 'split-commit' },
+        ],
+      },
       { type: 'separator' },
       { label: t('history.formatPatch'), clickId: 'format-patch' },
-      { label: t('history.openInBrowser'), clickId: 'browser' },
     );
     showContextMenu(items, (action) => {
       // Tag actions — dynamic clickId with tag name encoded after ':'
@@ -1148,6 +1568,7 @@ export function HistoryPage() {
         return;
       }
       switch (action) {
+        case 'squash-to-branch': openSquashToBranchDialog(); break;
         case 'cherry-pick': handleCherryPick(entry); break;
         case 'revert': handleRevert(entry); break;
         case 'checkout': handleCheckout(entry.hash); break;
@@ -1179,9 +1600,9 @@ export function HistoryPage() {
           window.location.hash = '#/diff';
           break;
         }
-        case 'copy-short': copyToClipboard(shortHash(entry.hash)); toast.success('Copied'); break;
-        case 'copy-full': copyToClipboard(entry.hash); toast.success('Copied'); break;
-        case 'copy-msg': copyToClipboard(entry.subject); toast.success('Copied'); break;
+        case 'copy-short': copyToClipboard(shortHash(entry.hash)); toast.success(t('history.copied')); break;
+        case 'copy-full': copyToClipboard(entry.hash); toast.success(t('history.copied')); break;
+        case 'copy-msg': copyToClipboard(entry.subject); toast.success(t('history.copied')); break;
         case 'edit-msg': handleEditMessage(entry); break;
         case 'edit-author': handleEditAuthor(entry); break;
         case 'add-note': handleAddNote(entry); break;
@@ -1196,6 +1617,9 @@ export function HistoryPage() {
       }
     });
   };
+  // Keep the memoized rows' context-menu ref pointing at the freshest
+  // closure (see ctxMenuRef above).
+  ctxMenuRef.current = showCommitContextMenu;
 
   // Git Notes — SmartGit Manual: Notes with custom categories
 
@@ -1203,24 +1627,24 @@ export function HistoryPage() {
     try {
       const note = await api.git.noteShow(repo.path, entry.hash);
       if (note.trim()) {
-        toast.info(`Note for ${shortHash(entry.hash)}`, note);
+        toast.info(t('history.noteFor', { hash: shortHash(entry.hash) }), note);
       } else {
-        toast.info('No note for this commit');
+        toast.info(t('history.noNote'));
       }
-    } catch (e) { toast.error('Failed to load note', String(e)); }
+    } catch (e) { toast.error(t('history.noteLoadFailed'), String(e)); }
   };
 
   const handleRemoveNote = async (entry: LogEntry) => {
     if (!(await confirmDialog({
-      title: 'Remove Git Note',
-      message: `Remove the Git Note from ${shortHash(entry.hash)}?`,
-      confirmLabel: 'Remove',
+      title: t('history.removeNoteTitle'),
+      message: t('history.removeNoteMessage', { hash: shortHash(entry.hash) }),
+      confirmLabel: t('history.removeAction'),
       danger: true,
     }))) return;
     try {
       await api.git.noteRemove(repo.path, entry.hash);
       toast.success(t('toast.edit.noteRemoved'));
-    } catch (e) { toast.error('Failed to remove note', String(e)); }
+    } catch (e) { toast.error(t('history.noteRemoveFailed'), String(e)); }
   };
 
   // Tag-from-commit dialog state
@@ -1242,43 +1666,69 @@ export function HistoryPage() {
 
   const handleSaveTag = async () => {
     if (!tagTarget || !tagName.trim()) return;
+    const newName = tagName.trim();
     try {
-      // When editing (editingTagName is set), use force=true to overwrite
-      // the existing tag at the same commit with the new message.
-      const force = !!editingTagName;
-      await api.git.createTag(repo.path, tagName.trim(), tagMessage || undefined, tagTarget, force, tagAnnotated);
-      toast.success(
-        force ? `Tag '${tagName}' updated` : `Tag '${tagName}' created`,
-        `Points to ${shortHash(tagTarget)}`
-      );
+      if (editingTagName && editingTagName !== newName) {
+        // RENAME (git has no tag rename): create the tag under the NEW name
+        // at the same commit (message/annotation preserved via the form),
+        // then delete the OLD tag. The old code force-overwrote only the NEW
+        // name and silently left the old tag in place — a rename that
+        // duplicated the tag instead of renaming it.
+        await api.git.createTag(repo.path, newName, tagMessage || undefined, tagTarget, false, tagAnnotated);
+        await api.git.deleteTag(repo.path, editingTagName);
+        toast.success(
+          t('history.tagRenamedToast', { old: editingTagName, new: newName }),
+          t('history.tagPointsTo', { hash: shortHash(tagTarget) }),
+        );
+      } else {
+        // CREATE, or EDIT in place (same name) — force re-creates the tag
+        // object at the same commit so the new message/annotation sticks.
+        const force = !!editingTagName;
+        await api.git.createTag(repo.path, newName, tagMessage || undefined, tagTarget, force, tagAnnotated);
+        toast.success(
+          force ? t('history.tagUpdatedToast', { name: newName }) : t('history.tagCreatedToast', { name: newName }),
+          t('history.tagPointsTo', { hash: shortHash(tagTarget) }),
+        );
+      }
       setShowTagDialog(false);
       setEditingTagName(null);
       await loadHistory();
-    } catch (e) { toast.error('Failed to save tag', String(e)); }
+    } catch (e) { toast.error(t('history.tagCreateFailed'), String(e)); }
   };
 
-  // Edit an existing tag's message (annotated tags only). Re-creates the tag
-  // with force=true at the same commit so the message is updated. Lightweight
-  // tags have no message to edit — the menu offers Delete instead.
+  // Edit an existing tag (message + name). git has no tag mutation — editing
+  // re-creates the tag object with force at the same commit; a NAME change
+  // additionally deletes the old tag (rename semantics). Lightweight tags
+  // have no message — the dialog opens with their current name and lets the
+  // user REPLACE the tag (rename, or convert to annotated by adding a
+  // message). This is the "see the current tag, change it, replace it"
+  // flow the user asked for — the popup always shows the CURRENT values.
   const handleEditTag = async (tagName: string, entry: LogEntry) => {
-    // Fetch the existing tag's annotation (if annotated) to pre-fill the dialog
+    // Full-fidelity read: tagsAt/tags only return the subject (FIRST LINE) —
+    // prefilling the dialog from that truncated a multi-line tag message,
+    // and the subsequent force-save silently DESTROYED the tail (data loss).
+    // tagShow reads the raw tag object (cat-file) so the message is
+    // byte-exact.
     try {
-      const tags = await api.git.tagsAt(repo.path, entry.hash);
-      const existing = tags.find(t => t.name === tagName);
-      const isAnnotated = existing?.annotated ?? false;
-      if (!isAnnotated) {
-        toast.info('Lightweight tag', `"${tagName}" has no message to edit. Use Delete + Create to convert.`);
+      const tag = await api.git.tagShow(repo.path, tagName);
+      if (!tag) {
+        toast.error(t('history.tagLoadFailed'), t('history.tagNotFound', { name: tagName }));
         return;
       }
-      // Open the tag dialog in "edit" mode — pre-fill name + message,
+      // Open the tag dialog in "edit" mode — pre-fill name + FULL message,
       // reuse the same dialog as Create (save uses force=true when editing).
-      setTagTarget(entry.hash);
+      // Lightweight tags (tag === null above only means MISSING tag; an
+      // existing lightweight tag returns { annotated: false }) open with the
+      // annotated checkbox OFF and an empty message — exactly what the tag
+      // currently is; checking Annotated + typing a message REPLACES it
+      // with an annotated tag at the same commit.
+      setTagTarget(tag.targetHash || entry.hash);
       setTagName(tagName);
-      setTagMessage(existing?.message ?? '');
-      setTagAnnotated(true);
+      setTagMessage(tag.annotated ? tag.message : '');
+      setTagAnnotated(!!tag.annotated);
       setEditingTagName(tagName);
       setShowTagDialog(true);
-    } catch (e) { toast.error('Failed to load tag', String(e)); }
+    } catch (e) { toast.error(t('history.tagLoadFailed'), String(e)); }
   };
 
   // Track whether the dialog is in edit mode (vs create). When set, handleSaveTag
@@ -1294,9 +1744,9 @@ export function HistoryPage() {
     }))) return;
     try {
       await api.git.deleteTag(repo.path, tagName);
-      toast.success(`Tag "${tagName}" deleted`);
+      toast.success(t('history.tagDeletedToast', { name: tagName }));
       await loadHistory();
-    } catch (e) { toast.error('Failed to delete tag', String(e)); }
+    } catch (e) { toast.error(t('history.tagDeleteFailed'), String(e)); }
   };
 
   // Branch-from-commit dialog state
@@ -1318,62 +1768,12 @@ export function HistoryPage() {
     try {
       await api.git.createBranch(repo.path, branchName.trim(), branchTarget);
       if (branchCheckout) await api.git.checkout(repo.path, branchName.trim());
-      toast.success(`Branch '${branchName}' created`, `From ${shortHash(branchTarget)}`);
+      toast.success(t('history.branchCreatedToast', { name: branchName }), t('history.branchFrom', { hash: shortHash(branchTarget) }));
       setShowBranchDialog(false);
       await loadHistory();
-    } catch (e) { toast.error('Failed to create branch', String(e)); }
+    } catch (e) { toast.error(t('history.branchCreateFailed'), String(e)); }
   };
 
-  // ===== SmartGit Log groups: Stashes + Recyclable Commits — row actions =====
-  const handleStashApply = async (s: StashEntry) => {
-    try {
-      await useOperationLogStore.getState().logOperation(
-        `Apply Stash {${s.index}}`, repo.path, `git stash apply stash@{${s.index}}`,
-        () => api.git.stashApply(repo.path, s.index)
-      );
-      toast.success('Stash applied');
-      await refreshStatus(repo.path); await loadHistory();
-    } catch (e) { toast.error('Apply stash failed', String(e)); }
-  };
-  const handleStashPop = async (s: StashEntry) => {
-    try {
-      await useOperationLogStore.getState().logOperation(
-        `Pop Stash {${s.index}}`, repo.path, `git stash pop stash@{${s.index}}`,
-        () => api.git.stashPop(repo.path, s.index)
-      );
-      toast.success('Stash popped');
-      await refreshStatus(repo.path); await loadHistory();
-    } catch (e) { toast.error('Pop stash failed', String(e)); }
-  };
-  const handleStashDrop = async (s: StashEntry) => {
-    if (!(await confirmDialog({
-      title: `Drop Stash {${s.index}}`,
-      message: `Permanently remove this stash?\n\n${s.message}`,
-      confirmLabel: 'Drop',
-      danger: true,
-    }))) return;
-    try {
-      await useOperationLogStore.getState().logOperation(
-        `Drop Stash {${s.index}}`, repo.path, `git stash drop stash@{${s.index}}`,
-        () => api.git.stashDrop(repo.path, s.index)
-      );
-      toast.success('Stash dropped');
-      await loadHistory();
-    } catch (e) { toast.error('Drop stash failed', String(e)); }
-  };
-  const handleRecyclableBranch = async (c: RecyclableCommit) => {
-    const name = await promptDialog({
-      title: 'Create branch at recyclable commit',
-      message: `Recover ${shortHash(c.hash)} as a new branch — the commit becomes reachable again.`,
-      input: { initialValue: `recover/${c.hash.substring(0, 8)}` },
-    });
-    if (!name) return;
-    try {
-      await api.git.createBranch(repo.path, name, c.hash);
-      toast.success(`Branch '${name}' created`, `From ${shortHash(c.hash)}`);
-      await loadHistory();
-    } catch (e) { toast.error('Create branch failed', String(e)); }
-  };
   const handleShowCommit = (hash: string) => {
     // Highlight the commit in the graph (when reachable from a loaded ref)
     useSelectionStore.getState().selectCommit(hash);
@@ -1403,22 +1803,22 @@ export function HistoryPage() {
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-border-default bg-bg-tertiary" style={{ height: 32 }}>
         <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold">Graph</span>
-          <span className="text-2xs text-text-tertiary">{filtered.length} commits</span>
+          <span className="text-xs font-semibold">{t('history.headerGraph')}</span>
+          <span className="text-2xs text-text-tertiary">{t('history.headerCommits', { n: filtered.length })}</span>
           {/* Incoming count badge — shows how many remote-only commits are visible */}
           {(() => {
             const visibleIncoming = filtered.filter(e => incomingHashes.has(e.hash)).length;
             if (visibleIncoming === 0) return null;
             return (
               <span className="text-2xs px-1.5 py-0.5 rounded border border-dashed border-status-info text-status-info font-medium flex items-center gap-0.5"
-                title={`${visibleIncoming} incoming commit(s) — exist on remote but not yet pulled`}>
-                ↓ {visibleIncoming} incoming
+                title={t('history.ttIncoming', { n: visibleIncoming })}>
+                {t('history.headerIncoming', { n: visibleIncoming })}
               </span>
             );
           })()}
           {(authorFilter || dateFrom || dateTo || pathFilter || useRegex) && (
-            <span className="text-2xs text-accent flex items-center gap-1" title="Active filters">
-              <span className="w-1.5 h-1.5 rounded-full bg-accent inline-block" />filtered
+            <span className="text-2xs text-accent flex items-center gap-1" title={t('history.ttActiveFilters')}>
+              <span className="w-1.5 h-1.5 rounded-full bg-accent inline-block" />{t('history.headerFiltered')}
             </span>
           )}
           {selectedBranches.size > 0 && (
@@ -1426,7 +1826,7 @@ export function HistoryPage() {
               {Array.from(selectedBranches).slice(0, 3).map(b => (
                 <span key={b} className="text-2xs px-1.5 py-0.5 rounded border border-accent/40 bg-accent-muted text-accent flex items-center gap-1">
                   <GitBranch size={8} />{b}
-                  <button onClick={() => toggleBranch(b)} title="Remove">
+                  <button onClick={() => toggleBranch(b)} title={t('common.remove')}>
                     <X size={8} />
                   </button>
                 </span>
@@ -1436,10 +1836,32 @@ export function HistoryPage() {
               )}
             </div>
           )}
+          {/* Single-click selection chip — when the user single-clicks a branch
+              (in BranchesPage, GitFlow, Pull-Requests, etc.) `selectedBranch`
+              is set and `selectedBranches` is cleared. The filter is actually
+              applied via `branchFilter`, but the multi-select chip area above
+              would be empty — so the user thought the filter wasn't applied.
+              Show a chip for the single-click selection too. */}
+          {selectedBranches.size === 0 && globalSelectedBranch && branchFilter !== 'head+upstream' && branchFilter !== 'all' && (
+            <div className="flex items-center gap-1 ml-2">
+              <span className="text-2xs px-1.5 py-0.5 rounded border border-accent/40 bg-accent-muted text-accent flex items-center gap-1">
+                <GitBranch size={8} />{globalSelectedBranch}
+                <button
+                  onClick={() => {
+                    selectBranch(null);
+                    setBranchFilter('head+upstream');
+                  }}
+                  title={t('common.remove')}
+                >
+                  <X size={8} />
+                </button>
+              </span>
+            </div>
+          )}
           {globalPathFilter && (
             <span className="text-2xs px-1.5 py-0.5 rounded border border-status-modified/40 bg-status-modified/10 text-status-modified flex items-center gap-1 ml-2">
               <FileText size={9} />{globalPathFilter}
-              <button onClick={() => setGlobalPathFilter(null)} title="Clear file filter">
+              <button onClick={() => setGlobalPathFilter(null)} title={t('history.ttClearFileFilter')}>
                 <X size={8} />
               </button>
             </span>
@@ -1454,6 +1876,7 @@ export function HistoryPage() {
             isRegex={useRegex}
             onToggleRegex={() => setUseRegex(!useRegex)}
             regexTitle="Toggle regex"
+            clearTitle={t('common.clearFilter', { defaultValue: 'Сбросить фильтр' })}
           />
           <button className={cn('icon-btn !w-5 !h-5', showFilters && 'active')}
             title="More filters" onClick={() => setShowFilters(!showFilters)}>
@@ -1464,37 +1887,41 @@ export function HistoryPage() {
             <button
               className={cn('text-2xs px-1.5 py-0.5 rounded border transition-colors',
                 authorFilter === myAuthorName && myAuthorName ? 'border-accent bg-accent-muted text-accent' : 'border-border-default bg-bg-tertiary text-text-secondary hover:bg-bg-hover')}
-              onClick={() => setAuthorFilter(authorFilter ? '' : myAuthorName)}
-              title="Show only my commits"
+              onClick={() => { clearSearchIfActive(); setAuthorFilter(authorFilter ? '' : myAuthorName); }}
+              title={t('history.ttShowMyCommits')}
             >
-              Mine
+              {t('history.chipMine')}
             </button>
             <button
               className={cn('text-2xs px-1.5 py-0.5 rounded border transition-colors',
                 search.toLowerCase() === 'merge' ? 'border-accent bg-accent-muted text-accent' : 'border-border-default bg-bg-tertiary text-text-secondary hover:bg-bg-hover')}
               onClick={() => setSearch(search.toLowerCase() === 'merge' ? '' : 'merge')}
-              title="Show only merge commits"
+              title={t('history.ttShowMerges')}
             >
-              Merges
+              {t('history.chipMerges')}
             </button>
             {/* Tagged-only filter — show only commits that have at least one tag
-                pointing at them (refs/tags/*). Useful for finding release points. */}
+                pointing at them (refs/tags/*). Useful for finding release points.
+                The count is the TAGGED-COMMITS-IN-VIEW count (matches what the
+                filter shows); the tooltip adds the repo-wide tag total. */}
             <button
               className={cn('text-2xs px-1.5 py-0.5 rounded border transition-colors flex items-center gap-1',
                 taggedActive ? 'border-accent bg-accent-muted text-accent' : 'border-border-default bg-bg-tertiary text-text-secondary hover:bg-bg-hover')}
-              onClick={() => setTaggedActive(!taggedActive)}
-              title={taggedActive ? 'Showing only tagged commits — click to clear' : 'Show only commits with a tag (release points)'}
+              onClick={() => { clearSearchIfActive(); setTaggedActive(!taggedActive); }}
+              title={taggedActive
+                ? t('history.taggedChipOn')
+                : t('history.taggedChipOff', { inView: taggedInView, total: allTags.length })}
             >
               <TagIcon size={10} />
-              Tagged{allTags.length > 0 ? ` (${allTags.length})` : ''}
+              {t('history.taggedChip')} ({taggedInView})
             </button>
           </div>
 
           <button className={cn('icon-btn !w-5 !h-5', showGraph && 'active')}
-            title="Toggle graph" onClick={() => setShowGraph(!showGraph)}>
+            title={t('history.ttToggleGraph')} onClick={() => setShowGraph(!showGraph)}>
             <GitBranch size={11} />
           </button>
-          <button className="icon-btn !w-5 !h-5" title="Refresh" onClick={loadHistory}>
+          <button className="icon-btn !w-5 !h-5" title={t('history.ttRefresh')} onClick={loadHistory}>
             <RefreshCw size={11} />
           </button>
         </div>
@@ -1507,17 +1934,23 @@ export function HistoryPage() {
           <div className="relative">
             <button
               className={cn('text-xs px-2 py-0.5 border rounded flex items-center gap-1',
-                selectedBranches.size > 0
+                (selectedBranches.size > 0 || (globalSelectedBranch && branchFilter !== 'head+upstream' && branchFilter !== 'all'))
                   ? 'border-accent bg-accent-muted text-accent'
                   : 'border-border-default bg-bg-tertiary text-text-secondary')}
               onClick={() => setShowBranchPicker(!showBranchPicker)}
             >
               <GitBranch size={10} />
-              Branches: {selectedBranches.size > 0 ? `${selectedBranches.size} selected` : (branchFilter === 'all' ? 'All' : branchFilter === 'head+upstream' ? 'Head + Upstream' : branchFilter)}
+              Branches: {selectedBranches.size > 0
+                ? `${selectedBranches.size} selected`
+                : (branchFilter === 'all'
+                    ? 'All'
+                    : branchFilter === 'head+upstream'
+                      ? 'Head + Upstream'
+                      : branchFilter)}
               <ChevronDown size={9} />
             </button>
             {showBranchPicker && (
-              <div className="absolute top-full left-0 mt-1 bg-bg-elevated border border-border-default rounded shadow-lg z-50 max-h-72 overflow-y-auto min-w-64">
+              <div className="absolute top-full left-0 mt-1 bg-zone-popover border border-border-default rounded shadow-lg z-50 max-h-72 overflow-y-auto min-w-64">
                 {/* Head + Upstream option — the new default. Shows only the
                     current local branch + its remote-tracking branch. */}
                 <label className="flex items-center gap-2 px-3 py-1.5 hover:bg-bg-hover cursor-pointer text-xs border-b border-border-subtle">
@@ -1548,42 +1981,106 @@ export function HistoryPage() {
                       setShowBranchPicker(false);
                     }}
                   />
-                  <span className="font-medium">All branches</span>
+                  <span className="font-medium">{t('history.ttAllBranches')}</span>
                 </label>
-                {branches.filter(b => !b.remote).length > 0 && (
+                {filterSymbolicHeads(branches.filter(b => !b.remote)).length > 0 && (
                   <div className="px-3 py-1 text-2xs uppercase text-text-tertiary bg-bg-tertiary">Local</div>
                 )}
-                {branches.filter(b => !b.remote).map(b => (
-                  <label key={b.name} className="flex items-center gap-2 px-3 py-1 hover:bg-bg-hover cursor-pointer text-xs">
-                    <input
-                      type="checkbox"
-                      checked={selectedBranches.has(b.name)}
-                      onChange={() => {
-                        toggleBranch(b.name);
-                        // Reset single-branch filter when using multi-select
-                        if (selectedBranches.size > 0 || !selectedBranches.has(b.name)) setBranchFilter('all');
-                      }}
-                    />
-                    <span className={cn('truncate', b.current && 'text-accent font-medium')}>{b.name}</span>
-                    {b.current && <span className="text-2xs text-text-tertiary ml-auto">HEAD</span>}
-                  </label>
-                ))}
-                {branches.filter(b => b.remote).length > 0 && (
+                {filterSymbolicHeads(branches.filter(b => !b.remote)).map(b => {
+                  // A branch is "checked" if either:
+                  //   - it's in the multi-select set (Ctrl+click in BranchesPage
+                  //     or any checkbox tick), OR
+                  //   - it's the single-click selection (`selectedBranch` set
+                  //     via BranchesPage plain click, GitFlow, Pull-Requests,
+                  //     etc.) — `selectedBranches` is empty in that case, so
+                  //     without this fallback the user would see no checkbox
+                  //     checked and think the filter wasn't applied.
+                  const isMultiSelected = selectedBranches.has(b.name);
+                  const isSingleSelected = selectedBranches.size === 0 && globalSelectedBranch === b.name;
+                  const isChecked = isMultiSelected || isSingleSelected;
+                  return (
+                    <label key={b.name} className="flex items-center gap-2 px-3 py-1 hover:bg-bg-hover cursor-pointer text-xs">
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => {
+                          if (isSingleSelected) {
+                            // User clicked the checkbox for the currently
+                            // single-selected branch — clear that selection
+                            // and reset the filter to the default view.
+                            selectBranch(null);
+                            setBranchFilter('head+upstream');
+                          } else {
+                            // Multi-select path: toggle this branch in the
+                            // set. If the user is starting from a single-click
+                            // selection, `toggleBranch` will add the new
+                            // branch and clear `selectedBranch` (size > 0).
+                            // The previous single-selected branch is NOT
+                            // preserved in the multi-set — this matches
+                            // SmartGit behaviour where ticking a checkbox
+                            // replaces the single-click selection.
+                            if (selectedBranches.size === 0 && globalSelectedBranch && globalSelectedBranch !== b.name) {
+                              // Preserve the previous single-click selection
+                              // by adding it to the multi-select set first.
+                              toggleBranch(globalSelectedBranch);
+                            }
+                            toggleBranch(b.name);
+                            setBranchFilter('all');
+                          }
+                        }}
+                      />
+                      <BranchSyncIndicator
+                        tracking={b.tracking}
+                        upstream={b.upstream}
+                        ahead={b.ahead}
+                        behind={b.behind}
+                        gone={b.gone}
+                        remote={b.remote}
+                        size={11}
+                      />
+                      <span className={cn('truncate', b.current && 'text-accent font-medium')}>{b.name}</span>
+                      {b.current && <span className="text-2xs text-text-tertiary ml-auto">HEAD</span>}
+                    </label>
+                  );
+                })}
+                {filterSymbolicHeads(branches.filter(b => b.remote)).length > 0 && (
                   <div className="px-3 py-1 text-2xs uppercase text-text-tertiary bg-bg-tertiary">Remote</div>
                 )}
-                {branches.filter(b => b.remote).map(b => (
-                  <label key={b.name} className="flex items-center gap-2 px-3 py-1 hover:bg-bg-hover cursor-pointer text-xs">
-                    <input
-                      type="checkbox"
-                      checked={selectedBranches.has(b.name)}
-                      onChange={() => {
-                        toggleBranch(b.name);
-                        if (selectedBranches.size > 0 || !selectedBranches.has(b.name)) setBranchFilter('all');
-                      }}
-                    />
-                    <span className="truncate">{b.name}</span>
-                  </label>
-                ))}
+                {filterSymbolicHeads(branches.filter(b => b.remote)).map(b => {
+                  const isMultiSelected = selectedBranches.has(b.name);
+                  const isSingleSelected = selectedBranches.size === 0 && globalSelectedBranch === b.name;
+                  const isChecked = isMultiSelected || isSingleSelected;
+                  return (
+                    <label key={b.name} className="flex items-center gap-2 px-3 py-1 hover:bg-bg-hover cursor-pointer text-xs">
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => {
+                          if (isSingleSelected) {
+                            selectBranch(null);
+                            setBranchFilter('head+upstream');
+                          } else {
+                            if (selectedBranches.size === 0 && globalSelectedBranch && globalSelectedBranch !== b.name) {
+                              toggleBranch(globalSelectedBranch);
+                            }
+                            toggleBranch(b.name);
+                            setBranchFilter('all');
+                          }
+                        }}
+                      />
+                      <BranchSyncIndicator
+                        tracking={b.tracking}
+                        upstream={b.upstream}
+                        ahead={b.ahead}
+                        behind={b.behind}
+                        gone={b.gone}
+                        remote={b.remote}
+                        size={11}
+                      />
+                      <span className="truncate">{b.name}</span>
+                    </label>
+                  );
+                })}
                 <div className="px-3 py-1 border-t border-border-subtle flex items-center justify-between">
                   <button className="text-2xs text-accent"
                     onClick={() => {
@@ -1602,20 +2099,20 @@ export function HistoryPage() {
           </div>
           <label className="flex items-center gap-1">
             <span className="text-text-tertiary">Author:</span>
-            <input type="text" value={authorFilter} placeholder="name or email"
-              onChange={(e) => setAuthorFilter(e.target.value)}
+            <input type="text" value={authorFilter} placeholder={t('history.authorPlaceholder')}
+              onChange={(e) => { if (e.target.value.trim()) clearSearchIfActive(); setAuthorFilter(e.target.value); }}
               className="text-xs w-32 px-1 py-0.5 bg-bg-tertiary border border-border-default rounded" />
           </label>
           <label className="flex items-center gap-1">
             <span className="text-text-tertiary">From:</span>
             <input type="date" value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
+              onChange={(e) => { if (e.target.value) clearSearchIfActive(); setDateFrom(e.target.value); }}
               className="text-xs px-1 py-0.5 bg-bg-tertiary border border-border-default rounded" />
           </label>
           <label className="flex items-center gap-1">
             <span className="text-text-tertiary">To:</span>
             <input type="date" value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
+              onChange={(e) => { if (e.target.value) clearSearchIfActive(); setDateTo(e.target.value); }}
               className="text-xs px-1 py-0.5 bg-bg-tertiary border border-border-default rounded" />
           </label>
           <label className="flex items-center gap-1">
@@ -1636,8 +2133,32 @@ export function HistoryPage() {
       <div className="flex flex-1 overflow-hidden">
         {/* Graph + Commit list */}
         <div className="flex-1 overflow-y-auto" ref={listScrollRef} style={{ position: 'relative' }}>
+          {/* Group-selection action bar — sticky above the list while a
+              2+ multi-selection is active (Shift/Ctrl+click). */}
+          {!loading && multiSel.size >= 2 && (
+            <div className="sticky top-0 z-30 flex items-center gap-2 px-2 py-1.5 bg-accent/15 border-b border-accent/40 text-xs text-text-primary" style={{ backdropFilter: 'blur(4px)' }}>
+              <GitBranch size={13} className="text-accent shrink-0" />
+              <span className="font-medium">
+                {t('history.nCommitsSelected', { count: multiSel.size })}
+              </span>
+              <button
+                className="btn btn-primary text-2xs !py-0.5 !px-2 ml-1"
+                onClick={openSquashToBranchDialog}
+                title={t('history.squashGroupToBranchTitle')}
+              >
+                {t('history.squashGroupToBranchAction')}
+              </button>
+              <span className="flex-1" />
+              <button
+                className="btn btn-secondary text-2xs !py-0.5 !px-2"
+                onClick={() => setMultiSel(new Set())}
+              >
+                {t('common.clear')}
+              </button>
+            </div>
+          )}
           {loading ? (
-            <div className="p-8 text-center text-text-tertiary text-sm">Loading...</div>
+            <div className="p-8 text-center text-text-tertiary text-sm">{t('common.loadingEllipsis')}</div>
           ) : filtered.length === 0 ? (
             <div className="p-8 text-center text-text-tertiary text-sm">
               {taggedActive ? 'No tagged commits found — tags point at commits outside the loaded window. Try scrolling down or increase the commit limit.' : search ? 'No commits match' : 'No commits yet'}
@@ -1687,12 +2208,18 @@ export function HistoryPage() {
 
                         {row.node && (
                           <>
+                            {/* Commits that are remote-only ("incoming", not yet
+                                pulled) get a dashed lane segment too — the
+                                whole remote chain then reads as distinct from
+                                the solid local history (VS Code style). */}
+                            {(() => { const inc = incomingHashes.has(row.node!.entry.hash); return (
+                            <>
                             {/* Closing curves — smooth bezier into node */}
                             {row.node.closing.map((c, ci) => (
                               <path key={`c-${start + idx}-${ci}`}
                                 d={bezierPath(x(c.lane), rowY, x(row.node!.lane), cy)}
                                 stroke={laneColor(c.color)} strokeWidth={2} fill="none" opacity={0.7}
-                                strokeDasharray={strokeDash(c.dashed)} strokeLinecap="round" />
+                                strokeDasharray={strokeDash(c.dashed || inc)} strokeLinecap="round" />
                             ))}
 
                             {/* Incoming vertical line (top → node center) */}
@@ -1700,8 +2227,8 @@ export function HistoryPage() {
                               <line
                                 x1={x(row.node.lane)} y1={rowY}
                                 x2={x(row.node.lane)} y2={cy}
-                                stroke={laneColor(row.node.color)} strokeWidth={2} opacity={0.7}
-                                strokeDasharray={strokeDash(row.node.firstParentDashed)} strokeLinecap="round" />
+                                stroke={laneColor(row.node.color)} strokeWidth={2} opacity={inc ? 0.55 : 0.7}
+                                strokeDasharray={strokeDash(row.node.firstParentDashed || inc)} strokeLinecap="round" />
                             )}
 
                             {/* Continues vertical line (node center → bottom) */}
@@ -1709,8 +2236,8 @@ export function HistoryPage() {
                               <line
                                 x1={x(row.node.lane)} y1={cy}
                                 x2={x(row.node.lane)} y2={rowY + ROW_HEIGHT}
-                                stroke={laneColor(row.node.color)} strokeWidth={2} opacity={0.7}
-                                strokeDasharray={strokeDash(row.node.firstParentDashed)} strokeLinecap="round" />
+                                stroke={laneColor(row.node.color)} strokeWidth={2} opacity={inc ? 0.55 : 0.7}
+                                strokeDasharray={strokeDash(row.node.firstParentDashed || inc)} strokeLinecap="round" />
                             )}
 
                             {/* Merge curves — smooth bezier from node to parent lane */}
@@ -1718,8 +2245,10 @@ export function HistoryPage() {
                               <path key={`m-${idx}-${mi}`}
                                 d={bezierPath(x(row.node!.lane), cy, x(m.lane), rowY + ROW_HEIGHT)}
                                 stroke={laneColor(m.color)} strokeWidth={2} fill="none" opacity={0.7}
-                                strokeDasharray={strokeDash(m.dashed)} strokeLinecap="round" />
+                                strokeDasharray={strokeDash(m.dashed || inc)} strokeLinecap="round" />
                             ))}
+                            </>
+                            ); })()}
 
                             {/* Node circle — VS Code style: solid filled, colored ring */}
                             {(() => {
@@ -1769,7 +2298,7 @@ export function HistoryPage() {
                   style={{ height: ROW_HEIGHT, paddingLeft: showGraph ? graphWidth + 8 : 8, zIndex: 4 }}
                   onClick={() => { setSelectedIdx(-1); window.location.hash = '#/changes'; }}
                 >
-                  <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: 'var(--status-deleted)' }} />
+                  <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: 'var(--status-deleted)' }} />
                   <span className="text-xs font-medium">Working Tree ({status?.files.length || 0} changed)</span>
                 </div>
               )}
@@ -1783,143 +2312,34 @@ export function HistoryPage() {
                     const realIdx = lazyList.visibleRange.start + idx;
                     if (!row.node) return null;
                     const entry = row.node.entry;
-                    const initials = getInitials(entry.author.name);
-                const color = getAuthorColor(entry.author.name);
-                const isSelected = selectedIdx === realIdx;
-                const isHEAD = entry.refs.some(r => r.includes('HEAD'));
-                const isFirstOverall = realIdx === 0;
-                return (
-                  <div
-                    key={entry.hash}
-                    className={cn('flex items-center gap-2 border-b border-border-subtle cursor-pointer relative',
-                      isSelected ? 'bg-bg-selected' : 'hover:bg-bg-hover',
-                      // Incoming (remote-only) commits get a subtle tinted background
-                      incomingHashes.has(entry.hash) && !isSelected && 'bg-blue-50/30 dark:bg-blue-950/10')}
-                    style={{ height: ROW_HEIGHT, paddingLeft: showGraph ? graphWidth + 8 : 8, zIndex: 4 }}
-                    onClick={() => { setSelectedIdx(realIdx); selectCommit(entry.hash); }}
-                    onContextMenu={(e) => showCommitContextMenu(e, entry, realIdx)}
-                  >
-                    {isHEAD && <span className="text-2xs text-text-primary flex-shrink-0" style={{ width: 8 }}>▶</span>}
-
-                    {/**  Sync indicator */}
-                    {isFirstOverall && status?.current && status?.tracking && (
-                      <div
-                        className={cn('flex items-center gap-0.5 px-1.5 py-0.5 rounded border text-2xs font-medium',
-                          status.ahead > 0 && status.behind > 0
-                            ? 'border-status-modified/40 bg-status-modified/10 text-status-modified'
-                            : status.ahead > 0
-                              ? 'border-status-added/40 bg-status-added/10 text-status-added'
-                              : status.behind > 0
-                                ? 'border-status-info/40 bg-status-info/10 text-status-info'
-                                : 'border-status-added/30 bg-status-added/5 text-status-added')}
-                        title={
-                          status.ahead === 0 && status.behind === 0
-                            ? `In sync with ${status.tracking}`
-                            : `Local: ${status.current} · Upstream: ${status.tracking}\n` +
-                              `↑ ${status.ahead} commit(s) ahead · ↓ ${status.behind} commit(s) behind`
-                        }
-                      >
-                        {status.ahead === 0 && status.behind === 0 ? (
-                          /* In sync — plug CONNECTED (вилка в розетке) */
-                          <span className="flex items-center gap-0.5">
-                            <PlugConnected size={14} />
-                          </span>
-                        ) : (
-                          /* Out of sync — plug DISCONNECTED (вилка отдельно) + counts */
-                          <>
-                            <PlugDisconnected size={14} />
-                            {status.ahead > 0 && (
-                              <span className="flex items-center gap-0.5 ml-0.5">
-                                <ArrowUp size={9} />
-                                {status.ahead}
-                              </span>
-                            )}
-                            {status.behind > 0 && (
-                              <span className="flex items-center gap-0.5 ml-0.5">
-                                <ArrowDown size={9} />
-                                {status.behind}
-                              </span>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    )}
-
-                    {!isHEAD && <span style={{ width: 8 }} className="flex-shrink-0" />}
-
-                    {/* Decorations: tags first, then HEAD/branches/remotes — parsed
-                        from BOTH short and --decorate=full shapes (see refBadge). */}
-                    {/* Show up to 5 ref badges per row so tags (often grouped with
-                        branches and remotes) are visible at a glance. */}
-                    <RefBadges refs={entry.refs} max={5} hash={entry.hash} onChanged={loadHistory} />
-
-                    {/* Incoming badge — commit exists only on remote, not yet pulled.
-                        In VS Code style: a dashed "↓ incoming" label with the remote
-                        branch name. */}
-                    {incomingHashes.has(entry.hash) && (
-                      <span className="flex-shrink-0 text-2xs px-1.5 py-0.5 rounded border border-dashed border-status-info text-status-info font-medium flex items-center gap-0.5"
-                        title="Incoming — this commit exists on a remote but has not been pulled into a local branch yet. Use Pull to bring it into your local branch.">
-                        ↓
-                        {entry.refs.some(r => r.includes('refs/remotes/') || r.includes('/')) && (
-                          <span className="opacity-75">
-                            {entry.refs.find(r => r.includes('refs/remotes/'))?.replace('refs/remotes/', '') || entry.refs.find(r => r.includes('/'))}
-                          </span>
-                        )}
-                      </span>
-                    )}
-
-                    {/* GitHub Actions CI badge (SmartGit "My History" CI integrations) */}
-                    {ciStatus[entry.hash]?.conclusion && (
-                      <span
-                        className="flex-shrink-0 text-2xs"
-                        title={`CI: ${ciStatus[entry.hash].conclusion} (${ciStatus[entry.hash].totalChecks} checks)`}
-                      >
-                        {ciStatus[entry.hash].conclusion === 'success' && <span className="text-green-500">●</span>}
-                        {ciStatus[entry.hash].conclusion === 'failure' && <span className="text-red-500">●</span>}
-                        {ciStatus[entry.hash].conclusion === 'running' && <span className="text-yellow-500 animate-pulse">●</span>}
-                      </span>
-                    )}
-
-                    <span className={cn('flex-1 truncate text-xs', isSelected ? 'font-semibold text-text-primary' : 'font-medium text-text-primary')}>
-                      {bugtraq
-                        ? linkifyCommitMessage(entry.subject, bugtraq).map((seg, i) =>
-                            seg.url ? (
-                              <a
-                                key={i}
-                                href={seg.url}
-                                className="text-accent hover:underline"
-                                onClick={(e) => { e.stopPropagation(); api.app.openExternal(seg.url!); }}
-                              >
-                                {seg.text}
-                              </a>
-                            ) : (
-                              <span key={i}>{seg.text}</span>
-                            )
-                          )
-                        : entry.subject}
-                    </span>
-
-                    {/* Hash — clicking ANY commit hash opens History focused on
-                        that commit (same as PARENTS links); copy lives in the
-                        right-click menu and the row menu. */}
-                    <CommitHashLink
-                      hash={entry.hash}
-                      plain
-                      display={entry.hashAbbrev || shortHash(entry.hash)}
-                      className="text-text-tertiary/60 flex-shrink-0 truncate"
-                    />
-
-                    {/* Author avatar — Gravatar image if the author's email
-                        is from a known provider (GitHub / GitLab noreply),
-                        otherwise the colored-initial fallback badge.
-                        QW-6 / Task (gravatar). */}
-                    <Avatar name={entry.author.name} email={entry.author.email} size={16} />
-                    <span className="text-2xs text-text-tertiary flex-shrink-0" style={{ width: 70, textAlign: 'right' }}>
-                      {formatTime(entry.author.date)}
-                    </span>
-                  </div>
-                );
-              })}
+                    // Precompute per-row values as PRIMITIVES so the memoized
+                    // HistoryCommitRow bails out on scroll frames (see the
+                    // component docblock for the prop discipline).
+                    const ci = ciStatus[entry.hash];
+                    const remoteLabel = entry.refs.some(r => r.includes('refs/remotes/') || r.includes('/'))
+                      ? (entry.refs.find(r => r.includes('refs/remotes/'))?.replace('refs/remotes/', '') || entry.refs.find(r => r.includes('/')) || null)
+                      : null;
+                    return (
+                      <HistoryCommitRow
+                        key={entry.hash}
+                        entry={entry}
+                        realIdx={realIdx}
+                        isSelected={selectedIdx === realIdx}
+                        isMultiSelected={multiSel.has(entry.hash)}
+                        sync={realIdx === 0 ? firstRowSync : null}
+                        isIncoming={incomingHashes.has(entry.hash)}
+                        incomingRemoteLabel={remoteLabel}
+                        ciConclusion={ci?.conclusion ?? null}
+                        ciTotalChecks={ci?.totalChecks ?? 0}
+                        showGraph={showGraph}
+                        graphWidth={graphWidth}
+                        bugtraqConfig={bugtraq}
+                        onRefsChanged={loadHistory}
+                        onSelect={rowSelectHandler}
+                        onContextMenu={rowContextMenuHandler}
+                      />
+                    );
+                  })}
                 </div>
               </div>
 
@@ -1942,23 +2362,45 @@ export function HistoryPage() {
           )}
         </div>
 
-        {/* Detail panel */}
+        {/* Detail panel — collapsible right sidebar (VS Code-style) */}
+        {detailCollapsed ? (
+          <button
+            className="w-6 shrink-0 bg-bg-secondary border-l border-border-default flex items-center justify-center hover:bg-bg-hover text-text-secondary hover:text-text-primary transition-colors"
+            title={t('history.expandDetailPanel', { defaultValue: 'Развернуть панель коммита' })}
+            aria-label={t('history.expandDetailPanel', { defaultValue: 'Развернуть панель коммита' })}
+            onClick={toggleDetailCollapsed}
+          >
+            <PanelRightOpen size={14} />
+          </button>
+        ) : (
+          <>
         <ResizableSplitter direction="horizontal" onResize={(d) => handleDetailResize(-d)} />
-        <div className="bg-bg-secondary overflow-y-auto flex-shrink-0" style={{ width: detailWidth }}>
+        <div className="bg-bg-secondary overflow-y-auto shrink-0 relative" style={{ width: detailWidth }}>
+          <button
+            className="absolute top-1 right-1 z-10 icon-btn !w-6 !h-6"
+            title={t('history.collapseDetailPanel', { defaultValue: 'Свернуть панель коммита' })}
+            aria-label={t('history.collapseDetailPanel', { defaultValue: 'Свернуть панель коммита' })}
+            onClick={toggleDetailCollapsed}
+          >
+            <PanelRightClose size={13} />
+          </button>
           {selected ? (
             <div className="p-3">
-              <div className="text-sm font-medium text-text-primary mb-2">
-                {bugtraq
-                  ? linkifyCommitMessage(selected.subject, bugtraq).map((seg, i) =>
-                      seg.url ? (
-                        <a key={i} href={seg.url} className="text-accent hover:underline" onClick={(e) => { e.preventDefault(); api.app.openExternal(seg.url!); }}>
-                          {seg.text}
-                        </a>
-                      ) : (
-                        <span key={i}>{seg.text}</span>
+              <div className="flex items-start gap-2 mb-2">
+                <Avatar name={selected.author.name} email={selected.author.email} size={20} className="mt-0.5 shrink-0" />
+                <div className="text-sm font-medium text-text-primary flex-1 min-w-0">
+                  {bugtraq
+                    ? linkifyCommitMessage(selected.subject, bugtraq).map((seg, i) =>
+                        seg.url ? (
+                          <a key={i} href={seg.url} className="text-accent hover:underline" onClick={(e) => { e.preventDefault(); api.app.openExternal(seg.url!); }}>
+                            {seg.text}
+                          </a>
+                        ) : (
+                          <span key={i}>{seg.text}</span>
+                        )
                       )
-                    )
-                  : selected.subject}
+                    : selected.subject}
+                </div>
               </div>
               {selectedNote && (
                 <div className="mb-2 px-2 py-1.5 rounded bg-amber-500/10 border border-amber-500/30 flex items-start gap-1.5">
@@ -1968,47 +2410,165 @@ export function HistoryPage() {
               )}
               {/* Tags and branch refs on this commit (shared badge renderer) */}
               <RefBadges refs={selected.refs} className="mb-3" hash={selected.hash} onChanged={loadHistory} />
-              {/* Annotated-tag details — SmartGit shows the tag message in the
-                  commit description. Lightweight tags only get a badge above. */}
-              {tagsHere.filter(t => t.annotated).length > 0 && (
-                <div className="mb-3 space-y-1">
-                  {tagsHere.filter(t => t.annotated).map((t) => (
-                    <div key={t.name} className="px-2 py-1.5 rounded bg-tag-bg/40 border border-tag-border/40">
-                      <div className="flex items-center gap-1.5 text-2xs text-tag-text">
-                        <TagIcon size={11} />
-                        <span className="font-semibold">{t.name}</span>
-                        {t.tagger && <span className="text-text-tertiary">· {t.tagger}</span>}
-                        {t.date && <span className="text-text-tertiary">· {formatTime(t.date)}</span>}
-                      </div>
-                      {t.message && (
-                        <div className="text-2xs text-text-secondary mt-0.5 whitespace-pre-wrap">{t.message}</div>
-                      )}
-                    </div>
-                  ))}
+              {/* BRANCHES CONTAINING this commit — the user's «в описании
+                  коммита не хватает названия ветки, к которой он относится».
+                  RefBadges above shows only refs POINTING AT the commit;
+                  `git branch --contains` answers the actual question (a
+                  commit "belongs" to every branch that contains it). Local
+                  badges are clickable → walks that branch; remote ones are
+                  informational. Collapsed to 5 + "+N" for wide branch sets. */}
+              {(branchesHere.local.length > 0 || branchesHere.remote.length > 0) && (
+                <div className="mb-3">
+                  <div className="text-2xs uppercase text-text-tertiary mb-1 flex items-center gap-1">
+                    <GitBranch size={10} />
+                    {t('history.branchesHereTitle')}
+                    <span className="text-text-tertiary/70">
+                      ({branchesHere.local.length + branchesHere.remote.length})
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {branchesHere.local.slice(0, 5).map((b) => (
+                      <button
+                        key={`l-${b}`}
+                        className="px-1.5 py-0.5 rounded border border-border-default bg-bg-tertiary text-2xs text-text-primary hover:bg-bg-hover max-w-40 truncate"
+                        title={t('history.branchesHereClick', { defaultValue: 'Показать историю ветки {branch}', branch: b })}
+                        onClick={() => { useSelectionStore.getState().clearBranches(); setBranchFilter(b); }}
+                      >
+                        {b}
+                      </button>
+                    ))}
+                    {branchesHere.local.length > 5 && (
+                      <span
+                        className="px-1.5 py-0.5 rounded border border-border-default bg-bg-tertiary text-2xs text-text-tertiary"
+                        title={branchesHere.local.join(', ')}
+                      >
+                        +{branchesHere.local.length - 5}
+                      </span>
+                    )}
+                    {branchesHere.remote.slice(0, 3).map((b) => (
+                      <span
+                        key={`r-${b}`}
+                        className="px-1.5 py-0.5 rounded border border-border-default/60 text-2xs text-text-tertiary max-w-40 truncate"
+                        title={t('history.branchesHereRemote', { defaultValue: 'Удалённая ветка, содержащая этот коммит', })}
+                      >
+                        {b}
+                      </span>
+                    ))}
+                    {branchesHere.remote.length > 3 && (
+                      <span
+                        className="px-1.5 py-0.5 rounded border border-border-default/60 text-2xs text-text-tertiary"
+                        title={branchesHere.remote.join(', ')}
+                      >
+                        +{branchesHere.remote.length - 3}
+                      </span>
+                    )}
+                  </div>
                 </div>
               )}
+              {/* TAGS ON THIS COMMIT — visible inline management: create (+),
+                  edit (pencil) and delete (trash) without hunting for the
+                  right-click menu. The context menu keeps the same actions;
+                  this section makes them discoverable. Shows ALL tags
+                  (annotated AND lightweight) — previously lightweight tags
+                  were only visible as a badge above. */}
+              <div className="mb-3">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-2xs uppercase text-text-tertiary flex items-center gap-1">
+                    <TagIcon size={10} />
+                    {t('history.tagsSectionTitle')}
+                    <span className="text-text-tertiary/70">({tagsHere.length})</span>
+                  </span>
+                  <button
+                    className="icon-btn !w-4 !h-4"
+                    title={t('history.addTagTooltip')}
+                    onClick={() => handleCreateTag(selected)}
+                  >
+                    <Plus size={9} />
+                  </button>
+                </div>
+                {tagsHere.length === 0 ? (
+                  <div className="text-2xs text-text-tertiary italic">{t('history.noTagsOnCommit')}</div>
+                ) : (
+                  <div className="space-y-1">
+                    {tagsHere.map((tg) => (
+                      <div key={tg.name} className="group px-2 py-1.5 rounded bg-tag-bg/40 border border-tag-border/40">
+                        <div className="flex items-center gap-1.5 text-2xs text-tag-text">
+                          <TagIcon size={11} className="shrink-0" />
+                          <span className="font-semibold">{tg.name}</span>
+                          {!tg.annotated && (
+                            <span className="px-1 rounded border border-tag-border/60 text-text-tertiary">{t('history.tagLightweightBadge')}</span>
+                          )}
+                          {tg.tagger && <span className="text-text-tertiary truncate">· {tg.tagger}</span>}
+                          {tg.date && <span className="text-text-tertiary shrink-0">· {formatTime(tg.date)}</span>}
+                          <span className="ml-auto flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100">
+                            <button
+                              className="icon-btn !w-5 !h-5"
+                              title={t('history.editTagTooltip')}
+                              onClick={() => handleEditTag(tg.name, selected)}
+                            >
+                              <Pencil size={10} />
+                            </button>
+                            <button
+                              className="icon-btn !w-5 !h-5 hover:!text-status-deleted"
+                              title={t('history.deleteTagTooltip')}
+                              onClick={() => handleDeleteTag(tg.name)}
+                            >
+                              <Trash size={10} />
+                            </button>
+                          </span>
+                        </div>
+                        {tg.annotated && tg.message && (
+                          <div className="text-2xs text-text-secondary mt-0.5 whitespace-pre-wrap">{tg.message}</div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
               <div className="flex items-center gap-2 mb-3">
                 <CommitHashLink hash={selected.hash} />
-                <button className="icon-btn !w-5 !h-5" title="Copy" onClick={() => { copyToClipboard(selected.hash); toast.success('Copied'); }}>
+                <button className="icon-btn !w-5 !h-5" title="Copy" onClick={() => { copyToClipboard(selected.hash); toast.success(t('history.copied')); }}>
                   <Copy size={10} />
                 </button>
-                <button className="icon-btn !w-5 !h-5" title="Browser" onClick={handleOpenInBrowser}>
+                <button className="icon-btn !w-5 !h-5" title={t('history.browserTitle')} onClick={handleOpenInBrowser}>
                   <ExternalLink size={11} />
                 </button>
               </div>
               <div className="flex items-center gap-2 mb-3">
-                <span className="flex-shrink-0 rounded author-badge text-center"
+                <span className="shrink-0 rounded author-badge text-center"
                   style={{ backgroundColor: getAuthorColor(selected.author.name).bg, width: 28, height: 18, fontSize: 9, lineHeight: '18px' }}>
                   {getInitials(selected.author.name)}
                 </span>
                 <div className="flex-1 min-w-0">
-                  <div className="text-xs text-text-primary">{selected.author.name}</div>
+                  {/* Click the author name → filter the graph by this author
+                      (the user's «не получается его скопировать и вставить в
+                      фильтр» — one click instead of copy+paste). */}
+                  <button
+                    className="text-xs text-text-primary hover:text-accent text-left truncate max-w-full"
+                    title={t('history.authorFilterClick', { defaultValue: 'Показать коммиты этого автора' })}
+                    onClick={() => {
+                      setAuthorFilter(selected.author.name);
+                      setShowFilters(true);
+                    }}
+                  >
+                    {selected.author.name}
+                  </button>
                   <div className="text-2xs text-text-tertiary">{formatTime(selected.author.date)}</div>
                 </div>
+                <button
+                  className="icon-btn !w-5 !h-5 shrink-0"
+                  title={t('history.authorCopy', { defaultValue: 'Скопировать «Имя <email>»' })}
+                  onClick={() => {
+                    copyToClipboard(`${selected.author.name} <${selected.author.email}>`);
+                    toast.success(t('history.copied'));
+                  }}
+                >
+                  <Copy size={10} />
+                </button>
               </div>
               {selected.parents.length > 0 && (
                 <div className="mb-3">
-                  <div className="text-2xs uppercase text-text-tertiary mb-1">Parents</div>
+                  <div className="text-2xs uppercase text-text-tertiary mb-1">{t('history.ttParents')}</div>
                   {selected.parents.map((p, i) => (
                     <div key={i} className="flex items-center gap-1">
                       <CornerDownRight size={10} className="text-text-tertiary" />
@@ -2035,7 +2595,7 @@ export function HistoryPage() {
                   </button>
                   {showNested && (
                     <div className="space-y-0.5">
-                      {loadingNested && <div className="text-2xs text-text-tertiary">Loading...</div>}
+                      {loadingNested && <div className="text-2xs text-text-tertiary">{t('common.loadingEllipsis')}</div>}
                       {nestedCommits.map((c) => (
                         <div
                           key={c.hash}
@@ -2047,11 +2607,11 @@ export function HistoryPage() {
                           title={c.hash === selected.hash ? 'This merge commit' : 'Jump to commit'}
                         >
                           {c.hash === selected.hash
-                            ? <GitMerge size={10} className="text-text-tertiary flex-shrink-0" />
-                            : <CornerDownRight size={10} className="text-text-tertiary flex-shrink-0" />}
-                          <span className="font-mono flex-shrink-0">{c.hashAbbrev || shortHash(c.hash)}</span>
+                            ? <GitMerge size={10} className="text-text-tertiary shrink-0" />
+                            : <CornerDownRight size={10} className="text-text-tertiary shrink-0" />}
+                          <span className="font-mono shrink-0">{c.hashAbbrev || shortHash(c.hash)}</span>
                           <span className="truncate flex-1 min-w-0">{c.subject}</span>
-                          <span className="text-text-tertiary flex-shrink-0">{c.author.name}</span>
+                          <span className="text-text-tertiary shrink-0">{c.author.name}</span>
                         </div>
                       ))}
                     </div>
@@ -2123,7 +2683,7 @@ export function HistoryPage() {
                 </div>
                 {showFiles && (
                   <div className="space-y-0.5">
-                    {loadingFiles ? <div className="text-2xs text-text-tertiary">Loading...</div> :
+                    {loadingFiles ? <div className="text-2xs text-text-tertiary">{t('common.loadingEllipsis')}</div> :
                       filesViewMode === 'tree' ? (
                         <CommitFileTree
                           files={commitFiles}
@@ -2216,7 +2776,7 @@ export function HistoryPage() {
                           <span className={cn('flex-1 truncate font-mono text-text-secondary group-hover:text-text-primary',
                             isHighlighted && 'text-accent font-medium')}>{f.path}</span>
                           {!f.binary && (f.additions > 0 || f.deletions > 0) && (
-                            <span className="text-2xs flex-shrink-0">
+                            <span className="text-2xs shrink-0">
                               <span className="text-status-added">+{f.additions}</span>
                               <span className="text-status-deleted ml-1">-{f.deletions}</span>
                             </span>
@@ -2231,29 +2791,38 @@ export function HistoryPage() {
               </div>
             </div>
           ) : (
-            <div className="p-4 text-center text-text-tertiary text-sm">Select a commit</div>
+            <div className="p-4 text-center text-text-tertiary text-sm">{t('history.ttSelectCommit')}</div>
           )}
         </div>
+          </>
+        )}
       </div>
 
-      {/* Create Tag dialog */}
+      {/* Create / Edit Tag dialog */}
       {showTagDialog && (
         <div className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50" onClick={() => setShowTagDialog(false)}>
           <div className="panel w-96 p-4" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-medium mb-1 flex items-center gap-2">
-              <TagIcon size={16} /> Create Tag at {shortHash(tagTarget || '')}
+              <TagIcon size={16} />
+              {editingTagName
+                ? t('history.tagDialogEditTitle', { name: editingTagName })
+                : t('history.tagDialogCreateTitle', { hash: shortHash(tagTarget || '') })}
             </h3>
-            <div className="text-2xs text-text-tertiary mb-4">Tag will point to this commit.</div>
+            <div className="text-2xs text-text-tertiary mb-4">
+              {editingTagName && tagName.trim() && tagName.trim() !== editingTagName
+                ? t('history.tagDialogRenameHint')
+                : t('history.tagDialogTargetHint')}
+            </div>
             <div className="space-y-3">
               <div>
-                <label className="text-xs text-text-tertiary block mb-1">Tag name</label>
+                <label className="text-xs text-text-tertiary block mb-1">{t('history.tagNameLabel')}</label>
                 <input type="text" className="w-full text-sm font-mono" placeholder="v1.0.0"
                   value={tagName} autoFocus
                   onChange={(e) => setTagName(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleSaveTag()} />
               </div>
               <div>
-                <label className="text-xs text-text-tertiary block mb-1">Message (optional, for annotated tags)</label>
+                <label className="text-xs text-text-tertiary block mb-1">{t('history.tagMessageLabel')}</label>
                 <textarea className="w-full text-sm h-20 resize-none"
                   value={tagMessage}
                   onChange={(e) => setTagMessage(e.target.value)}
@@ -2262,13 +2831,13 @@ export function HistoryPage() {
               <label className="flex items-center gap-2 text-sm cursor-pointer">
                 <input type="checkbox" checked={tagAnnotated}
                   onChange={(e) => setTagAnnotated(e.target.checked)} />
-                <span>Annotated tag (recommended — stores tagger + date + message)</span>
+                <span>{t('history.tagAnnotatedLabel')}</span>
               </label>
             </div>
-            <div className="flex justify-end gap-2 mt-4">
+            <div className="flex flex-wrap justify-end gap-2 mt-4">
               <button className="btn btn-secondary" onClick={() => setShowTagDialog(false)}>{t('action.button.cancel')}</button>
               <button className="btn btn-primary" onClick={handleSaveTag} disabled={!tagName.trim()}>
-                <TagIcon size={13} /> Create Tag
+                <TagIcon size={13} /> {editingTagName ? t('history.tagSaveButton') : t('history.tagCreateButton')}
               </button>
             </div>
           </div>
@@ -2282,10 +2851,10 @@ export function HistoryPage() {
             <h3 className="text-base font-medium mb-1 flex items-center gap-2">
               <GitBranch size={16} /> Create Branch at {shortHash(branchTarget || '')}
             </h3>
-            <div className="text-2xs text-text-tertiary mb-4">Branch will start from this commit.</div>
+            <div className="text-2xs text-text-tertiary mb-4">{t('history.branchStartsAt')}</div>
             <div className="space-y-3">
               <div>
-                <label className="text-xs text-text-tertiary block mb-1">Branch name</label>
+                <label className="text-xs text-text-tertiary block mb-1">{t('history.branchNameLabel')}</label>
                 <input type="text" className="w-full text-sm font-mono" placeholder="feature/my-branch"
                   value={branchName} autoFocus
                   onChange={(e) => setBranchName(e.target.value)}
@@ -2294,10 +2863,10 @@ export function HistoryPage() {
               <label className="flex items-center gap-2 text-sm cursor-pointer">
                 <input type="checkbox" checked={branchCheckout}
                   onChange={(e) => setBranchCheckout(e.target.checked)} />
-                <span>Checkout after creation</span>
+                <span>{t('history.branchCheckoutAfter')}</span>
               </label>
             </div>
-            <div className="flex justify-end gap-2 mt-4">
+            <div className="flex flex-wrap justify-end gap-2 mt-4">
               <button className="btn btn-secondary" onClick={() => setShowBranchDialog(false)}>{t('action.button.cancel')}</button>
               <button className="btn btn-primary" onClick={handleSaveBranch} disabled={!branchName.trim()}>
                 <GitBranch size={13} /> Create Branch
@@ -2325,14 +2894,14 @@ export function HistoryPage() {
         <div className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50" onClick={() => setShowSplitOff(false)}>
           <div className="panel w-[560px] max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="px-4 pt-4">
-              <h3 className="text-base font-medium">Split Off Files Into New Commit</h3>
+              <h3 className="text-base font-medium">{t('history.splitOffTitle')}</h3>
               <div className="text-xs text-text-tertiary mt-1">
                 From {shortHash(splitOffEntry.hash)} "{splitOffEntry.subject}" — selected files move into a NEW commit right after this one.
               </div>
             </div>
             <div className="flex-1 overflow-y-auto mx-4 my-3 border border-border-default rounded">
               {splitOffFileList.length === 0 ? (
-                <div className="p-4 text-xs text-text-tertiary text-center">Loading files...</div>
+                <div className="p-4 text-xs text-text-tertiary text-center">{t('history.loadingFiles')}</div>
               ) : (
                 splitOffFileList.map((f) => (
                   <label
@@ -2348,9 +2917,9 @@ export function HistoryPage() {
                         setSplitOffSelected(next);
                       }}
                     />
-                    <span className="badge badge-renamed w-6 text-center flex-shrink-0">{f.status}</span>
+                    <span className="badge badge-renamed w-6 text-center shrink-0">{f.status}</span>
                     <span className="font-mono truncate">{f.path}</span>
-                    <span className="ml-auto flex-shrink-0 text-text-tertiary">
+                    <span className="ml-auto shrink-0 text-text-tertiary">
                       +{f.additions} −{f.deletions}
                     </span>
                   </label>
@@ -2361,11 +2930,11 @@ export function HistoryPage() {
               <input
                 type="text"
                 className="w-full text-sm"
-                placeholder="Message for the new commit"
+                placeholder={t('history.splitOffMessageLabel')}
                 value={splitOffMessage}
                 onChange={(e) => setSplitOffMessage(e.target.value)}
               />
-              <div className="flex justify-end gap-2">
+              <div className="flex flex-wrap justify-end gap-2">
                 <button className="btn btn-secondary text-xs" onClick={() => setShowSplitOff(false)}>{t('action.button.cancel')}</button>
                 <button
                   className="btn btn-primary text-xs"
@@ -2378,6 +2947,21 @@ export function HistoryPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Group squash-to-branch (multi-selection) */}
+      {squashDialog && (
+        <SquashToBranchDialog
+          commits={squashDialog.commits}
+          onClose={() => setSquashDialog(null)}
+          onChanged={() => {
+            // The selection is stale after the operation — drop it and
+            // reload the graph so the new squashed commit/branch shows up.
+            setMultiSel(new Set());
+            setSquashDialog(null);
+            void loadHistory();
+          }}
+        />
       )}
     </div>
   );

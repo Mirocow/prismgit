@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
-import { Folder, X, Github, Loader, Download } from './icons';
+import { Folder, X, Github, Loader, Download, Lock, GitBranch } from './icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useAuthStore } from '../stores/authStore';
+import { offerSslBypass } from '../stores/sslBypassStore';
+import { offerAuthBypass } from '../stores/authBypassStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
-import { api, type GithubRepository } from '../lib/api';
+import { api, type GithubRepository, type GitLabProject, type SshUrlResolution, type SshTestResult } from '../lib/api';
 import { cn } from '../lib/utils';
 import { useI18n } from '../lib/i18n';
 
@@ -34,8 +36,11 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
   // SmartGit Manual: Skip recursive submodule initialization
   const [noRecursive, setNoRecursive] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [tab, setTab] = useState<'url' | 'github'>('url');
+  const [tab, setTab] = useState<'url' | 'github' | 'gitlab'>('url');
   const [repos, setRepos] = useState<GithubRepository[]>([]);
+  const [gitlabProjects, setGitlabProjects] = useState<GitLabProject[]>([]);
+  const [gitlabAuthenticated, setGitlabAuthenticated] = useState(false);
+  const [gitlabUser, setGitlabUser] = useState<{ username?: string; name?: string } | null>(null);
   const [loadingRepos, setLoadingRepos] = useState(false);
   const [search, setSearch] = useState('');
   // SmartGit 24.1: recent clone directories for easier selection
@@ -44,6 +49,34 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
   // SmartGit 24.1: detect active branch from remote
   const [detectedBranch, setDetectedBranch] = useState<string>('');
   const [detectingBranch, setDetectingBranch] = useState(false);
+  // DBeaver-style inline SSH panel: what will this URL authenticate with?
+  const [sshRes, setSshRes] = useState<SshUrlResolution | null>(null);
+  const [sshTesting, setSshTesting] = useState(false);
+  const [sshTestResult, setSshTestResult] = useState<SshTestResult | null>(null);
+  // Sidebar group selector: clone into a specific group (or root if null).
+  // The chosen groupId is forwarded to cloneRepository() which calls
+  // api.settings.setRepoGroup() after the clone lands.
+  const [groups, setGroups] = useState<{ id: string; name: string; parentId?: string | null }[]>([]);
+  const [targetGroupId, setTargetGroupId] = useState<string | null>(null);
+  const [loadingGroups, setLoadingGroups] = useState(false);
+
+  // Load sidebar groups on modal open — used to populate the group dropdown.
+  // We use api.settings.getRepoGroups() which returns the list of all groups
+  // (top-level + nested) so the user can pick which group to clone into.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setLoadingGroups(true);
+    (async () => {
+      try {
+        const list = await api.settings.getRepoGroups();
+        if (!cancelled) setGroups(list);
+      } catch { /* non-fatal */ } finally {
+        if (!cancelled) setLoadingGroups(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [open]);
 
   useEffect(() => {
     if (open) {
@@ -55,9 +88,26 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
       setPartialClone(false);
       setSetupCredentialHelper(false);
       setNoRecursive(false);
+      setSshRes(null);
+      setSshTestResult(null);
       if (authenticated) {
         loadRepos();
       }
+      // Check GitLab auth state (separate from GitHub auth).
+      loadGitlabAuthState();
+    }
+    // Read the target group from sessionStorage — set by App.tsx when
+    // the user right-clicks a group in the Sidebar and chooses
+    // "Clone into Group". Without this, the group dropdown defaults
+    // to "(root)" and the cloned repo lands at the Sidebar root
+    // instead of in the chosen group.
+    const storedGroupId = sessionStorage.getItem('prismgit-clone-target-group');
+    if (storedGroupId) {
+      setTargetGroupId(storedGroupId);
+      // Clean up so it doesn't persist on the next manual Clone open.
+      sessionStorage.removeItem('prismgit-clone-target-group');
+    } else {
+      setTargetGroupId(null);
     }
   }, [open, authenticated, settings.defaultCloneDir]);
 
@@ -70,7 +120,10 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
     setDetectingBranch(true);
     try {
       // git ls-remote --symref <url> HEAD returns: ref: refs/heads/main\t<hash>
-      const output = await api.git.raw('', ['ls-remote', '--symref', cloneUrl, 'HEAD']);
+      // lsRemoteUrl (NOT git:raw) — carries the same SSH env as the actual
+      // clone, so managed keys / SSH connection profiles / passwords work
+      // for ssh://git@host:50022/repo.git too.
+      const output = await api.git.lsRemoteUrl(cloneUrl, ['--symref', 'HEAD']);
       const match = output.match(/ref:\s*refs\/heads\/(\S+)/);
       if (match && match[1]) {
         const branchName = match[1];
@@ -96,6 +149,46 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
     return () => clearTimeout(timer);
   }, [url, mirror]);
 
+  // Debounced SSH resolution when URL changes (DBeaver shows the SSH tab
+  // inside the connection dialog — here we show what the URL would use).
+  useEffect(() => {
+    if (!url) {
+      setSshRes(null);
+      setSshTestResult(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const r = await api.ssh.resolveForUrl(url);
+        if (!cancelled) {
+          setSshRes(r);
+          setSshTestResult(null); // URL changed — previous test is stale
+        }
+      } catch {
+        if (!cancelled) setSshRes(null);
+      }
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [url]);
+
+  const testSshForClone = async () => {
+    if (!sshRes?.profile) return;
+    setSshTesting(true);
+    setSshTestResult(null);
+    try {
+      const r = await api.ssh.testProfile(sshRes.profile.id);
+      setSshTestResult(r);
+    } catch (e) {
+      setSshTestResult({ ok: false, output: String(e) });
+    } finally {
+      setSshTesting(false);
+    }
+  };
+
   const loadRepos = async () => {
     setLoadingRepos(true);
     try {
@@ -108,11 +201,117 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
     }
   };
 
+  // ─── GitLab: auth state + project list ──────────────────────────────────
+  // GitLab auth is SEPARATE from GitHub auth — the user can be logged into
+  // both at once. We check the auth state on modal open + load projects if
+  // authenticated.
+  const [gitlabPat, setGitlabPat] = useState('');
+  const [gitlabBaseUrl, setGitlabBaseUrl] = useState('https://gitlab.com');
+  const [gitlabAuthLoading, setGitlabAuthLoading] = useState(false);
+
+  const loadGitlabAuthState = async () => {
+    try {
+      const state = await api.gitlab.getAuthState();
+      setGitlabAuthenticated(!!state.token);
+      setGitlabUser(state.user ? { username: state.user.username, name: state.user.name } : null);
+      if (state.token) {
+        // Auto-load projects if already authenticated.
+        loadGitlabProjects();
+      }
+    } catch {
+      // GitLab not configured — that's fine, the user can auth via the form.
+      setGitlabAuthenticated(false);
+    }
+  };
+
+  const loadGitlabProjects = async () => {
+    setLoadingRepos(true);
+    try {
+      const projects = await api.gitlab.listProjects(1, 100);
+      setGitlabProjects(projects);
+    } catch (e) {
+      toast.error(t('dialogs.loadGitlabProjectsFailed', { defaultValue: 'Failed to load GitLab projects' }), String(e));
+      setGitlabProjects([]);
+    } finally {
+      setLoadingRepos(false);
+    }
+  };
+
+  const handleGitlabAuth = async () => {
+    if (!gitlabPat.trim()) {
+      toast.warning(t('dialogs.gitlabTokenRequired', { defaultValue: 'GitLab personal access token is required' }));
+      return;
+    }
+    setGitlabAuthLoading(true);
+    try {
+      const user = await api.gitlab.authWithPAT(gitlabPat.trim(), gitlabBaseUrl.trim() || undefined);
+      setGitlabAuthenticated(true);
+      setGitlabUser({ username: user.username, name: user.name });
+      setGitlabPat('');
+      toast.success(t('dialogs.gitlabConnected', { defaultValue: 'Connected to GitLab as {user}', user: user.username }));
+      loadGitlabProjects();
+    } catch (e) {
+      toast.error(t('dialogs.gitlabAuthFailed', { defaultValue: 'GitLab authentication failed' }), String(e));
+    } finally {
+      setGitlabAuthLoading(false);
+    }
+  };
+
+  const handleGitlabLogout = async () => {
+    try {
+      await api.gitlab.logout();
+      setGitlabAuthenticated(false);
+      setGitlabUser(null);
+      setGitlabProjects([]);
+      toast.info(t('dialogs.gitlabDisconnected', { defaultValue: 'Disconnected from GitLab' }));
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const selectGitlabProject = (p: GitLabProject) => {
+    // Prefer the HTTP URL for cloning (works with credential helper).
+    const cloneUrl = p.http_url_to_repo || p.web_url + '.git';
+    setUrl(cloneUrl);
+    const defaultName = p.path_with_namespace.split('/').pop() || p.name;
+    const basePath = settings.defaultCloneDir || targetPath || '';
+    if (basePath) {
+      setTargetPath(`${basePath}/${defaultName}`.replace(/\/+/g, '/'));
+    }
+    setTab('url');
+  };
+
   const handleBrowse = async () => {
     const path = await api.fs.openDirectoryPicker();
     if (path) {
-      setTargetPath(path);
+      // Bug fix: when the user picks a parent directory (e.g. /opt) AND
+      // a URL is supplied, the clone should land in /opt/<repo-name>
+      // instead of /opt itself. Without this, git clone clones INTO
+      // /opt — which creates /opt/.git, /opt/HEAD, etc. and mixes the
+      // repo files with whatever is already in /opt.
+      //
+      // We append the repo name derived from the URL (if available)
+      // so the user sees "/opt/29agroapk" as the final path.
+      const repoName = url.trim() ? deriveRepoNameFromUrl(url.trim()) : '';
+      if (repoName) {
+        setTargetPath(`${path}/${repoName}`.replace(/\/+/g, '/'));
+      } else {
+        setTargetPath(path);
+      }
     }
+  };
+
+  /**
+   * Extract the repo name from a git URL.
+   *   https://host/group/repo.git  →  repo
+   *   git@host:group/repo.git      →  repo
+   *   /path/to/repo.git            →  repo
+   *   /path/to/repo               →  repo
+   * Returns '' if the URL is empty or malformed.
+   */
+  const deriveRepoNameFromUrl = (input: string): string => {
+    const m = input.match(/\/([^/]+?)(?:\.git)?(?:\?|#|$)/);
+    return m?.[1] ?? '';
   };
 
   // SmartGit 24: tolerant URL parsing — strip "git clone " prefix
@@ -157,25 +356,52 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
       toast.warning(t('dialogs.targetRequired'));
       return;
     }
-    setLoading(true);
-    try {
-      const finalPath = targetPath;
+    const finalPath = targetPath;
+    // The clone body is a NAMED inner step (not inline in the try) so the
+    // SSL-bypass retry below can re-run the EXACT clone — mirror / partial /
+    // normal — with sslVerify:false after the server's certificate was
+    // rejected. The auth retry must remember WHICH mode it is in: a server
+    // with BOTH an expired certificate AND required login goes
+    // SSL dialog → retry (bypassed) → auth dialog → retry (STILL bypassed).
+    let sslBypassed = false;
+    const runClone = async (sslBypass: boolean): Promise<void> => {
+      sslBypassed = sslBypass;
       if (mirror) {
         // Mirror clone: copies ALL refs (heads, tags, notes, remotes) — bare backup copy
-        await api.git.mirror(normalizedUrl, finalPath);
+        await api.git.mirror(normalizedUrl, finalPath, sslBypass ? { sslVerify: false } : undefined);
         await useRepositoryStore.getState().openRepository(finalPath);
+        // Mirror clones also honour the group selector.
+        if (targetGroupId) {
+          try {
+            await api.settings.setRepoGroup(finalPath, targetGroupId);
+            await api.settings.setRepoGroupExpanded?.(targetGroupId, true).catch(() => {});
+            await useRepositoryStore.getState().loadRepos();
+          } catch { /* non-fatal */ }
+        }
       } else if (partialClone) {
         // SmartGit Manual: Partial clone — fetch tree without blobs, fetch on demand
         await api.git.clonePartial(normalizedUrl, finalPath, 'blob:none', {
           depth: depth ? Number(depth) : undefined,
           branch: branch || undefined,
           recursive: !noRecursive,
+          ...(sslBypass ? { sslVerify: false } : {}),
         });
         await useRepositoryStore.getState().openRepository(finalPath);
+        if (targetGroupId) {
+          try {
+            await api.settings.setRepoGroup(finalPath, targetGroupId);
+            await api.settings.setRepoGroupExpanded?.(targetGroupId, true).catch(() => {});
+            await useRepositoryStore.getState().loadRepos();
+          } catch { /* non-fatal */ }
+        }
       } else {
         await cloneRepository(normalizedUrl, finalPath, {
           depth: depth ? Number(depth) : undefined,
           branch: branch || undefined,
+          // Forward the chosen sidebar group so the cloned repo lands
+          // in the right place in the Sidebar's tree (not the root).
+          groupId: targetGroupId,
+          ...(sslBypass ? { sslVerify: false } : {}),
         });
       }
       if (setupCredentialHelper) {
@@ -187,7 +413,30 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
         : t('dialogs.cloneCreated')
       );
       onClose();
+    };
+    setLoading(true);
+    try {
+      await runClone(false);
     } catch (e) {
+      // Expired / self-signed corporate certificate — same reaction as
+      // pull/push: offer the bypass. skipConfigWrite because the repo does
+      // not exist yet; the retry passes sslVerify:false which git ALSO
+      // persists into the new repo's config (clone --config).
+      if (offerSslBypass(e, {
+        repoPath: finalPath,
+        skipConfigWrite: true,
+        retry: () => runClone(true),
+      })) return;
+      // The server requires a login and none is stored (git, prompts
+      // disabled, says "could not read Username"). The dialog saves the
+      // entered credentials keyed by the TARGET path + 'origin' — clone()
+      // picks them up from there and re-runs; the retry keeps whatever SSL
+      // state the previous round established.
+      if (offerAuthBypass(e, {
+        repoPath: finalPath,
+        remoteName: 'origin',
+        retry: () => runClone(sslBypassed),
+      })) return;
       toast.error(t('dialogs.cloneFailed'), String(e));
     } finally {
       setLoading(false);
@@ -214,7 +463,7 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
 
   return (
     <div
-      className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 animate-fade-in"
+      className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50 animate-fade-in"
       onClick={onClose}
     >
       <div
@@ -256,11 +505,25 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
             <Github size={12} />
             {t('dialogs.githubTab')} {authenticated && `(${user?.login})`}
           </button>
+          <button
+            className={cn(
+              'flex-1 py-2 text-sm font-medium transition-colors flex items-center justify-center gap-1',
+              tab === 'gitlab'
+                ? 'text-accent border-b-2 border-accent'
+                : 'text-text-secondary hover:text-text-primary'
+            )}
+            onClick={() => setTab('gitlab')}
+            disabled={!gitlabAuthenticated}
+            title={gitlabAuthenticated ? t('dialogs.gitlabTab', { defaultValue: 'GitLab projects' }) : t('dialogs.gitlabTabDisabled', { defaultValue: 'Authenticate with GitLab first (Settings → Integrations)' })}
+          >
+            <GitBranch size={12} />
+            {t('dialogs.gitlabTab', { defaultValue: 'GitLab' })} {gitlabAuthenticated && gitlabUser?.username && `(${gitlabUser.username})`}
+          </button>
         </div>
 
         <div className="flex-1 overflow-y-auto p-4">
           {tab === 'url' ? (
-            <div className="space-y-3">
+            <div className="space-y-4">
               <div>
                 <label className="text-xs text-text-tertiary block mb-1">
                   {t('clone.url')}
@@ -274,6 +537,69 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
                   onChange={(e) => handleUrlChange(e.target.value)}
                 />
               </div>
+              {sshRes?.isSsh && (
+                <div className="rounded border border-border-subtle bg-bg-secondary/60 px-2.5 py-2 space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0 text-xs">
+                      <Lock size={12} className="text-text-tertiary shrink-0" />
+                      <span className="font-mono truncate">
+                        {sshRes.user || 'git'}@{sshRes.host}{sshRes.port ? `:${sshRes.port}` : ''}
+                      </span>
+                    </div>
+                    {sshRes.profile && (
+                      <button
+                        className="btn btn-secondary text-2xs py-0.5 px-2 shrink-0"
+                        onClick={testSshForClone}
+                        disabled={sshTesting}
+                      >
+                        {sshTesting ? <Loader size={10} className="animate-spin" /> : null}
+                        {sshTesting ? t('clone.ssh.testing') : t('clone.ssh.test')}
+                      </button>
+                    )}
+                  </div>
+                  {sshRes.fallback === 'profile' && sshRes.profile && (
+                    <div className="text-2xs text-text-secondary flex items-center gap-1.5 flex-wrap">
+                      <span className="text-status-added">●</span>
+                      <span className="truncate">
+                        {t('clone.ssh.usingProfile', {
+                          name: sshRes.profile.label || `${sshRes.profile.user}@${sshRes.profile.host}`,
+                        })}
+                        {' · '}
+                        {sshRes.profile.authMethod === 'password'
+                          ? 'password'
+                          : sshRes.keyLabel || 'key'}
+                      </span>
+                    </div>
+                  )}
+                  {sshRes.fallback === 'key' && (
+                    <div className="text-2xs text-text-secondary flex items-center gap-1.5">
+                      <span className="text-status-added">●</span>
+                      <span className="truncate">{t('clone.ssh.usingKey', { name: sshRes.keyLabel || '' })}</span>
+                    </div>
+                  )}
+                  {sshRes.fallback === 'system' && (
+                    <div className="text-2xs space-y-0.5">
+                      <div className="text-status-modified">{t('clone.ssh.usingSystem')}</div>
+                      <div className="text-text-tertiary">{t('clone.ssh.hintSystem')}</div>
+                    </div>
+                  )}
+                  {sshTestResult && (
+                    <div
+                      className={cn(
+                        'text-2xs space-y-0.5',
+                        sshTestResult.ok ? 'text-status-added' : 'text-status-deleted'
+                      )}
+                    >
+                      <div>{sshTestResult.ok ? t('clone.ssh.ok') : t('clone.ssh.failed')}</div>
+                      {sshTestResult.output && (
+                        <div className="font-mono text-text-tertiary line-clamp-2" title={sshTestResult.output}>
+                          {sshTestResult.output.split('\n').filter(Boolean).slice(-2).join('\n')}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
               <div>
                 <label className="text-xs text-text-tertiary block mb-1">
                   {t('clone.target')}
@@ -282,7 +608,7 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
                   <input
                     type="text"
                     className="flex-1 text-sm font-mono"
-                    placeholder="/path/to/clone"
+                    placeholder="/path/to/clone/<repo-name>"
                     value={targetPath}
                     onChange={(e) => setTargetPath(e.target.value)}
                   />
@@ -291,6 +617,38 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
                     {t('dialogs.browse')}
                   </button>
                 </div>
+                {/* Hint: when a URL is supplied, the chosen parent dir
+                    will get /<repo-name> appended automatically. */}
+                {url.trim() && (
+                  <div className="text-2xs text-text-tertiary mt-1">
+                    {t('dialogs.targetHint', { defaultValue: 'The repo will be cloned into the chosen folder + repo name from the URL.' })}
+                  </div>
+                )}
+              </div>
+              {/* Sidebar group selector — clone into a specific group.
+                  The chosen groupId is forwarded to cloneRepository()
+                  which calls api.settings.setRepoGroup() after the
+                  clone lands so the new repo appears in the chosen
+                  group instead of at the root of the Sidebar tree. */}
+              <div>
+                <label className="text-xs text-text-tertiary block mb-1">
+                  {t('clone.targetGroup', { defaultValue: 'Sidebar group' })}
+                </label>
+                <select
+                  className="w-full text-sm bg-bg-secondary border border-border-default rounded px-2 py-1"
+                  value={targetGroupId ?? ''}
+                  onChange={(e) => setTargetGroupId(e.target.value || null)}
+                  disabled={loadingGroups || groups.length === 0}
+                  title={t('clone.targetGroupHint', { defaultValue: 'Where the cloned repo will appear in the Sidebar tree. Pick "(root)" to add it to the top level.' })}
+                >
+                  <option value="">{t('clone.targetGroupRoot', { defaultValue: '(root — no group)' })}</option>
+                  {groups.map((g) => (
+                    <option key={g.id} value={g.id}>{g.name}</option>
+                  ))}
+                </select>
+                {loadingGroups && (
+                  <span className="text-2xs text-text-tertiary ml-2">{t('dialogs.loading', { defaultValue: 'loading...' })}</span>
+                )}
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -369,7 +727,7 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
               </label>
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-4">
               <input
                 type="text"
                 placeholder={t('dialogs.searchRepos')}
@@ -394,7 +752,7 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
                       className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-bg-hover border-b border-border-subtle"
                       onClick={() => selectGithubRepo(r)}
                     >
-                      <Github size={14} className="text-text-tertiary flex-shrink-0" />
+                      <Github size={14} className="text-text-tertiary shrink-0" />
                       <div className="flex-1 min-w-0">
                         <div className="text-sm truncate">{r.full_name}</div>
                         {r.description && (
@@ -413,9 +771,122 @@ export function CloneModal({ open, onClose }: CloneModalProps) {
               </div>
             </div>
           )}
+          {tab === 'gitlab' && (
+            <div className="space-y-4">
+              {/* GitLab auth form — shown when not authenticated. Mirrors
+                  the GitHub PAT form in SettingsPage but inline so the
+                  user can auth without leaving the Clone modal. */}
+              {!gitlabAuthenticated ? (
+                <div className="space-y-2 p-3 bg-bg-tertiary rounded border border-border-default">
+                  <div className="text-sm font-medium">{t('dialogs.gitlabConnect', { defaultValue: 'Connect to GitLab' })}</div>
+                  <div className="text-xs text-text-tertiary">
+                    {t('dialogs.gitlabConnectHint', { defaultValue: 'Enter your GitLab personal access token (PAT) and instance URL to browse and clone your projects.' })}
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <input
+                      type="text"
+                      className="col-span-2 text-xs font-mono"
+                      placeholder="https://gitlab.com"
+                      value={gitlabBaseUrl}
+                      onChange={(e) => setGitlabBaseUrl(e.target.value)}
+                      title={t('dialogs.gitlabBaseUrlTitle', { defaultValue: 'GitLab instance URL (cloud: https://gitlab.com, self-hosted: https://gitlab.example.com)' })}
+                    />
+                    <input
+                      type="password"
+                      className="text-xs font-mono"
+                      placeholder="glpat-..."
+                      value={gitlabPat}
+                      onChange={(e) => setGitlabPat(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleGitlabAuth()}
+                      title={t('dialogs.gitlabPatTitle', { defaultValue: 'GitLab personal access token — create at https://gitlab.com/-/user_settings/personal_access_tokens (scopes: read_api, read_repository)' })}
+                    />
+                  </div>
+                  <button
+                    className="btn btn-primary text-xs"
+                    onClick={handleGitlabAuth}
+                    disabled={gitlabAuthLoading || !gitlabPat.trim()}
+                  >
+                    {gitlabAuthLoading ? <Loader size={12} className="animate-spin" /> : <GitBranch size={12} />}
+                    {t('dialogs.gitlabConnectButton', { defaultValue: 'Connect' })}
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {/* GitLab projects list — mirrors the GitHub tab layout. */}
+                  <div className="flex items-center justify-between gap-2">
+                    <input
+                      type="text"
+                      placeholder={t('dialogs.searchRepos')}
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      className="flex-1 text-sm"
+                    />
+                    <button
+                      className="btn btn-secondary text-xs"
+                      onClick={loadGitlabProjects}
+                      title={t('common.refresh')}
+                    >
+                      {t('common.refresh')}
+                    </button>
+                    <button
+                      className="btn btn-secondary text-xs"
+                      onClick={handleGitlabLogout}
+                      title={t('dialogs.gitlabDisconnect', { defaultValue: 'Disconnect from GitLab' })}
+                    >
+                      {t('settings.logout')}
+                    </button>
+                  </div>
+                  <div className="max-h-80 overflow-y-auto border border-border-default rounded">
+                    {loadingRepos ? (
+                      <div className="p-4 text-center text-sm text-text-tertiary flex items-center justify-center gap-2">
+                        <Loader size={14} className="animate-spin" />
+                        {t('common.loading')}
+                      </div>
+                    ) : gitlabProjects.length === 0 ? (
+                      <div className="p-4 text-center text-sm text-text-tertiary">
+                        {t('dialogs.noGitlabProjects', { defaultValue: 'No GitLab projects found' })}
+                      </div>
+                    ) : (
+                      gitlabProjects
+                        .filter((p) => {
+                          const q = search.trim().toLowerCase();
+                          if (!q) return true;
+                          return p.path_with_namespace.toLowerCase().includes(q) ||
+                            p.name.toLowerCase().includes(q) ||
+                            (p.description ?? '').toLowerCase().includes(q);
+                        })
+                        .map((p) => (
+                          <div
+                            key={p.id}
+                            className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-bg-hover border-b border-border-subtle"
+                            onClick={() => selectGitlabProject(p)}
+                          >
+                            <GitBranch size={14} className="text-text-tertiary shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm truncate">{p.path_with_namespace}</div>
+                              {p.description && (
+                                <div className="text-xs text-text-tertiary truncate">
+                                  {p.description}
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 text-xs text-text-tertiary">
+                              {p.visibility === 'private' && <span className="badge badge-modified">PRIVATE</span>}
+                              {p.visibility === 'internal' && <span className="badge badge-renamed">INTERNAL</span>}
+                              <span>{p.default_branch}</span>
+                              {p.star_count != null && p.star_count > 0 && <span>★ {p.star_count}</span>}
+                            </div>
+                          </div>
+                        ))
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
 
-        <div className="flex justify-end gap-2 px-4 py-3 border-t border-border-default">
+        <div className="flex flex-wrap justify-end gap-2 px-4 py-3 border-t border-border-default">
           <button className="btn btn-secondary" onClick={onClose}>
             {t('common.cancel')}
           </button>

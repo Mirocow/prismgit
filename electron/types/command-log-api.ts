@@ -26,6 +26,10 @@ export interface CommandLogEntry {
   stdout: string;
   /** Captured stderr (truncated). Git writes ref status lines here even on success. */
   stderr: string;
+  /** Where the git child ran: main process (default/undefined) or the
+   * dedicated git worker (read commands routed there since v3.8 — the
+   * console shows both realms with durations). */
+  origin?: 'worker';
 }
 
 export interface CommandLogApi {
@@ -35,4 +39,10 @@ export interface CommandLogApi {
   clear: () => Promise<void>;
   /** Live feed of new entries. Returns an unsubscribe function. */
   onEntry: (cb: (entry: CommandLogEntry) => void) => () => void;
+  /** Live feed of new entries, delivered as the main process's 100 ms
+   *  BATCHES — one callback per batch instead of one per entry. Prefer
+   *  this over onEntry: during a "Check all repositories" burst the store
+   *  does ONE array copy + ONE set() (one re-render) per batch instead of
+   *  N back-to-back set()s that freeze the renderer's main thread. */
+  onBatch: (cb: (entries: CommandLogEntry[]) => void) => () => void;
 }

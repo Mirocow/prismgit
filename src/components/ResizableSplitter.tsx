@@ -5,6 +5,13 @@ interface ResizableSplitterProps {
   direction?: 'horizontal' | 'vertical';
   onResize: (delta: number) => void;
   onResizeEnd?: () => void;
+  /**
+   * Wide variant (v3.9): a REAL grabbable divider — 6px wide with a visible
+   * center grip and a ±5px hit area — for layouts where the splitter is a
+   * primary resize control (the 3-way merge panes). The default remains the
+   * 1px hairline used by sidebar/console splitters.
+   */
+  wide?: boolean;
 }
 
 /**
@@ -16,6 +23,7 @@ export function ResizableSplitter({
   direction = 'horizontal',
   onResize,
   onResizeEnd,
+  wide = false,
 }: ResizableSplitterProps) {
   const [isDragging, setIsDragging] = useState(false);
   const startPos = useRef(0);
@@ -57,7 +65,9 @@ export function ResizableSplitter({
   return (
     <div
       className={cn(
-        direction === 'horizontal' ? 'split-divider' : 'split-divider-horizontal',
+        direction === 'horizontal'
+          ? (wide ? 'split-divider split-divider-wide' : 'split-divider')
+          : 'split-divider-horizontal',
         isDragging && 'dragging'
       )}
       onMouseDown={handleMouseDown}

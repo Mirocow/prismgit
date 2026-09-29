@@ -208,6 +208,37 @@ export const tauriApi = {
       return callGit('git_raw', repoPath, args);
     },
 
+    /** Batched config read — ONE `git config --list -z` for all keys
+     *  (mirrors Electron's git:configGetMany; Repository Settings). */
+    configGetMany: async (repoPath: string, keys: string[]): Promise<Record<string, string | undefined>> => {
+      const out: Record<string, string | undefined> = {};
+      for (const k of keys) out[k] = undefined;
+      try {
+        const raw = await callGit('git_raw', repoPath, ['config', '--list', '-z']);
+        // -z records: "key\nvalue", NUL-separated.
+        for (const entry of String(raw).split('\0')) {
+          if (!entry) continue;
+          const idx = entry.indexOf('\n');
+          if (idx <= 0) continue;
+          const key = entry.substring(0, idx);
+          if (key in out) out[key] = entry.substring(idx + 1);
+        }
+      } catch { /* missing config file → all keys stay undefined */ }
+      return out;
+    },
+
+    /** Batched config write — sequential git_raw config calls (git holds
+     *  .git/config.lock per write); value null/'' → unset. */
+    configSetMany: async (repoPath: string, entries: { key: string; value: string | null }[]): Promise<void> => {
+      for (const e of entries) {
+        if (e.value == null || e.value.trim() === '') {
+          await callGit('git_raw', repoPath, ['config', '--unset', e.key]).catch(() => {});
+        } else {
+          await callGit('git_raw', repoPath, ['config', e.key, e.value.trim()]);
+        }
+      }
+    },
+
     /** git status --porcelain — parsed into the same StatusResult shape. */
     status: async (_repoPath: string): Promise<{ files: unknown[]; staged: unknown[]; modified: string[]; not_added: string[]; current: string | null; ahead: number; behind: number; detached: boolean }> => {
       // TODO: parse porcelain output into StatusResult. For now, return
@@ -225,14 +256,28 @@ export const tauriApi = {
       };
     },
 
+    /** Background status — under Tauri there is no background git worker;
+     *  the same (stub) result as status() keeps the watcher refresh path
+     *  working until the Tauri side grows a real porcelain parser. */
+    statusBackground: async (repoPath: string): Promise<unknown> => {
+      return tauriApi.git.status(repoPath);
+    },
+
     branches: async (repoPath: string): Promise<RawBranchInfo[]> => {
       const out = await callGit('git_branches', repoPath);
       return out.split('\n').filter(Boolean).map(line => {
-        const [head, name, tracking, hashAbbrev, date] = line.split('\x00');
+        // Rust git_branches format: refname \x1f refname:short \x1f upstream:short
+        // \x1f objectname:short \x1f committerdate:iso \x1f HEAD-marker.
+        // BUGFIX: the parser used to split on \x00 while the Rust side joins
+        // fields with \x1f (every field came back undefined), and
+        // `remote: name.includes('/')` misclassified local feature/x
+        // branches as remote. Detect via the full refname prefix instead.
+        const [refname, short, tracking, hashAbbrev, date, headMarker] = line.split('\x1f');
+        const isRemote = refname.startsWith('refs/remotes/');
         return {
-          name,
-          remote: name.includes('/'),
-          current: head === '*',
+          name: short,
+          remote: isRemote,
+          current: headMarker === '*',
           tracking: tracking || undefined,
           hashAbbrev: hashAbbrev || undefined,
           date: date || undefined,
@@ -342,8 +387,12 @@ export const tauriApi = {
       };
     },
     pull: async (repoPath: string, remote?: string, branch?: string, rebase?: boolean, noFF?: boolean): Promise<void> => {
+      // Always pass an explicit --rebase / --no-rebase flag so git 2.27+
+      // never refuses with "Need to specify how to reconcile divergent
+      // branches" on repos without `pull.rebase` configured.
+      // Mirrors the fix in electron/services/git.ts:pull().
       const args = ['pull'];
-      if (rebase) args.push('--rebase');
+      args.push(rebase ? '--rebase' : '--no-rebase');
       if (noFF) args.push('--no-ff');
       args.push(remote || 'origin');
       if (branch) args.push(branch);
@@ -365,6 +414,29 @@ export const tauriApi = {
       const args = ['fetch', '--deepen=' + (commits ?? 1)];
       if (remote) args.push(remote);
       await callGit('git_raw', repoPath, args);
+    },
+    /** BUGFIX "не получаю все ветки": refspec map for single-branch detection. */
+    remoteFetchSpecs: async (repoPath: string): Promise<Record<string, string[]>> => {
+      // `git config --get-regexp` exits 1 on no match — callGit throws;
+      // treat as "no remotes configured".
+      let out: string;
+      try {
+        out = await callGit('git_raw', repoPath, ['config', '--get-regexp', '^remote\\..*\\.fetch$']);
+      } catch {
+        return {};
+      }
+      const specs: Record<string, string[]> = {};
+      for (const line of out.split('\n').filter(Boolean)) {
+        const m = line.match(/^remote\.(.+)\.fetch\s+(.+)$/);
+        if (m) (specs[m[1].trim()] ??= []).push(m[2].trim());
+      }
+      return specs;
+    },
+    /** One-click remediation: `git remote set-branches <remote> '*'` + fetch. */
+    fetchAllBranches: async (repoPath: string, remote?: string): Promise<void> => {
+      const name = remote || 'origin';
+      await callGit('git_raw', repoPath, ['remote', 'set-branches', name, '*']);
+      await callGit('git_raw', repoPath, ['fetch', '--prune', name]);
     },
     setFetchDepth: async (repoPath: string, remote?: string, depth?: number): Promise<void> => {
       const args = ['fetch'];
@@ -419,6 +491,49 @@ export const tauriApi = {
     revParse: async (repoPath: string, ref: string): Promise<string> => {
       const out = await callGit('git_raw', repoPath, ['rev-parse', ref]);
       return out.trim();
+    },
+    tagShow: async (repoPath: string, name: string): Promise<{ name: string; annotated: boolean; message: string; tagger?: string; date?: string; targetHash: string } | null> => {
+      // Mirrors electron/services/git.ts tagShow via git_raw (cat-file).
+      const fullRef = `refs/tags/${name}`;
+      let objectType: string;
+      try {
+        objectType = (await callGit('git_raw', repoPath, ['cat-file', '-t', fullRef])).trim();
+      } catch {
+        return null; // no such tag
+      }
+      if (objectType === 'tag') {
+        const raw = await callGit('git_raw', repoPath, ['cat-file', 'tag', fullRef]);
+        const blank = raw.indexOf('\n\n');
+        const header = blank >= 0 ? raw.slice(0, blank) : raw;
+        const message = blank >= 0 ? raw.slice(blank + 2) : '';
+        let tagger: string | undefined;
+        let date: string | undefined;
+        let targetHash = '';
+        for (const line of header.split('\n')) {
+          if (line.startsWith('object ')) targetHash = line.slice('object '.length).trim();
+          if (line.startsWith('tagger ')) {
+            const m = line.match(/^tagger\s+(.*?)\s+<[^>]*>\s+(\d+)\s+([+-]\d{4})$/);
+            if (m) {
+              tagger = m[1];
+              date = new Date(Number(m[2]) * 1000).toISOString();
+            } else {
+              tagger = line.slice('tagger '.length).replace(/\s+<[^>]*>\s+\d+\s+[+-]\d{4}$/, '').trim();
+            }
+          }
+        }
+        if (!targetHash) {
+          try {
+            targetHash = (await callGit('git_raw', repoPath, ['rev-parse', `${fullRef}^{commit}`])).trim();
+          } catch { /* leave empty */ }
+        }
+        return { name, annotated: true, message: message.replace(/\n+$/, ''), tagger, date, targetHash };
+      }
+      // Lightweight: ref points straight at the commit.
+      let targetHash = '';
+      try {
+        targetHash = (await callGit('git_raw', repoPath, ['rev-parse', fullRef])).trim();
+      } catch { /* leave empty */ }
+      return { name, annotated: false, message: '', targetHash };
     },
     reset: async (repoPath: string, mode: 'soft' | 'mixed' | 'hard' | 'keep', hash: string): Promise<void> => {
       await callGit('git_raw', repoPath, ['reset', `--${mode}`, hash]);
@@ -839,6 +954,46 @@ export const tauriApi = {
         return { ok: false, status: 0, statusText: String(e), body: '' };
       }
     },
+    providerListModels: async (kind: string, url: string, apiKey?: string): Promise<{ ok: boolean; error: string | null; models: { id: string; size?: number; family?: string; parameterSize?: string; quantization?: string; format?: string }[]; latencyMs: number }> => {
+      // Tauri: direct fetch, same dispatch logic as the Electron main process.
+      // CLONE the URL — never modify the original. The stored URL is the
+      // chat endpoint (may include /chat/completions). For the models
+      // endpoint, we derive a separate URL from a local copy.
+      const started = Date.now();
+      const connectUrl = (url || '').trim().replace(/\/+$/, '');
+      try {
+        if (kind === 'ollama') {
+          const b = connectUrl.replace(/\/api\/chat$/, '').replace(/\/chat\/completions$/, '') || 'http://localhost:11434';
+          const res = await fetch(`${b}/api/tags`);
+          if (!res.ok) return { ok: false, error: `HTTP ${res.status}`, models: [], latencyMs: Date.now() - started };
+          const data = await res.json();
+          const models = (data.models || []).map((m: { name: string; size?: number; details?: { family?: string; parameter_size?: string; quantization_level?: string; format?: string } }) => ({
+            id: m.name, size: m.size, family: m.details?.family,
+            parameterSize: m.details?.parameter_size, quantization: m.details?.quantization_level, format: m.details?.format,
+          }));
+          return { ok: true, error: null, models, latencyMs: Date.now() - started };
+        }
+        if (kind === 'anthropic') {
+          const b = connectUrl.replace(/\/v1\/messages$/, '') || 'https://api.anthropic.com';
+          const res = await fetch(`${b}/v1/models`, { headers: { 'x-api-key': apiKey || '', 'anthropic-version': '2023-06-01' } });
+          if (!res.ok) return { ok: false, error: `HTTP ${res.status}`, models: [], latencyMs: Date.now() - started };
+          const data = await res.json();
+          const models = (data.data || []).map((m: { id?: string }) => ({ id: m.id || '' })).filter((m: { id: string }) => m.id);
+          return { ok: true, error: null, models, latencyMs: Date.now() - started };
+        }
+        if (!connectUrl) return { ok: false, error: 'URL is not configured', models: [], latencyMs: Date.now() - started };
+        const modelsBase = connectUrl.replace(/\/chat\/completions$/, '');
+        const modelsUrl = modelsBase.endsWith('/models') ? modelsBase : `${modelsBase}/models`;
+        const res = await fetch(modelsUrl, { headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {} });
+        if (!res.ok) return { ok: false, error: `HTTP ${res.status}`, models: [], latencyMs: Date.now() - started };
+        const data = await res.json();
+        const rawList: Array<{ id?: string; name?: string }> = Array.isArray(data) ? data : (data.data || data.models || []);
+        const models = rawList.map((m) => ({ id: m.id || m.name || '' })).filter((m: { id: string }) => m.id);
+        return { ok: true, error: null, models, latencyMs: Date.now() - started };
+      } catch (e) {
+        return { ok: false, error: String(e), models: [], latencyMs: Date.now() - started };
+      }
+    },
   },
 
   github: {
@@ -851,6 +1006,10 @@ export const tauriApi = {
     clear: async (): Promise<void> => { /* no-op */ },
     onEntry: (_cb: (entry: unknown) => void): UnlistenFn => {
       // No live command log in Tauri yet — return a no-op unsubscriber.
+      return () => {};
+    },
+    onBatch: (_cb: (entries: unknown[]) => void): UnlistenFn => {
+      // No live command log in Tauri yet — no-op unsubscriber (see onEntry).
       return () => {};
     },
     onClick: (_cb: (clickId: string) => void): UnlistenFn => {

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { RotateCcw, RefreshCw, Trash, Copy, AlertCircle, GitBranch, Plus, X } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
-import { useGitStore } from '../stores/gitStore';
+import { useGitStore, surfaceConflictedState } from '../stores/gitStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { api, type RecyclableCommit } from '../lib/api';
 import { cn, formatDate, shortHash, copyToClipboard } from '../lib/utils';
@@ -74,10 +74,13 @@ export function RecyclablePage() {
       const result = await api.git.cherryPick(repo.path, [hash]);
       if (result.conflicts.length > 0) {
         setConflictInfo({ hash, files: result.conflicts });
-        toast.warning(
-          t('pages.cherryPickConflictsFiles', { count: result.conflicts.length }),
-          t('pages.cherryPickConflictsDetail'),
-        );
+        // Conflict-reaction audit (v3.6): toast-only left the user here
+        // with a conflicted cherry-pick and no next step. Same state-based
+        // reaction as pull: land on the Changes tool (conflicts + banner).
+        await surfaceConflictedState(repo.path, {
+          title: t('toast.git.cherryPickConflicts'),
+          detail: t('toast.git.cherryPickConflictsHint'),
+        });
       } else if (result.empty) {
         // "The previous cherry-pick is now empty" — the commit's changes are
         // already applied to HEAD. The repo stays in cherry-picking-state and
@@ -270,7 +273,7 @@ export function RecyclablePage() {
 
       {/* Info banner — explain what "recyclable" means + retention */}
       <div className="px-3 py-1.5 border-b border-border-subtle bg-bg-tertiary flex items-center gap-2">
-        <AlertCircle size={12} className="text-status-warning flex-shrink-0" />
+        <AlertCircle size={12} className="text-status-warning shrink-0" />
         <span className="text-2xs text-text-secondary">
           {t('pages.recyclableBanner')}
         </span>

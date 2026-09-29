@@ -13,40 +13,41 @@ import { test, expect } from '@playwright/test';
 import { launchApp, navigateTo, waitForText, screenshot } from './helpers';
 
 test.describe('Settings workflow', () => {
-  test('renders all settings sections', async () => {
+  test('renders all six tabs and their sections', async () => {
     const ctx = await launchApp();
     try {
       await navigateTo(ctx.page, 'Settings');
-      await ctx.page.waitForTimeout(2000);
+      await ctx.page.waitForTimeout(1500);
 
       await screenshot(ctx.page, 'settings-default');
 
-      // Use page.evaluate for text checks (more reliable than waitForSelector).
-      // Since the Settings page was split into two tabs (5a73533):
-      //   Application Settings → Appearance, GitHub Integration, About
-      //   Project Settings (needs an open repo; the fixture repo is
-      //   pre-loaded) → Pull Strategy, Git Config
-      const appSections = ['APPEARANCE', 'GITHUB INTEGRATION', 'ABOUT'];
-      for (const section of appSections) {
-        const has = await ctx.page.evaluate((s) =>
-          document.body.innerText.includes(s), section
-        );
-        expect(has, `Application Settings should contain "${section}" section`).toBe(true);
+      // E2E FIX (root cause #8): Settings was reorganized from the old
+      // 2-tab "Application/Project Settings" layout into a 6-tab vertical
+      // sidebar: Appearance / Git / AI / Security & SSH / Integrations /
+      // Project Settings. The old assertions ('GITHUB INTEGRATION' section
+      // + 'Project Settings' tab button) matched nothing.
+      const tabs = ['Appearance', 'Git', 'AI', 'Security & SSH', 'Integrations', 'Project Settings'];
+      for (const tab of tabs) {
+        const btn = ctx.page.locator('nav button', { hasText: tab }).first();
+        await expect(btn, `settings tab "${tab}" should render`).toBeVisible({ timeout: 8000 });
       }
 
-      // Switch to the Project Settings tab
-      const projectTab = ctx.page.locator('button:has-text("Project Settings")').first();
-      await projectTab.waitFor({ state: 'visible', timeout: 5000 });
-      await projectTab.click();
-      await ctx.page.waitForTimeout(1500);
+      // Default tab = Appearance: contrast presets visible.
+      const body = ctx.page.locator('body');
+      await expect(body).toContainText('Normal');
+      await expect(body).toContainText('Max');
 
-      const projectSections = ['PULL STRATEGY', 'GIT CONFIG'];
-      for (const section of projectSections) {
-        const has = await ctx.page.evaluate((s) =>
-          document.body.innerText.includes(s), section
-        );
-        expect(has, `Project Settings should contain "${section}" section`).toBe(true);
-      }
+      // Git tab renders its repository/commit defaults panel.
+      await ctx.page.locator('nav button', { hasText: 'Git' }).first().click();
+      await ctx.page.waitForTimeout(800);
+      await expect(body).toContainText('Default commit author');
+
+      // Project Settings (fixture repo is pre-loaded) shows Pull Strategy
+      // and the per-repo Git Config panel.
+      await ctx.page.locator('nav button', { hasText: 'Project Settings' }).first().click();
+      await ctx.page.waitForTimeout(800);
+      await expect(body).toContainText('Pull Strategy');
+      await expect(body).toContainText('Git Config');
     } finally {
       await ctx.close();
     }

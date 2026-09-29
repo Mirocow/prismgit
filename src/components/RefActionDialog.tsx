@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { X, Search, Loader } from './icons';
+import { BranchSyncIndicator } from './BranchSyncIndicator';
+import { filterSymbolicHeads } from '../lib/branchFilter';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
@@ -42,6 +44,9 @@ export function RefActionDialog({ action, onClose }: { action: RefAction; onClos
   const [selected, setSelected] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<{ subject: string; author: string } | null>(null);
+  // "Show all" past the initial 500-row page — repos with thousands of
+  // branches used to silently hide everything after row 200 here.
+  const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -84,12 +89,30 @@ export function RefActionDialog({ action, onClose }: { action: RefAction; onClos
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    let list = branches;
+    // Defense-in-depth: never show symbolic HEAD refs like "origin/HEAD"
+    // or "github/HEAD" — they are pointers to the default branch of the
+    // remote, not real branches. Backend branches() already strips them,
+    // but if a different code path slips through, the user could pick a
+    // symbolic ref and the operation would fail.
+    let list = filterSymbolicHeads(branches);
     if (action === 'checkout') list = list; // remote branches can be checked out too (creates local tracking)
     if (meta.branchOnly) list = list.filter((b) => !b.remote);
-    if (!q) return list.slice(0, 200);
-    return list.filter((b) => b.name.toLowerCase().includes(q)).slice(0, 200);
+    if (!q) return list;
+    return list.filter((b) => b.name.toLowerCase().includes(q));
   }, [branches, query, action, meta.branchOnly]);
+
+  // Re-query → re-page: collapse the "Show all" expansion so the filtered
+  // list starts from its first page again.
+  useEffect(() => { setShowAll(false); }, [query]);
+
+  // Initial page: 500 rows render instantly even on huge repos; the
+  // remainder is one click away (and fully reachable, unlike the old
+  // hard slice(0, 200) which made branches UNREACHABLE in this dialog).
+  const PAGE = 500;
+  const visible = useMemo(
+    () => (showAll ? filtered : filtered.slice(0, PAGE)),
+    [filtered, showAll],
+  );
 
   const run = useCallback(async () => {
     const target = selected?.trim();
@@ -138,7 +161,7 @@ export function RefActionDialog({ action, onClose }: { action: RefAction; onClos
   }, [action, selected, repo.path, branches, toast, onClose, t, meta.titleKey]);
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-6" onClick={onClose}>
+    <div className="fixed inset-0 z-50 bg-black/30 dark:bg-black/55 flex items-center justify-center p-6" onClick={onClose}>
       <div className="panel w-full max-w-lg flex flex-col max-h-[70vh]" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center px-4 py-3 border-b border-border">
           <span className="text-sm font-semibold">{t(meta.titleKey)}…</span>
@@ -163,7 +186,7 @@ export function RefActionDialog({ action, onClose }: { action: RefAction; onClos
           </div>
         </div>
         <div className="flex-1 overflow-y-auto px-2 pb-2 min-h-[120px]">
-          {filtered.map((b) => (
+          {visible.map((b) => (
             <button
               key={b.name}
               onClick={() => {
@@ -179,12 +202,32 @@ export function RefActionDialog({ action, onClose }: { action: RefAction; onClos
               )}
             >
               <span className="truncate flex-1 mono">{b.name}</span>
+              {/* Sync indicator — plug connected/disconnected for the
+                  branch's upstream relationship. Hidden for remote-only
+                  branches (no upstream concept). */}
+              <BranchSyncIndicator
+                tracking={b.tracking}
+                upstream={b.upstream}
+                ahead={b.ahead}
+                behind={b.behind}
+                gone={b.gone}
+                remote={b.remote}
+                size={11}
+              />
               {b.current && <span className="text-2xs px-1 rounded bg-green-500/20 text-green-500">HEAD</span>}
               {typeof b.ahead === 'number' && typeof b.behind === 'number' && (b.ahead || b.behind) && (
                 <span className="text-2xs text-text-tertiary">{b.ahead > 0 ? `↑${b.ahead}` : ''}{b.behind > 0 ? `↓${b.behind}` : ''}</span>
               )}
             </button>
           ))}
+          {filtered.length > PAGE && !showAll && (
+            <button
+              onClick={() => setShowAll(true)}
+              className="w-full text-center px-3 py-2 text-2xs text-accent hover:bg-surface-hover rounded"
+            >
+              {t('branches.showAll', { count: filtered.length })}
+            </button>
+          )}
           {filtered.length === 0 && query && (
             <div className="px-3 py-4 text-xs text-text-tertiary">
               {t('dialogs.noMatchingBranch', { query })}
@@ -198,7 +241,7 @@ export function RefActionDialog({ action, onClose }: { action: RefAction; onClos
             <span className="text-text-tertiary">— {preview.author}</span>
           </div>
         )}
-        <div className="flex justify-end gap-2 px-4 py-3 border-t border-border">
+        <div className="flex flex-wrap justify-end gap-2 px-4 py-3 border-t border-border">
           <button className="px-3 py-1.5 text-xs rounded border border-border hover:bg-surface-hover" onClick={onClose}>{t('common.cancel')}</button>
           <button
             className="px-3 py-1.5 text-xs font-medium bg-accent text-accent-foreground rounded hover:opacity-90 disabled:opacity-40 flex items-center gap-1"

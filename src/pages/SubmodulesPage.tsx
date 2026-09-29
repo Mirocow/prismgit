@@ -4,6 +4,8 @@ import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore } from '../stores/gitStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
+import { offerSslBypass } from '../stores/sslBypassStore';
+import { offerAuthBypass } from '../stores/authBypassStore';
 import { api, type SubmoduleInfo } from '../lib/api';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
@@ -59,6 +61,10 @@ export function SubmodulesPage() {
       toast.success(name ? t('pages.submoduleUpdated', { name }) : t('pages.submoduleUpdatedAll'));
       await load();
     } catch (e) {
+      // submodule update clones/fetches from the submodule's remote — an
+      // expired corporate certificate OR a required login hits HERE too.
+      if (offerSslBypass(e, { repoPath: repo.path, retry: () => handleUpdate(name) })) return;
+      if (offerAuthBypass(e, { repoPath: repo.path, retry: () => handleUpdate(name) })) return;
       toast.error(t('pages.submoduleUpdateFailed'), String(e));
     } finally {
       setBusy(null);
@@ -174,7 +180,7 @@ export function SubmodulesPage() {
               key={s.name}
               className="group flex items-center gap-3 px-3 py-3 border-b border-border-subtle hover:bg-bg-hover"
             >
-              <Package size={16} className="text-accent flex-shrink-0" />
+              <Package size={16} className="text-accent shrink-0" />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium text-text-primary">{s.name}</span>
@@ -325,7 +331,7 @@ export function SubmodulesPage() {
                 />
               </div>
             </div>
-            <div className="flex justify-end gap-2 mt-4">
+            <div className="flex flex-wrap justify-end gap-2 mt-4">
               <button className="btn btn-secondary" onClick={() => setShowAdd(false)}>
                 {t('common.cancel')}
               </button>

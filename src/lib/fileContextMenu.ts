@@ -22,6 +22,7 @@
  *   Select Directory / Root  → scopes the Changes dir tree
  */
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
+import { confirmWithRemember, CONFIRMATION_IDS } from './confirmations';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useToastStore } from '../stores/toastStore';
 import { api } from './api';
@@ -157,11 +158,15 @@ export function actionTargets(ctx: Pick<FileMenuCtx, 'path' | 'paths'>): string[
 /** Human label suffix for bulk operations: " (3 files)". */
 export function bulkSuffix(ctx: Pick<FileMenuCtx, 'path' | 'paths'>): string {
   const n = actionTargets(ctx).length;
-  return n > 1 ? ` (${n} files)` : '';
+  return n > 1 ? i18nT('ctx.bulkSuffix').replace('{n}', String(n)) : '';
 }
 
 /** Build the menu items for a file (pure — no side effects). */
 export function buildFileMenu(ctx: FileMenuCtx): ContextMenuItem[] {
+  // MENU STRUCTURE (v3.4): items are LOGICALLY GROUPED by domain —
+  // “Открыть ▸”, “Просмотр ▸”, “Рабочее дерево ▸”, “Игнорировать ▸”,
+  // “Копировать ▸” — instead of a flat 20+ item list. The most frequent
+  // action (Open) stays top-level.
   const items: ContextMenuItem[] = [];
   // In changes mode the working-tree state is authoritative: an untracked
   // file is never in the index, so 'Remove...' becomes 'Delete File...'.
@@ -172,96 +177,109 @@ export function buildFileMenu(ctx: FileMenuCtx): ContextMenuItem[] {
   const bulk = bulkSuffix(ctx);
 
   // --- Open (opens EVERY selected file, like a file manager) ----------------
-  items.push({ label: `Open${bulk}`, clickId: 'open' });
-  items.push({ label: i18nT('vscode.openInVscode'), clickId: 'open-vscode' });
-  items.push({ label: `Reveal in File Manager${bulk}`, clickId: 'reveal' });
+  items.push({ label: `${i18nT('ctx.file.open')}${bulk}`, clickId: 'open' });
+  items.push({
+    label: i18nT('ctx.group.open'),
+    submenu: [
+      { label: i18nT('vscode.openInVscode'), clickId: 'open-vscode' },
+      { label: `${i18nT('ctx.file.revealInFileManager')}${bulk}`, clickId: 'reveal' },
+    ],
+  });
   items.push({ type: 'separator' });
 
-  // --- Inspect ------------------------------------------------------------
+  // --- Inspect → “Просмотр и сравнение” --------------------------------------
+  const viewItems: ContextMenuItem[] = [];
   if (ctx.mode === 'changes' && ctx.onShowChanges) {
-    items.push({ label: 'Show Changes', clickId: 'show-changes' });
+    viewItems.push({ label: i18nT('ctx.file.showChanges'), clickId: 'show-changes' });
   }
   if ((ctx.mode === 'history' || ctx.mode === 'changes') && ctx.onOpenDiff) {
-    items.push({ label: 'Open in Diff tool', clickId: 'open-diff' });
+    viewItems.push({ label: i18nT('ctx.file.openInDiffTool'), clickId: 'open-diff' });
   }
   if (ctx.mode === 'changes') {
-    items.push({ label: i18nT('vscode.openDiffInVscode'), clickId: 'open-vscode-diff' });
+    viewItems.push({ label: i18nT('vscode.openDiffInVscode'), clickId: 'open-vscode-diff' });
   }
   if (ctx.mode === 'history' && ctx.commitSha) {
-    items.push({ label: i18nT('vscode.openCommitFileDiff'), clickId: 'open-vscode-commit-diff' });
-    items.push({ label: i18nT('vscode.openFileVersion'), clickId: 'open-vscode-version' });
+    viewItems.push({ label: i18nT('vscode.openCommitFileDiff'), clickId: 'open-vscode-commit-diff' });
+    viewItems.push({ label: i18nT('vscode.openFileVersion'), clickId: 'open-vscode-version' });
   }
-  items.push({ label: 'File History (Log)', clickId: 'file-history' });
-  items.push({ label: 'Blame this file', clickId: 'blame' });
-  items.push({ type: 'separator' });
+  viewItems.push({ label: i18nT('ctx.file.fileHistory'), clickId: 'file-history' });
+  viewItems.push({ label: i18nT('ctx.file.blameThisFile'), clickId: 'blame' });
+  if (viewItems.length > 0) {
+    items.push({ label: i18nT('ctx.group.view'), submenu: viewItems });
+    items.push({ type: 'separator' });
+  }
 
-  // --- Working-tree operations (Changes mode only) -------------------------
+  // --- Working-tree operations (Changes mode only) → “Рабочее дерево” -------
   if (ctx.mode === 'changes') {
+    const worktreeItems: ContextMenuItem[] = [];
     if (ctx.isStaged) {
-      items.push({ label: `Unstage${bulk}`, clickId: 'unstage' });
+      worktreeItems.push({ label: `${i18nT('ctx.file.unstage')}${bulk}`, clickId: 'unstage' });
     } else {
-      items.push({ label: `Stage${bulk}`, clickId: 'stage' });
+      worktreeItems.push({ label: `${i18nT('ctx.file.stage')}${bulk}`, clickId: 'stage' });
     }
-    items.push({ label: 'Commit...', clickId: 'commit' });
+    worktreeItems.push({ label: i18nT('ctx.file.commit'), clickId: 'commit' });
     if (!untracked) {
-      items.push({ label: `Stash Selection...${bulk}`, clickId: 'stash-file' });
-      items.push({ type: 'separator' });
-      items.push({
-        label: ctx.isStaged ? `Discard Staged Changes...${bulk}` : `Discard Changes...${bulk}`,
+      worktreeItems.push({ label: `${i18nT('ctx.file.stashSelection')}${bulk}`, clickId: 'stash-file' });
+      worktreeItems.push({ type: 'separator' });
+      worktreeItems.push({
+        label: ctx.isStaged ? `${i18nT('ctx.file.discardStagedChanges')}${bulk}` : `${i18nT('ctx.file.discardChanges')}${bulk}`,
         clickId: 'discard',
       });
-      items.push({ label: `Restore from Ref...${bulk}`, clickId: 'restore-from-ref' });
+      worktreeItems.push({ label: `${i18nT('ctx.file.restoreFromRef')}${bulk}`, clickId: 'restore-from-ref' });
     } else {
       // Untracked files — "Discard" means deleting the file (git clean).
       // Show it as "Discard (Delete)" so the user understands what happens.
-      items.push({ type: 'separator' });
-      items.push({
-        label: `Discard (Delete)...${bulk}`,
+      worktreeItems.push({ type: 'separator' });
+      worktreeItems.push({
+        label: `${i18nT('ctx.file.discardDelete')}${bulk}`,
         clickId: 'discard-untracked',
       });
     }
-    items.push({ type: 'separator' });
-
     // --- Index flags (tracked files only, live checkbox state) ------------
     if (ctx.indexFlags) {
-      items.push({
-        label: "Toggle 'Assume Unchanged'",
+      worktreeItems.push({ type: 'separator' });
+      worktreeItems.push({
+        label: i18nT('ctx.file.toggleAssumeUnchanged'),
         type: 'checkbox',
         checked: ctx.indexFlags.assumeUnchanged,
         clickId: 'toggle-assume-unchanged',
       });
-      items.push({
-        label: "Toggle 'Skip Worktree'",
+      worktreeItems.push({
+        label: i18nT('ctx.file.toggleSkipWorktree'),
         type: 'checkbox',
         checked: ctx.indexFlags.skipWorktree,
         clickId: 'toggle-skip-worktree',
       });
-      items.push({ type: 'separator' });
     }
+    items.push({ label: i18nT('ctx.group.worktree'), submenu: worktreeItems });
 
-    // --- File operations --------------------------------------------------
+    // --- File operations → “Игнорировать” / “Удаление” --------------------
+    const fileOpItems: ContextMenuItem[] = [];
     if (untracked) {
-      items.push({ label: `Add to .gitignore${bulk}`, clickId: 'ignore' });
-      items.push({ label: 'Edit .gitignore', clickId: 'edit-ignore-local' });
-      items.push({ label: 'Edit global ignore file', clickId: 'edit-ignore-global' });
+      fileOpItems.push({ label: `${i18nT('ctx.file.addToGitignore')}${bulk}`, clickId: 'ignore' });
+      fileOpItems.push({ label: i18nT('ctx.file.editGitignore'), clickId: 'edit-ignore-local' });
+      fileOpItems.push({ label: i18nT('ctx.file.editGlobalIgnore'), clickId: 'edit-ignore-global' });
+      fileOpItems.push({ type: 'separator' });
     }
-    items.push({ label: 'Move or Rename...', clickId: 'move-rename' });
-    items.push({
-      label: `${tracked ? 'Remove...' : 'Delete File...'}${bulk}`,
+    fileOpItems.push({ label: i18nT('ctx.file.moveOrRename'), clickId: 'move-rename' });
+    fileOpItems.push({
+      label: `${tracked ? i18nT('ctx.file.remove') : i18nT('ctx.file.deleteFile')}${bulk}`,
       clickId: 'delete-file',
     });
+    items.push({ label: i18nT('ctx.group.delete'), submenu: fileOpItems });
+
     if (ctx.isConflicted) {
       items.push({ type: 'separator' });
-      items.push({ label: 'Resolve Conflict...', clickId: 'resolve-conflict' });
+      items.push({ label: i18nT('ctx.file.resolveConflict'), clickId: 'resolve-conflict' });
       // SmartGit-style "Resolve" submenu: Take Ours / Take Theirs
       items.push({
-        label: 'Resolve',
+        label: i18nT('ctx.group.resolve'),
         clickId: '_submenu_resolve',
         submenu: [
-          { label: 'Take Ours', clickId: 'resolve-take-ours', title: 'git checkout --ours -- <file> + git add' },
-          { label: 'Take Theirs', clickId: 'resolve-take-theirs', title: 'git checkout --theirs -- <file> + git add' },
+          { label: i18nT('ctx.file.takeOurs'), clickId: 'resolve-take-ours', title: 'git checkout --ours -- <file> + git add' },
+          { label: i18nT('ctx.file.takeTheirs'), clickId: 'resolve-take-theirs', title: 'git checkout --theirs -- <file> + git add' },
           { type: 'separator' },
-          { label: 'Use External Merge Tool', clickId: 'resolve-mergetool', title: 'git mergetool -- <file> (uses configured merge.tool)' },
+          { label: i18nT('ctx.file.useExternalMergeTool'), clickId: 'resolve-mergetool', title: 'git mergetool -- <file> (uses configured merge.tool)' },
         ],
       });
       items.push({ label: i18nT('vscode.resolveInVscode'), clickId: 'open-vscode-merge' });
@@ -269,16 +287,21 @@ export function buildFileMenu(ctx: FileMenuCtx): ContextMenuItem[] {
     items.push({ type: 'separator' });
   }
 
-  // --- Clipboard ------------------------------------------------------------
-  items.push({ label: 'Copy Name', clickId: 'copy-name' });
-  items.push({ label: 'Copy Relative Path', clickId: 'copy-rel-path' });
-  items.push({ label: 'Copy Full Path', clickId: 'copy-full-path' });
+  // --- Clipboard → “Копировать” ----------------------------------------------
+  items.push({
+    label: i18nT('ctx.group.copy'),
+    submenu: [
+      { label: i18nT('ctx.file.copyName'), clickId: 'copy-name' },
+      { label: i18nT('ctx.file.copyRelativePath'), clickId: 'copy-rel-path' },
+      { label: i18nT('ctx.file.copyFullPath'), clickId: 'copy-full-path' },
+    ],
+  });
 
   // --- Directory scoping (Changes mode) --------------------------------------
   if (ctx.mode === 'changes' && ctx.onSelectDirectory) {
     items.push({ type: 'separator' });
-    items.push({ label: 'Select Directory', clickId: 'select-directory' });
-    items.push({ label: 'Select Repository Root', clickId: 'select-root' });
+    items.push({ label: i18nT('ctx.file.selectDirectory'), clickId: 'select-directory' });
+    items.push({ label: i18nT('ctx.file.selectRepoRoot'), clickId: 'select-root' });
   }
   return items;
 }
@@ -412,7 +435,9 @@ export async function runFileAction(clickId: string, ctx: FileMenuCtx): Promise<
     }
     case 'unstage': {
       try {
-        for (const p of targets) await api.git.resetFile(ctx.repoPath, p);
+        // BATCH: single `git reset HEAD -- f1 f2 f3` call instead of N
+        // sequential resetFile() calls. ~50× faster for 50 files.
+        await api.git.resetFiles(ctx.repoPath, targets);
         t.success(n('Unstaged'));
         refresh();
       } catch (e) {
@@ -457,7 +482,8 @@ export async function runFileAction(clickId: string, ctx: FileMenuCtx): Promise<
         targets.length > 1
           ? `${targets.length} selected files`
           : `'${ctx.path}'`;
-      const ok = await confirmDialog({
+      // 4.5 — supports persistent "Don't ask again" (confirmations registry).
+      const ok = await confirmWithRemember(CONFIRMATION_IDS.discardChanges, {
         title: ctx.isStaged ? 'Discard staged changes' : 'Discard changes',
         message: ctx.isStaged
           ? `Discard staged changes for ${what}?\nThis will unstage AND restore the files to HEAD.`
@@ -469,25 +495,18 @@ export async function runFileAction(clickId: string, ctx: FileMenuCtx): Promise<
       try {
         // For ALL discard cases (staged, unstaged, unmerged/conflicted):
         // 1. git reset HEAD -- <files>  → unstages + clears unmerged state
-        // 2. git checkout -- <files>   → restores working tree to HEAD
+        // 2. git restore <files>        → restores working tree to HEAD
         //
-        // The old code called `api.git.restore()` directly for unstaged files,
-        // but `git restore` FAILS on unmerged files with:
-        //   "error: path '.vscode/settings.json' is unmerged"
-        //
-        // By always calling resetFile FIRST (which runs `git reset HEAD -- <file>`),
-        // we clear the unmerged/staged state, THEN restore works.
-        // This handles:
-        //   - Normal staged files (unstage + restore)
-        //   - Normal unstaged files (reset is a no-op, restore works)
-        //   - Unmerged/conflicted files (reset clears conflict state, restore to HEAD)
-        for (const p of targets) {
-          try {
-            await api.git.resetFile(ctx.repoPath, p);
-          } catch {
-            // resetFile may fail if the file is not in the index (untracked).
-            // That's fine — we'll handle untracked separately below.
-          }
+        // BATCH: both calls accept ALL paths in ONE invocation — much faster
+        // than calling resetFile/checkout in a for-loop (each loop iteration
+        // spawns a new git process + walks the index from scratch).
+        // For 50 files this is ~50× faster (50× fewer git spawns).
+        try {
+          await api.git.resetFiles(ctx.repoPath, targets);
+        } catch {
+          // resetFiles may fail if some files aren't in the index (untracked).
+          // That's fine — untracked files are handled by the separate
+          // 'discard-untracked' menu item.
         }
         // Now restore working tree to HEAD for all targets.
         // For untracked files this won't work (git restore only works on
@@ -497,12 +516,18 @@ export async function runFileAction(clickId: string, ctx: FileMenuCtx): Promise<
           await api.git.restore(ctx.repoPath, targets);
         } catch {
           // If restore fails (e.g. some files were untracked and can't be
-          // restored), try git checkout -- for each file individually.
-          for (const p of targets) {
-            try {
-              await api.git.raw(ctx.repoPath, ['checkout', '--', p]);
-            } catch {
-              // Skip files that can't be restored (untracked, already deleted, etc.)
+          // restored), try git checkout -- for ALL files at once (single call).
+          // Falls back to per-file only if the batch call fails entirely.
+          try {
+            await api.git.raw(ctx.repoPath, ['checkout', '--', ...targets]);
+          } catch {
+            // Last resort: per-file checkout — slow but reliable.
+            for (const p of targets) {
+              try {
+                await api.git.raw(ctx.repoPath, ['checkout', '--', p]);
+              } catch {
+                // Skip files that can't be restored (untracked, already deleted, etc.)
+              }
             }
           }
         }
@@ -545,7 +570,10 @@ export async function runFileAction(clickId: string, ctx: FileMenuCtx): Promise<
       });
       if (!ref || !ref.trim()) return true;
       try {
-        for (const p of targets) await api.git.checkoutFile(ctx.repoPath, p, ref.trim());
+        // BATCH: single git call for ALL targets instead of N sequential
+        // checkoutFile() calls. `git checkout <ref> -- f1 f2 f3` works for
+        // any number of paths in one invocation.
+        await api.git.checkoutFiles(ctx.repoPath, targets, ref.trim());
         t.success(targets.length > 1 ? `Restored ${targets.length} files from ${ref.trim()}` : `Restored '${ctx.path}' from ${ref.trim()}`);
         refresh();
       } catch (e) {
@@ -561,7 +589,9 @@ export async function runFileAction(clickId: string, ctx: FileMenuCtx): Promise<
       try {
         const flag = clickId === 'toggle-assume-unchanged' ? 'assume-unchanged' as const : 'skip-worktree' as const;
         const current = flag === 'assume-unchanged' ? ctx.indexFlags.assumeUnchanged : ctx.indexFlags.skipWorktree;
-        for (const p of targets) await api.git.setIndexFlag(ctx.repoPath, p, flag, !current);
+        // BATCH: single `git update-index <opt> -- f1 f2 f3` call instead of
+        // N sequential setIndexFlag() calls. ~50× faster for 50 files.
+        await api.git.setIndexFlagBatch(ctx.repoPath, targets, flag, !current);
         t.success(`${!current ? 'Set' : 'Cleared'} ${flag} on ${targets.length > 1 ? `${targets.length} files` : baseName(ctx.path)}`);
         refresh();
       } catch (e) {
@@ -624,7 +654,10 @@ export async function runFileAction(clickId: string, ctx: FileMenuCtx): Promise<
       });
       if (!ok) return true;
       try {
-        for (const p of targets) await api.git.deleteFile(ctx.repoPath, p);
+        // BATCH: single `git rm -f -- f1 f2 f3` call instead of N sequential
+        // deleteFile() calls. The batch call falls back to per-file fs.rmSync
+        // for untracked files (git rm refuses them).
+        await api.git.deleteFiles(ctx.repoPath, targets);
         t.success(n('Deleted'));
         refresh();
       } catch (e) {

@@ -12,6 +12,13 @@
  * Configuration is stored in AppSettings and in .git/config under [smartgit-ai-llm "..."] sections.
  */
 
+import { proxyFetch } from './aiChat';
+import {
+  LLMApiError, OPENROUTER_FREE_MODEL, notifyLLMFallback,
+  shouldFallbackToOpenRouterFree,
+} from './aiErrors';
+import { deriveChatUrl, deriveAnthropicUrl, deriveOllamaChatUrl } from './aiUtils';
+
 export interface LLMProvider {
   id: string;
   name: string;
@@ -95,9 +102,14 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: 'openrouter',
     label: 'OpenRouter (free models aggregator)',
-    defaultUrl: 'https://openrouter.ai/api/v1/chat/completions',
-    defaultModel: 'meta-llama/llama-3.1-8b-instruct:free',
-    description: 'Aggregator with dozens of FREE models (Llama 3, Gemma, Mistral). No credit card needed. Pick any model from openrouter.ai/models.',
+    defaultUrl: 'https://openrouter.ai/api/v1',
+    // v2.3.12 — openrouter/free is the meta-router that picks any available
+    // free model. Individual :free models share one rate-limited upstream
+    // pool (429 at peak times) — the router dodges it, which is exactly why
+    // users observed «only openrouter/free works». Specific :free models
+    // still work (and are auto-retried via the router on 429).
+    defaultModel: 'openrouter/free',
+    description: 'Aggregator with free models. Recommended: the openrouter/free auto-router (always picks an available free model). Or any specific :free model from openrouter.ai/models — free pools are rate-limited at peak times, and the app auto-retries via the router.',
     apiKeyHint: 'https://openrouter.ai/keys',
     freeTier: true,
   },
@@ -273,14 +285,23 @@ async function callOpenAICompatible(
   userPrompt: string,
   maxTokens: number
 ): Promise<string> {
-  const url = provider.url || 'https://api.openai.com/v1/chat/completions';
+  // Derive the chat-completions endpoint from whatever URL shape the
+  // provider registry stored. The presets are deliberately inconsistent:
+  // some store the FULL endpoint (OpenAI, Groq, Z.ai: ".../chat/completions"),
+  // others the BASE (OpenRouter: "https://openrouter.ai/api/v1") — and a
+  // custom provider may hold either. Using provider.url as-is made every
+  // base-URL entry POST to a non-endpoint → 404 → "AI doesn't work" while
+  // the chat page (which derives) kept working. Same derivation everywhere.
+  const url = provider.url
+    ? deriveChatUrl(provider.url)
+    : 'https://api.openai.com/v1/chat/completions';
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
   if (provider.apiKey) {
     headers['Authorization'] = `Bearer ${provider.apiKey}`;
   }
-  const body = {
+  const body: Record<string, unknown> = {
     model: provider.model,
     messages: [
       { role: 'system', content: systemPrompt },
@@ -289,20 +310,34 @@ async function callOpenAICompatible(
     max_tokens: maxTokens,
     temperature: provider.temperature ?? 0.4,
   };
-  const response = await fetch(url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-  });
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`LLM API error ${response.status}: ${text}`);
+  // proxyFetch routes through the main process (ai:chat IPC) — cloud
+  // providers (Z.ai, OpenAI, Groq, Cerebras, …) do NOT send CORS headers,
+  // so a renderer-side fetch() fails with "Failed to fetch" before the
+  // request ever reaches the API. The IPC proxy has no CORS restriction.
+  let response = await proxyFetch(url, headers, JSON.stringify(body));
+  // v2.3.12 — OpenRouter free model 429 → retry once via the free
+  // meta-router (same rationale as callOpenAIChat in aiChat.ts).
+  if (!response.ok && shouldFallbackToOpenRouterFree(provider.type, provider.model, response.status, response.body)) {
+    notifyLLMFallback(provider.model);
+    response = await proxyFetch(url, headers, JSON.stringify({ ...body, model: OPENROUTER_FREE_MODEL }));
   }
-  const data = await response.json();
+  if (!response.ok) {
+    // v2.3.12 — structured error instead of `LLM API error 429: {raw JSON}`.
+    throw new LLMApiError(response.status, response.body);
+  }
+  let data: { choices?: { message?: { content?: string } }[] };
+  try {
+    data = JSON.parse(response.body);
+  } catch {
+    throw new Error(`LLM API returned non-JSON response: ${response.body.slice(0, 200)}`);
+  }
   const content = data.choices?.[0]?.message?.content;
   if (!content) throw new Error('Empty LLM response');
   return content.trim();
 }
+
+// (Anthropic/Ollama batch throw sites below also got the structured error —
+// v2.3.12.)
 
 /** Anthropic Claude API. */
 async function callAnthropic(
@@ -311,7 +346,10 @@ async function callAnthropic(
   userPrompt: string,
   maxTokens: number
 ): Promise<string> {
-  const url = provider.url || 'https://api.anthropic.com/v1/messages';
+  // See callOpenAICompatible — derive /v1/messages from base or full URLs.
+  const url = provider.url
+    ? deriveAnthropicUrl(provider.url)
+    : 'https://api.anthropic.com/v1/messages';
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     'anthropic-version': '2023-06-01',
@@ -325,16 +363,18 @@ async function callAnthropic(
     messages: [{ role: 'user', content: userPrompt }],
     max_tokens: maxTokens,
   };
-  const response = await fetch(url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-  });
+  // IPC proxy — see callOpenAICompatible (CORS).
+  const response = await proxyFetch(url, headers, JSON.stringify(body));
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Anthropic API error ${response.status}: ${text}`);
+    // v2.3.12 — structured error instead of a raw body dump.
+    throw new LLMApiError(response.status, response.body);
   }
-  const data = await response.json();
+  let data: { content?: { text?: string }[] };
+  try {
+    data = JSON.parse(response.body);
+  } catch {
+    throw new Error(`Anthropic API returned non-JSON response: ${response.body.slice(0, 200)}`);
+  }
   const content = data.content?.[0]?.text;
   if (!content) throw new Error('Empty Anthropic response');
   return content.trim();
@@ -347,7 +387,17 @@ async function callOllama(
   userPrompt: string,
   maxTokens: number
 ): Promise<string> {
-  const url = provider.url || 'http://localhost:11434/api/chat';
+  // THE AI-COMMIT-SUGGESTER FIX. The Ollama preset and the provider
+  // registry store the BASE url ("http://localhost:11434" — no path).
+  // Using provider.url as-is POSTed to the server ROOT: real Ollama
+  // answers 404 ("path '/' not found"), which proxyFetch then misread
+  // as "model loading" and retried 3x with 2-8 s backoff — 14 s of
+  // silence followed by "AI generation failed" for every Ollama user,
+  // while the auto-suggest banner silently never appeared at all.
+  // deriveOllamaChatUrl normalizes ALL stored shapes (bare base,
+  // ".../api/chat", ".../chat/completions") to {base}/api/chat — the
+  // same normalization the AI-chat path has always done.
+  const url = deriveOllamaChatUrl(provider.url || 'http://localhost:11434');
   const body = {
     model: provider.model,
     messages: [
@@ -360,16 +410,22 @@ async function callOllama(
     },
     stream: false,
   };
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+  // IPC proxy — keeps Ollama + cloud providers on one code path (no CORS).
+  const response = await proxyFetch(
+    url,
+    { 'Content-Type': 'application/json' },
+    JSON.stringify(body)
+  );
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Ollama API error ${response.status}: ${text}`);
+    // v2.3.12 — structured error instead of a raw body dump.
+    throw new LLMApiError(response.status, response.body);
   }
-  const data = await response.json();
+  let data: { message?: { content?: string } };
+  try {
+    data = JSON.parse(response.body);
+  } catch {
+    throw new Error(`Ollama API returned non-JSON response: ${response.body.slice(0, 200)}`);
+  }
   const content = data.message?.content;
   if (!content) throw new Error('Empty Ollama response');
   return content.trim();
@@ -647,7 +703,10 @@ export async function* callLLMStream(
 
   // --- OpenAI-compatible (OpenAI / Custom / GitHub / Mistral) ---
   async function* streamOpenAICompatible(): AsyncGenerator<string> {
-    const url = provider.url || 'https://api.openai.com/v1/chat/completions';
+    // See callOpenAICompatible — derive the endpoint from any stored shape.
+    const url = provider.url
+      ? deriveChatUrl(provider.url)
+      : 'https://api.openai.com/v1/chat/completions';
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       Accept: 'text/event-stream',
@@ -663,10 +722,51 @@ export async function* callLLMStream(
       temperature: provider.temperature ?? 0.4,
       stream: true,
     });
-    const response = await fetch(url, { method: 'POST', headers, body, signal });
+    let response: Response;
+    try {
+      response = await fetch(url, { method: 'POST', headers, body, signal });
+    } catch {
+      // CORS / network failure (Z.ai, OpenAI, … don't send CORS headers):
+      // fall back to the IPC proxy. Streaming becomes a single batch, but
+      // the request WORKS — without this the stream path always failed for
+      // cloud providers.
+      const msg = await callOpenAICompatible(provider, systemPrompt, userPrompt, maxTokens);
+      full += msg;
+      onToken?.(msg);
+      yield msg;
+      return;
+    }
     if (!response.ok || !response.body) {
-      const text = await response.text();
-      throw new Error(`LLM stream error ${response.status}: ${text}`);
+      // v2.3.12 — OpenRouter free model 429 → retry via the meta-router.
+      // This direct-fetch path is reachable because openrouter.ai DOES send
+      // CORS headers (unlike most providers), so the 429 can land here
+      // before the batch fallback ever runs.
+      // NOTE: response.text() may be called ONCE per Response — read it here
+      // and reuse the string; a second .text() on the same body throws
+      // "Body is unusable: Body has already been read".
+      const text = await response.text().catch(() => '');
+      if (shouldFallbackToOpenRouterFree(provider.type, provider.model, response.status, text)) {
+        notifyLLMFallback(provider.model);
+        const fbBody = JSON.stringify({
+          model: OPENROUTER_FREE_MODEL,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ],
+          max_tokens: maxTokens,
+          temperature: provider.temperature ?? 0.4,
+          stream: true,
+        });
+        response = await fetch(url, { method: 'POST', headers, body: fbBody, signal });
+        if (!response.ok || !response.body) {
+          const fbText = await response.text().catch(() => '');
+          // v2.3.12 — structured error instead of a raw body dump.
+          throw new LLMApiError(response.status, fbText);
+        }
+      } else {
+        // v2.3.12 — structured error instead of a raw body dump.
+        throw new LLMApiError(response.status, text);
+      }
     }
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -697,7 +797,10 @@ export async function* callLLMStream(
 
   // --- Anthropic (Claude) ---
   async function* streamAnthropic(): AsyncGenerator<string> {
-    const url = provider.url || 'https://api.anthropic.com/v1/messages';
+    // See callAnthropic — derive /v1/messages from any stored shape.
+    const url = provider.url
+      ? deriveAnthropicUrl(provider.url)
+      : 'https://api.anthropic.com/v1/messages';
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'anthropic-version': '2023-06-01',
@@ -711,10 +814,21 @@ export async function* callLLMStream(
       max_tokens: maxTokens,
       stream: true,
     });
-    const response = await fetch(url, { method: 'POST', headers, body, signal });
+    let response: Response;
+    try {
+      response = await fetch(url, { method: 'POST', headers, body, signal });
+    } catch {
+      // CORS / network failure — IPC proxy fallback (see streamOpenAICompatible).
+      const msg = await callAnthropic(provider, systemPrompt, userPrompt, maxTokens);
+      full += msg;
+      onToken?.(msg);
+      yield msg;
+      return;
+    }
     if (!response.ok || !response.body) {
       const text = await response.text();
-      throw new Error(`Anthropic stream error ${response.status}: ${text}`);
+      // v2.3.12 — structured error instead of a raw body dump.
+      throw new LLMApiError(response.status, text);
     }
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -747,7 +861,10 @@ export async function* callLLMStream(
 
   // --- Ollama (NDJSON — one JSON object per line) ---
   async function* streamOllama(): AsyncGenerator<string> {
-    const url = (provider.url || 'http://localhost:11434') + '/api/chat';
+    // See callOllama — derive /api/chat from any stored URL shape (base,
+    // /api/chat, /chat/completions). Preserves the old inline behavior
+    // but shares ONE implementation with the batch path.
+    const url = deriveOllamaChatUrl(provider.url || 'http://localhost:11434');
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     const body = JSON.stringify({
       model: provider.model,
@@ -758,10 +875,21 @@ export async function* callLLMStream(
       stream: true,
       options: { temperature: provider.temperature ?? 0.4 },
     });
-    const response = await fetch(url, { method: 'POST', headers, body, signal });
+    let response: Response;
+    try {
+      response = await fetch(url, { method: 'POST', headers, body, signal });
+    } catch {
+      // Network failure — IPC proxy fallback (Ollama has no CORS headers either).
+      const msg = await callOllama(provider, systemPrompt, userPrompt, maxTokens);
+      full += msg;
+      onToken?.(msg);
+      yield msg;
+      return;
+    }
     if (!response.ok || !response.body) {
       const text = await response.text();
-      throw new Error(`Ollama stream error ${response.status}: ${text}`);
+      // v2.3.12 — structured error instead of a raw body dump.
+      throw new LLMApiError(response.status, text);
     }
     const reader = response.body.getReader();
     const decoder = new TextDecoder();

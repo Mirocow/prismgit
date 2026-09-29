@@ -20,9 +20,11 @@ vi.mock('simple-git', () => {
   const getRemotes = vi
     .fn()
     .mockResolvedValue([{ name: 'origin', refs: { fetch: 'http://example.com/r.git', push: '' } }]);
-  const simpleGit = vi.fn(() => ({ raw, getRemotes }));
+  // env: the service pipes the merged child environment through the
+  // supported .env() builder — the mock must accept (and ignore) it.
+  const simpleGit = vi.fn(() => ({ raw, getRemotes, env: vi.fn().mockReturnThis() }));
   // Expose the shared mocked methods — every getGit() instance returns them.
-  return { default: simpleGit, __mocks: { raw, getRemotes } };
+  return { default: simpleGit, simpleGit, __mocks: { raw, getRemotes } };
 });
 
 vi.mock('../../electron/services/storage.js', () => ({
@@ -59,17 +61,29 @@ describe('fetch dedupe — one download per repo at a time', () => {
     expect(raw).toHaveBeenCalledTimes(1);
   });
 
-  it('joins an in-flight fetchAll as well (menu Fetch vs History auto-fetch)', async () => {
+  it('does NOT join an in-flight fetchAll when a specific remote is requested (R3 fix)', async () => {
+    // RACE FIX (R3): runExclusiveFetch used to dedupe solely by repoPath,
+    // so a fetchAll and a fetch('origin') collapsed into a single in-flight
+    // promise — the second caller joined the first and its requested remote
+    // was silently never fetched. The fix includes `remote` in the dedup
+    // key, so fetchAll (no specific remote, key=repoPath) and
+    // fetch('origin') (key=repoPath\u0001origin) run as TWO distinct calls.
+    // This is correct: fetchAll may be downloading `upstream` while
+    // fetch('origin') just wants `origin`.
     let release!: () => void;
-    raw.mockImplementationOnce(() => new Promise<void>((res) => { release = res; }));
+    let release2!: () => void;
+    raw
+      .mockImplementationOnce(() => new Promise<void>((res) => { release = res; }))
+      .mockImplementationOnce(() => new Promise<void>((res) => { release2 = res; }));
 
     const all = fetchAll('/repo/dedupe2', true);
     const one = fetch('/repo/dedupe2', 'origin', true, true);
     await flush();
     release();
+    release2();
     await Promise.all([all, one]);
 
-    expect(raw).toHaveBeenCalledTimes(1);
+    expect(raw).toHaveBeenCalledTimes(2);
   });
 
   it('runs a fresh fetch after the previous one finished (mutex released)', async () => {

@@ -41,14 +41,34 @@ export interface AIMemoryFile {
 
 const MEMORY_DIR = '.prismgit';
 const MEMORY_FILE = 'ai-memory.json';
+const SAVE_DEBOUNCE_MS = 500;
 
 /** Get the path to the memory file for a given repo. */
 function memoryFilePath(repoPath: string): string {
   return path.join(repoPath, MEMORY_DIR, MEMORY_FILE);
 }
 
-/** Load the AI memory for a repo. Returns empty entries if file doesn't exist. */
+// PERFORMANCE (ST-IO6): the previous implementation called 4 synchronous fs
+// operations per `saveAIMemoryEntry` — existsSync + mkdirSync + readFileSync
+// + writeFileSync — blocking the Electron main-process event loop for ~10 ms
+// on each save. The AI assistant calls save_memory multiple times per
+// conversation (often 3-5× in quick succession when the model decides to
+// persist several facts). Now saveAIMemoryEntry / deleteAIMemoryEntry:
+//   1) Use async `fs.promises.*` (no main-loop blocking).
+//   2) Debounce writes 500 ms — multiple saves within 500 ms coalesce into a
+//      single disk write. The in-memory `pendingEntries` Map is the source
+//      of truth between flushes so reads stay consistent.
+const pendingEntries = new Map<string, AIMemoryEntry[]>();
+const saveTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+/** Load the AI memory for a repo. Returns empty entries if file doesn't exist.
+ *
+ * If there are pending (un-flushed) writes for this repo, returns the
+ * pending list so reads stay consistent with the most recent writes. */
 export function loadAIMemory(repoPath: string): AIMemoryEntry[] {
+  // Pending writes take precedence — they are more recent than the file.
+  const pending = pendingEntries.get(repoPath);
+  if (pending) return pending.slice();
   try {
     const filePath = memoryFilePath(repoPath);
     if (!fs.existsSync(filePath)) return [];
@@ -61,35 +81,55 @@ export function loadAIMemory(repoPath: string): AIMemoryEntry[] {
   }
 }
 
-/** Save a new memory entry (or update an existing one by key). */
+function scheduleFlush(repoPath: string): void {
+  if (saveTimers.has(repoPath)) return;
+  const t = setTimeout(async () => {
+    saveTimers.delete(repoPath);
+    const entries = pendingEntries.get(repoPath);
+    if (!entries) return;
+    pendingEntries.delete(repoPath);
+    try {
+      const dir = path.join(repoPath, MEMORY_DIR);
+      await fs.promises.mkdir(dir, { recursive: true });
+      const file: AIMemoryFile = { version: 1, entries };
+      await fs.promises.writeFile(
+        memoryFilePath(repoPath),
+        JSON.stringify(file, null, 2),
+        'utf8'
+      );
+    } catch {
+      // Silently fail — memory is a nice-to-have, not critical. Restore
+      // the pending entries so the next save attempt includes them.
+      const next = pendingEntries.get(repoPath);
+      pendingEntries.set(repoPath, next ? [...entries, ...next] : entries);
+    }
+  }, SAVE_DEBOUNCE_MS);
+  saveTimers.set(repoPath, t);
+}
+
+/** Save a new memory entry (or update an existing one by key).
+ *
+ * Returns immediately — the actual disk write is debounced 500 ms later. */
 export function saveAIMemoryEntry(repoPath: string, key: string, value: string, category?: string): void {
-  try {
-    const dir = path.join(repoPath, MEMORY_DIR);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const entries = loadAIMemory(repoPath);
-    // Update existing or add new.
-    const idx = entries.findIndex(e => e.key === key);
-    const entry: AIMemoryEntry = { key, value, savedAt: new Date().toISOString(), category };
-    if (idx >= 0) entries[idx] = entry;
-    else entries.push(entry);
-    const file: AIMemoryFile = { version: 1, entries };
-    fs.writeFileSync(memoryFilePath(repoPath), JSON.stringify(file, null, 2), 'utf8');
-  } catch {
-    // Silently fail — memory is a nice-to-have, not critical.
-  }
+  const entries = pendingEntries.get(repoPath) ?? loadAIMemory(repoPath);
+  // Update existing or add new (operate on a copy so we don't mutate the
+  // pending array in place — loadAIMemory callers expect a snapshot).
+  const next = entries.slice();
+  const idx = next.findIndex(e => e.key === key);
+  const entry: AIMemoryEntry = { key, value, savedAt: new Date().toISOString(), category };
+  if (idx >= 0) next[idx] = entry;
+  else next.push(entry);
+  pendingEntries.set(repoPath, next);
+  scheduleFlush(repoPath);
 }
 
 /** Delete a memory entry by key. */
 export function deleteAIMemoryEntry(repoPath: string, key: string): void {
-  try {
-    const entries = loadAIMemory(repoPath);
-    const filtered = entries.filter(e => e.key !== key);
-    if (filtered.length === entries.length) return; // nothing deleted
-    const file: AIMemoryFile = { version: 1, entries: filtered };
-    fs.writeFileSync(memoryFilePath(repoPath), JSON.stringify(file, null, 2), 'utf8');
-  } catch {
-    // ignore
-  }
+  const entries = pendingEntries.get(repoPath) ?? loadAIMemory(repoPath);
+  const filtered = entries.filter(e => e.key !== key);
+  if (filtered.length === entries.length) return; // nothing deleted
+  pendingEntries.set(repoPath, filtered);
+  scheduleFlush(repoPath);
 }
 
 /** Build a text summary of the memory entries for injection into the system prompt. */

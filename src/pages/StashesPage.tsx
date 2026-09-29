@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Package, RefreshCw, Plus, Trash, Download, Upload, Check, FileText, ChevronDown, ChevronRight, X, GitBranch } from '../components/icons';
 import { EmptyState } from '../components/EmptyState';
 import { useRepositoryStore } from '../stores/repositoryStore';
-import { useGitStore } from '../stores/gitStore';
+import { useGitStore, surfaceConflictedState } from '../stores/gitStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { api, type StashEntry, type DiffResult } from '../lib/api';
@@ -13,13 +13,17 @@ import { cn } from '../lib/utils';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
+import { confirmWithRemember, CONFIRMATION_IDS } from '../lib/confirmations';
 import { useContextMenu } from '../lib/useContextMenu';
 import { useI18n } from '../lib/i18n';
+import { useDateFormatter } from '../lib/formatDate';
 export function StashesPage() {
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const toast = useToastActions();
   const { t } = useI18n();
+  // 0.7 — honors settings.dateFormat (relative / absolute / both)
+  const fmtDate = useDateFormatter();
   const showContextMenu = useContextMenu();
   const navigate = useNavigate();
   const [stashes, setStashes] = useState<StashEntry[]>([]);
@@ -28,6 +32,9 @@ export function StashesPage() {
   useEscapeKey(showNewDialog, () => setShowNewDialog(false));
   const [stashMessage, setStashMessage] = useState('');
   const [includeUntracked, setIncludeUntracked] = useState(false);
+  // 2.3 — SmartGit "Keep index": stash push --keep-index leaves the staged
+  // changes in the index/working tree while still stashing everything.
+  const [keepIndex, setKeepIndex] = useState(false);
   // Global stash selection — shared with Branches stash section and the Toolbar
   // chip: clicking a stash here marks it everywhere (SmartGit behavior).
   const selectedStashIndex = useSelectionStore((s) => s.selectedStashIndex);
@@ -50,11 +57,12 @@ export function StashesPage() {
 
   const handleStashPush = async () => {
     try {
-      await api.git.stashPush(repo.path, stashMessage || undefined, includeUntracked);
+      await api.git.stashPush(repo.path, stashMessage || undefined, includeUntracked, keepIndex);
       toast.success(t('stashes.stashed'));
       setShowNewDialog(false);
       setStashMessage('');
       setIncludeUntracked(false);
+      setKeepIndex(false);
       await load();
       await refreshStatus(repo.path);
     } catch (e) {
@@ -62,15 +70,19 @@ export function StashesPage() {
     }
   };
 
-  const handlePop = async (stash: StashEntry) => {
+  const handlePop = async (stash: StashEntry, opts?: { keepIndex?: boolean }) => {
     if (!(await confirmDialog({
       title: t('stashes.popStashAt', { index: stash.index }),
       message: t('stashes.popConfirmMessage', { message: stash.message }),
       confirmLabel: t('stashes.pop'),
     }))) return;
     try {
-      await api.git.stashPop(repo.path, stash.index);
-      toast.success(t('stashes.poppedStash', { index: stash.index }));
+      await api.git.stashPop(repo.path, stash.index, opts?.keepIndex);
+      toast.success(
+        opts?.keepIndex
+          ? t('stashes.poppedKeepIndex', { index: stash.index })
+          : t('stashes.poppedStash', { index: stash.index })
+      );
       // The popped stash no longer exists — clear the global selection if it pointed here
       if (useSelectionStore.getState().selectedStashIndex === stash.index) {
         useSelectionStore.getState().selectStash(null);
@@ -78,22 +90,43 @@ export function StashesPage() {
       await load();
       await refreshStatus(repo.path);
     } catch (e) {
-      toast.error(t('stashes.popFailed'), String(e));
+      // Conflict-reaction audit (v3.6): a conflicted pop leaves unmerged
+      // paths in the working tree (NO sequencer state — MERGE_HEAD etc.
+      // don't exist) while the stash entry itself is KEPT. The old raw
+      // error toast told the user neither. Now: state-based detection →
+      // Changes tool + a message that says the stash was kept.
+      const conflicted = await surfaceConflictedState(repo.path, {
+        title: t('stashes.popConflicts'),
+        detail: t('stashes.popConflictsHint'),
+      });
+      if (!conflicted) toast.error(t('stashes.popFailed'), String(e));
+      await load();
     }
   };
 
-  const handleApply = async (stash: StashEntry) => {
+  const handleApply = async (stash: StashEntry, opts?: { keepIndex?: boolean }) => {
     try {
-      await api.git.stashApply(repo.path, stash.index);
-      toast.success(t('stashes.appliedKeptStash', { index: stash.index }));
+      await api.git.stashApply(repo.path, stash.index, opts?.keepIndex);
+      toast.success(
+        opts?.keepIndex
+          ? t('stashes.appliedKeepIndex', { index: stash.index })
+          : t('stashes.appliedKeptStash', { index: stash.index })
+      );
       await refreshStatus(repo.path);
     } catch (e) {
-      toast.error(t('stashes.applyFailed'), String(e));
+      // Conflict-reaction audit (v3.6): same state-based reaction as pop —
+      // conflicted apply leaves unmerged paths, the stash is kept.
+      const conflicted = await surfaceConflictedState(repo.path, {
+        title: t('stashes.applyConflicts'),
+        detail: t('stashes.applyConflictsHint'),
+      });
+      if (!conflicted) toast.error(t('stashes.applyFailed'), String(e));
     }
   };
 
   const handleDrop = async (stash: StashEntry) => {
-    if (!(await confirmDialog({
+    // 4.5 — supports persistent "Don't ask again" (confirmations registry).
+    if (!(await confirmWithRemember(CONFIRMATION_IDS.stashDrop, {
       title: t('stashes.dropStashAt', { index: stash.index }),
       message: t('stashes.dropConfirmMessage', { message: stash.message }),
       confirmLabel: t('stashes.drop'),
@@ -205,17 +238,28 @@ export function StashesPage() {
                 title={t('stashes.rowTooltip')}
                 onContextMenu={(e) => {
                   e.preventDefault();
+                  // MENU STRUCTURE (v3.4): grouped by domain — view top-level,
+                  // restore variants (apply/pop × keep-index) in one group,
+                  // branch/drop in “Удаление ▸”, clipboard in “Копировать ▸”.
                   showContextMenu([
                     { label: t('stashes.viewMenu'), clickId: 'view' },
                     { type: 'separator' },
-                    { label: t('stashes.applyItem', { index: s.index }), clickId: 'apply' },
-                    { label: t('stashes.popStashAtMenu', { index: s.index }), clickId: 'pop' },
-                    { label: t('stashes.branchMenu'), clickId: 'branch' },
-                    { type: 'separator' },
-                    { label: t('stashes.dropStashAtMenu', { index: s.index }), clickId: 'drop' },
-                    { type: 'separator' },
-                    { label: t('stashes.copyMessage'), clickId: 'copy-msg' },
-                    { label: t('stashes.copyHash'), clickId: 'copy-hash' },
+                    { label: t('stashes.restoreGroup', { defaultValue: 'Restore' }), submenu: [
+                      { label: t('stashes.applyItem', { index: s.index }), clickId: 'apply' },
+                      { label: t('stashes.applyKeepIndexMenu', { index: s.index }), clickId: 'apply-keep-index' },
+                      { type: 'separator' },
+                      { label: t('stashes.popStashAtMenu', { index: s.index }), clickId: 'pop' },
+                      { label: t('stashes.popKeepIndexMenu', { index: s.index }), clickId: 'pop-keep-index' },
+                      { type: 'separator' },
+                      { label: t('stashes.branchMenu'), clickId: 'branch' },
+                    ] },
+                    { label: t('ctx.group.delete'), submenu: [
+                      { label: t('stashes.dropStashAtMenu', { index: s.index }), clickId: 'drop' },
+                    ] },
+                    { label: t('ctx.group.copy'), submenu: [
+                      { label: t('stashes.copyMessage'), clickId: 'copy-msg' },
+                      { label: t('stashes.copyHash'), clickId: 'copy-hash' },
+                    ] },
                   ], (action) => {
                     switch (action) {
                       case 'view': handleViewStash(s); break;
@@ -223,7 +267,12 @@ export function StashesPage() {
                         useSelectionStore.getState().selectStash(s.index, s.hash);
                         handleApply(s);
                         break;
+                      case 'apply-keep-index':
+                        useSelectionStore.getState().selectStash(s.index, s.hash);
+                        handleApply(s, { keepIndex: true }); // 2.3 — restore staged/unstaged split
+                        break;
                       case 'pop': handlePop(s); break;
+                      case 'pop-keep-index': handlePop(s, { keepIndex: true }); break; // 2.3
                       case 'branch': handleStashBranch(s); break;
                       case 'drop': handleDrop(s); break;
                       case 'copy-msg': copyToClipboard(s.message); toast.success(t('stashes.copied')); break;
@@ -232,14 +281,14 @@ export function StashesPage() {
                   });
                 }}
               >
-                <code className="text-xs font-mono text-text-tertiary flex-shrink-0">
+                <code className="text-xs font-mono text-text-tertiary shrink-0">
                   stash@{'{' + s.index + '}'}
                 </code>
                 <div className="flex-1 min-w-0">
                   <div className="text-sm text-text-primary truncate">{s.message}</div>
                   <div className="flex items-center gap-2 text-xs text-text-tertiary mt-0.5">
                     <CommitHashLink hash={s.hash} />
-                    <span>· {formatDate(s.date)}</span>
+                    <span>· {fmtDate(s.date)}</span>
                   </div>
                 </div>
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100" onClick={(e) => e.stopPropagation()}>
@@ -313,8 +362,19 @@ export function StashesPage() {
                 />
                 {t('stashes.includeUntracked')}
               </label>
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={keepIndex}
+                  onChange={(e) => setKeepIndex(e.target.checked)}
+                />
+                <span>
+                  {t('stashes.keepIndexPush')}
+                  <span className="block text-2xs text-text-tertiary">{t('stashes.keepIndexPushHint')}</span>
+                </span>
+              </label>
             </div>
-            <div className="flex justify-end gap-2 mt-4">
+            <div className="flex flex-wrap justify-end gap-2 mt-4">
               <button className="btn btn-secondary" onClick={() => setShowNewDialog(false)}>
                 {t('common.cancel')}
               </button>

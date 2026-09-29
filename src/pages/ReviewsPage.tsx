@@ -1,9 +1,15 @@
-import { useState, useEffect, useCallback } from 'react';
-import { GitPullRequest, RefreshCw, Plus, Trash, Check, X, AlertCircle, Upload, Download, Loader, FileText } from '../components/icons';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useShallow } from 'zustand/react/shallow';
+import { GitPullRequest, GitBranch, RefreshCw, Plus, Trash, Check, X, AlertCircle, Upload, Download, Loader, FileText, ExternalLink, ArrowLeft } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
+import { useAuthStore } from '../stores/authStore';
+import { useProviderStore } from '../stores/providerStore';
 import { api, type LogEntry } from '../lib/api';
+import { ProviderChip } from '../components/ProviderChip';
+import { PRReview } from '../components/PRReview';
+import { SquashToBranchDialog } from '../components/SquashToBranchDialog';
 import {
   loadReviews,
   addReviewComment,
@@ -50,6 +56,37 @@ export function ReviewsPage() {
   useEscapeKey(showAdd, () => setShowAdd(false));
   const [newComment, setNewComment] = useState<Partial<ReviewComment>>({});
   const [busy, setBusy] = useState<string | null>(null);
+  // ── Group squash-to-branch (local review mode) ──
+  // Same interaction model as History / the PR Commits tab: Shift+click
+  // range, Ctrl/Cmd+click toggle, plain click resets (and selects the
+  // commit for the comments panel, as before).
+  const [multiSel, setMultiSel] = useState<ReadonlySet<string>>(new Set());
+  const multiAnchorRef = useRef<string | null>(null);
+  const [squashDialog, setSquashDialog] = useState<{ commits: LogEntry[] } | null>(null);
+  useEscapeKey(multiSel.size >= 2 && !squashDialog, () => setMultiSel(new Set()));
+
+  // ─── Single source of truth: shared with PullRequestsPage via providerStore
+  // The user's explicit request: 'Зачем делали тогда инструмент Reviews — в
+  // нем и должен происходить кодревью, он и должен быть синхронизирован с
+  // пулреквест'. So when a PR is selected from PullRequests (or anywhere
+  // else that calls selectPR), Reviews shows the PR review surface instead
+  // of the local-review mode.
+  const providerInfo = useProviderStore(useShallow((s) => ({
+    provider: s.provider,
+    owner: s.owner,
+    repo: s.repo,
+    gitlabAuthed: s.gitlabAuthed,
+  })));
+  const gitlabProjectId = useProviderStore((s) => s.gitlabProjectId);
+  const setGitlabProjectId = useProviderStore((s) => s.setGitlabProjectId);
+  const selectedPR = useProviderStore((s) => s.selectedPR);
+  const selectPR = useProviderStore((s) => s.selectPR);
+  const detectProvider = useProviderStore((s) => s.detect);
+  const [prNumberInput, setPrNumberInput] = useState('');
+
+  useEffect(() => {
+    detectProvider(repo.path);
+  }, [repo.path, detectProvider]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -68,8 +105,10 @@ export function ReviewsPage() {
   }, [repo.path, toast]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    // Only load local reviews when we're NOT in PR review mode — PR review
+    // fetches its own data via the GitHub/GitLab API.
+    if (!selectedPR) load();
+  }, [load, selectedPR]);
 
   const handleAdd = async () => {
     if (!newComment.commitHash || !newComment.filePath || !newComment.body) {
@@ -126,8 +165,15 @@ export function ReviewsPage() {
   const handlePush = async () => {
     setBusy('push');
     try {
-      await pushReviews(repo.path);
-      toast.success(t('pages.reviewsPushed'));
+      const result = await pushReviews(repo.path);
+      if (result === 'nothing-to-push') {
+        toast.info(
+          t('pages.reviewsNothingToPush', { defaultValue: 'No reviews to push' }),
+          t('pages.reviewsNothingToPushHint', { defaultValue: 'Add a review comment first, then push to share it with your team.' })
+        );
+      } else {
+        toast.success(t('pages.reviewsPushed'));
+      }
     } catch (e) {
       toast.error(t('pages.pushFailed'), String(e));
     } finally {
@@ -138,11 +184,74 @@ export function ReviewsPage() {
   const handleFetch = async () => {
     setBusy('fetch');
     try {
-      await fetchReviews(repo.path);
-      toast.success(t('pages.reviewsFetched'));
-      await load();
+      const result = await fetchReviews(repo.path);
+      if (result === 'no-remote-reviews') {
+        toast.info(
+          t('pages.reviewsNoRemoteReviews', { defaultValue: 'No reviews on remote yet' }),
+          t('pages.reviewsNoRemoteReviewsHint', { defaultValue: 'The remote repository has no review notes. Push your local reviews first to share them.' })
+        );
+      } else {
+        toast.success(t('pages.reviewsFetched'));
+        await load();
+      }
     } catch (e) {
       toast.error(t('pages.fetchFailed'), String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleLoadFromPR = async () => {
+    if (!providerInfo.owner || !providerInfo.repo) {
+      toast.warning(t('pages.reviewsNoProvider', { defaultValue: 'Repository is not hosted on GitHub/GitLab' }));
+      return;
+    }
+    const prNumStr = prNumberInput.trim() || await promptDialog({
+      title: t('pages.reviewsLoadFromPRTitle', { defaultValue: 'Load review comments from Pull Request' }),
+      message: t('pages.reviewsLoadFromPRMessage', { defaultValue: 'Enter the PR/MR number:' }),
+      input: { placeholder: '#123' },
+      confirmLabel: t('common.load', { defaultValue: 'Load' }),
+    });
+    if (prNumStr == null || !prNumStr.trim()) return;
+    const prNum = parseInt(prNumStr.replace(/^#/, '').trim(), 10);
+    if (!Number.isFinite(prNum) || prNum <= 0) {
+      toast.error(t('pages.reviewsInvalidPRNumber', { defaultValue: 'Invalid PR number' }));
+      return;
+    }
+    setBusy('pr-load');
+    try {
+      let imported = 0;
+      if (providerInfo.provider === 'github') {
+        const { authenticated } = useAuthStore.getState();
+        if (!authenticated) {
+          toast.warning(t('pages.reviewsGithubNotAuthed', { defaultValue: 'Connect to GitHub first (Settings → Integrations)' }));
+          return;
+        }
+        const comments = await api.github.listPRComments(providerInfo.owner, providerInfo.repo, prNum);
+        for (const c of comments) {
+          if (!c.commit_id || !c.path) continue;
+          await addReviewComment(repo.path, {
+            commitHash: c.commit_id,
+            filePath: c.path,
+            lineNumber: c.line ?? 0,
+            author: c.user?.login || 'github',
+            body: c.body,
+            severity: 'info',
+            resolved: false,
+          });
+          imported++;
+        }
+      } else if (providerInfo.provider === 'gitlab') {
+        toast.info(t('pages.reviewsGitlabNotesUnsupported', { defaultValue: 'GitLab MR note import is not yet available — use the GitLab web UI to view MR comments' }));
+        return;
+      } else {
+        toast.warning(t('pages.reviewsNoProvider', { defaultValue: 'Repository is not hosted on GitHub/GitLab' }));
+        return;
+      }
+      toast.success(t('pages.reviewsImported', { defaultValue: 'Imported {count} review comments from PR #{pr}', count: imported, pr: prNum }));
+      await load();
+    } catch (e) {
+      toast.error(t('pages.reviewsImportFailed', { defaultValue: 'Failed to import PR comments' }), String(e));
     } finally {
       setBusy(null);
     }
@@ -154,16 +263,127 @@ export function ReviewsPage() {
     0
   );
 
+  // ── Group squash-to-branch (local review mode) ──────────────────────────
+  // Sort the reviewed-commit rows by git-log order (newest first) instead of
+  // the arbitrary git-notes listing order. This does two things: the panel
+  // reads like History, and Shift-range selections map onto REAL git ranges
+  // (squashToBranch refuses gap selections).
+  const orderedReviews = useMemo(() => {
+    const idx = new Map(commits.map((c, i) => [c.hash, i]));
+    return [...reviews].sort((a, b) =>
+      (idx.get(a.commitHash) ?? Number.MAX_SAFE_INTEGER) - (idx.get(b.commitHash) ?? Number.MAX_SAFE_INTEGER));
+  }, [reviews, commits]);
+  // Drop selected hashes that vanished after a reload.
+  useEffect(() => {
+    if (multiSel.size === 0) return;
+    const alive = new Set(reviews.map((r) => r.commitHash));
+    const next = new Set([...multiSel].filter((h) => alive.has(h)));
+    if (next.size !== multiSel.size) setMultiSel(next);
+  }, [reviews, multiSel]);
+
+  const handleReviewRowClick = useCallback((e: React.MouseEvent, review: Review) => {
+    if (e.shiftKey) {
+      const anchor = multiAnchorRef.current ?? review.commitHash;
+      const aIdx = orderedReviews.findIndex((r) => r.commitHash === anchor);
+      const idx = orderedReviews.findIndex((r) => r.commitHash === review.commitHash);
+      const from = Math.min(aIdx < 0 ? idx : aIdx, idx);
+      const to = Math.max(aIdx < 0 ? idx : aIdx, idx);
+      const set = new Set<string>();
+      for (let i = from; i <= to; i++) {
+        const r = orderedReviews[i];
+        if (r) set.add(r.commitHash);
+      }
+      setMultiSel(set);
+    } else if (e.ctrlKey || e.metaKey) {
+      setMultiSel((prev) => {
+        const next = new Set(prev);
+        if (next.has(review.commitHash)) next.delete(review.commitHash); else next.add(review.commitHash);
+        return next;
+      });
+      multiAnchorRef.current = review.commitHash;
+    } else {
+      multiAnchorRef.current = review.commitHash;
+      setMultiSel((prev) => (prev.size === 0 ? prev : new Set()));
+    }
+    // The comments panel keeps following the last clicked commit.
+    selectCommit(review.commitHash);
+  }, [orderedReviews, selectCommit]);
+
+  /** Open the squash dialog for the selected reviewed commits. Ordered
+   *  OLDEST → NEWEST via the git-log array; hashes outside the loaded
+   *  100-commit window cannot be mapped to LogEntry — refuse with a hint. */
+  const openSquashToBranch = useCallback(() => {
+    if (multiSel.size < 2) return;
+    const sel = new Set(multiSel);
+    const ordered = [...commits].reverse().filter((c) => sel.has(c.hash));
+    if (ordered.length < multiSel.size) {
+      toast.error(
+        t('toast.squashToBranch.failed'),
+        t('pages.reviewsSquashOutsideWindow'),
+      );
+      return;
+    }
+    if (ordered.length < 2) return;
+    setSquashDialog({ commits: ordered });
+  }, [multiSel, commits, toast, t]);
+
   const filteredReviews = selectedCommit
     ? reviews.filter(r => r.commitHash.startsWith(selectedCommit))
     : reviews;
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // PR REVIEW MODE — when a PR is selected (via PullRequests page click),
+  // the Reviews page becomes the code review surface for that PR.
+  // The local-review mode (git-notes comments) is shown when no PR is
+  // selected.
+  // ═══════════════════════════════════════════════════════════════════════
+  if (selectedPR && providerInfo.owner && providerInfo.repo &&
+      (providerInfo.provider === 'github' || providerInfo.provider === 'gitlab')) {
+    return (
+      <div className="flex flex-col flex-1 overflow-hidden">
+        {/* PR review header — shows the selected PR + a "back to local reviews" button */}
+        <div className="flex items-center justify-between px-3 py-1 border-b border-border-default bg-bg-secondary">
+          <div className="flex items-center gap-2">
+            <GitPullRequest size={14} />
+            <span className="text-sm font-medium">{t('pages.reviewsTitle')}</span>
+            <ProviderChip />
+            <span className="text-2xs text-text-tertiary">
+              · PR review · #{selectedPR.number}
+            </span>
+          </div>
+          <button
+            className="btn btn-secondary text-xs flex items-center gap-1"
+            onClick={() => selectPR(null)}
+            title={t('pages.reviewsBackToLocal', { defaultValue: 'Back to local review comments' })}
+          >
+            <ArrowLeft size={12} />
+            {t('pages.reviewsExitPR', { defaultValue: 'Exit PR review' })}
+          </button>
+        </div>
+        <PRReview
+          pr={selectedPR}
+          owner={providerInfo.owner}
+          repo={providerInfo.repo}
+          provider={providerInfo.provider as 'github' | 'gitlab'}
+          gitlabProjectId={gitlabProjectId}
+          onActionComplete={() => {/* PR list will refresh on next PullRequests visit */}}
+          onClose={() => selectPR(null)}
+          onGitlabProjectIdResolved={(id) => setGitlabProjectId(id)}
+        />
+      </div>
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // LOCAL REVIEW MODE — git-notes based review (no PR selected).
+  // ═══════════════════════════════════════════════════════════════════════
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2 border-b border-border-default bg-bg-secondary">
         <div className="flex items-center gap-2">
           <GitPullRequest size={14} />
           <span className="text-sm font-medium">{t('pages.reviewsTitle')}</span>
+          <ProviderChip />
           <span className="text-2xs text-text-tertiary">
             {t('pages.reviewsCounts', { comments: totalComments, unresolved: unresolvedCount })}
           </span>
@@ -190,6 +410,21 @@ export function ReviewsPage() {
             {busy === 'push' ? <Loader size={12} className="spin" /> : <Upload size={12} />}
             {t('remotes.push')}
           </button>
+          {/* Load PR comments from GitHub/GitLab — pulls inline review comments
+              from the hosting provider so the user can see code review
+              feedback without leaving the app. Disabled when the repo isn't
+              on GitHub/GitLab or the user isn't authenticated. */}
+          {providerInfo.provider === 'github' || providerInfo.provider === 'gitlab' ? (
+            <button
+              className="btn btn-secondary text-xs"
+              onClick={handleLoadFromPR}
+              disabled={!!busy}
+              title={t('pages.reviewsLoadFromPRTitle', { defaultValue: 'Load review comments from a Pull Request/Merge Request' })}
+            >
+              {busy === 'pr-load' ? <Loader size={12} className="spin" /> : <ExternalLink size={12} />}
+              {t('pages.reviewsLoadFromPR', { defaultValue: 'From PR' })}
+            </button>
+          ) : null}
           <button
             className="btn btn-primary text-xs"
             onClick={() => {
@@ -205,10 +440,37 @@ export function ReviewsPage() {
 
       <div className="flex flex-1 overflow-hidden">
         {/* Commit list with review count */}
-        <div className="w-72 border-r border-border-default overflow-y-auto flex-shrink-0">
+        <div className="w-72 border-r border-border-default overflow-y-auto shrink-0">
           <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-text-secondary bg-bg-tertiary border-b border-border-default">
             {t('pages.reviewedCommits', { count: reviews.length })}
           </div>
+          {/* Group-selection action bar (Shift/Ctrl+click), mirroring
+              History and the PR Commits tab. */}
+          {multiSel.size >= 2 && (
+            <div
+              className="sticky top-0 z-10 flex items-center gap-1.5 px-2 py-1.5 bg-accent/15 border-b border-accent/40 text-xs text-text-primary"
+              style={{ backdropFilter: 'blur(4px)' }}
+            >
+              <GitBranch size={13} className="text-accent shrink-0" />
+              <span className="font-medium">
+                {t('history.nCommitsSelected', { count: multiSel.size })}
+              </span>
+              <button
+                className="btn btn-primary text-2xs !py-0.5 !px-2 ml-1"
+                onClick={openSquashToBranch}
+                title={t('history.squashGroupToBranchTitle')}
+              >
+                {t('history.squashGroupToBranchAction')}
+              </button>
+              <span className="flex-1" />
+              <button
+                className="btn btn-secondary text-2xs !py-0.5 !px-2"
+                onClick={() => setMultiSel(new Set())}
+              >
+                {t('common.clear')}
+              </button>
+            </div>
+          )}
           {loading ? (
             <div className="p-4 text-center text-text-tertiary text-sm">{t('common.loading')}</div>
           ) : reviews.length === 0 ? (
@@ -216,17 +478,22 @@ export function ReviewsPage() {
               {t('pages.noReviewsYet')}
             </div>
           ) : (
-            reviews.map(review => {
+            orderedReviews.map(review => {
               const commit = commits.find(c => c.hash === review.commitHash);
               const unresolved = review.comments.filter(c => !c.resolved).length;
+              const inGroup = multiSel.size > 1 && multiSel.has(review.commitHash);
               return (
                 <div
                   key={review.commitHash}
                   className={cn(
                     'px-3 py-2 cursor-pointer border-b border-border-subtle hover:bg-bg-hover',
-                    selectedCommit && review.commitHash.startsWith(selectedCommit) && 'bg-bg-selected'
+                    selectedCommit && review.commitHash.startsWith(selectedCommit) && !inGroup && 'bg-bg-selected',
+                    inGroup && 'bg-accent/15'
                   )}
-                  onClick={() => selectCommit(review.commitHash)}
+                  style={inGroup && !(selectedCommit && review.commitHash.startsWith(selectedCommit))
+                    ? { boxShadow: 'inset 2px 0 0 0 var(--accent)' }
+                    : undefined}
+                  onClick={(e) => handleReviewRowClick(e, review)}
                 >
                   <div className="flex items-center gap-2">
                     <code className="text-2xs mono text-text-tertiary">{shortHash(review.commitHash)}</code>
@@ -258,7 +525,7 @@ export function ReviewsPage() {
                 >
                   <div className="flex items-start gap-3">
                     <div
-                      className="w-2 h-2 rounded-full mt-1.5 flex-shrink-0"
+                      className="w-2 h-2 rounded-full mt-1.5 shrink-0"
                       style={{ backgroundColor: SEVERITY_COLORS[comment.severity] }}
                     />
                     <div className="flex-1 min-w-0">
@@ -279,7 +546,7 @@ export function ReviewsPage() {
                         {comment.body}
                       </div>
                     </div>
-                    <div className="flex items-center gap-1 flex-shrink-0">
+                    <div className="flex items-center gap-1 shrink-0">
                       <button
                         className="icon-btn !w-6 !h-6"
                         title={comment.resolved ? t('pages.markUnresolved') : t('pages.markResolved')}
@@ -308,6 +575,15 @@ export function ReviewsPage() {
               <GitPullRequest size={32} className="mb-2 opacity-50" />
               <div className="text-sm">{t('pages.selectCommitForReviews')}</div>
               <div className="text-xs mt-1">{t('pages.addCommentHint')}</div>
+              {/* Hint pointing the user at Pull Requests when a provider is set */}
+              {providerInfo.provider === 'github' || providerInfo.provider === 'gitlab' ? (
+                <button
+                  className="btn btn-secondary text-xs mt-4"
+                  onClick={() => { window.location.hash = '#/pulls'; }}
+                >
+                  {t('pages.reviewsGoToPRs', { defaultValue: 'Open Pull Requests to review a PR' })}
+                </button>
+              ) : null}
             </div>
           )}
         </div>
@@ -316,7 +592,7 @@ export function ReviewsPage() {
       {/* Add comment dialog */}
       {showAdd && (
         <div
-          className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 animate-fade-in"
+          className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50 animate-fade-in"
           onClick={() => setShowAdd(false)}
         >
           <div className="panel w-[480px] flex flex-col shadow-lg" onClick={e => e.stopPropagation()}>
@@ -397,7 +673,7 @@ export function ReviewsPage() {
                 />
               </div>
             </div>
-            <div className="flex justify-end gap-2 px-4 py-3 border-t border-border-default">
+            <div className="flex flex-wrap justify-end gap-2 px-4 py-3 border-t border-border-default">
               <button className="btn btn-secondary" onClick={() => setShowAdd(false)}>{t('common.cancel')}</button>
               <button
                 className="btn btn-primary"
@@ -410,6 +686,22 @@ export function ReviewsPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Group squash-to-branch (local review mode multi-selection). */}
+      {squashDialog && (
+        <SquashToBranchDialog
+          commits={squashDialog.commits}
+          onClose={() => setSquashDialog(null)}
+          onChanged={() => {
+            setSquashDialog(null);
+            setMultiSel(new Set());
+            multiAnchorRef.current = null;
+            // The git log (and possibly the reviewed-commit subjects)
+            // changed — reload the local review data.
+            void load();
+          }}
+        />
       )}
     </div>
   );

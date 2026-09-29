@@ -2,10 +2,21 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { execSync } from 'child_process';
+import { execSync, execFileSync } from 'child_process';
+import { fileURLToPath } from 'node:url';
 import * as gitService from '../../electron/services/git';
 
-const TEST_REPO_DIR = path.join(os.tmpdir(), 'prismgit-repos', 'test-repo');
+// Per-suite fixture name: vitest runs test files in PARALLEL workers, and the
+// three suites that use this fixture would otherwise rm -rf each other's repo
+// mid-test ("fatal: unable to get current working directory"). Also resolve
+// the script via import.meta.url (not process.cwd()) so running vitest from
+// another directory — or a checkout path containing spaces — still works.
+const FIXTURE_NAME = 'test-repo-real';
+const TEST_REPO_DIR = path.join(os.tmpdir(), 'prismgit-repos', FIXTURE_NAME);
+const SETUP_SCRIPT = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '../fixtures/setup-test-repo.sh',
+);
 
 function shell(cmd: string, cwd = TEST_REPO_DIR) {
   return execSync(cmd, { cwd, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
@@ -21,8 +32,8 @@ function writeFile(p: string, content: string): void {
 
 describe('git service — integration with real git repo', () => {
   beforeAll(() => {
-    // ALWAYS recreate: e2e suites share this fixture and may leave it dirty.
-    execSync('bash tests/fixtures/setup-test-repo.sh', { encoding: 'utf-8', cwd: process.cwd() });
+    // ALWAYS recreate: e2e suites may leave the fixture dirty.
+    execFileSync('bash', [SETUP_SCRIPT, FIXTURE_NAME], { encoding: 'utf-8' });
   });
 
   describe('isRepo', () => {

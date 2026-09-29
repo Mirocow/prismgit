@@ -167,7 +167,7 @@ export function SubtreesPage() {
               {t('pages.subtreeSquashLabel')}
             </label>
           </div>
-          <div className="col-span-2 flex justify-end gap-2">
+          <div className="col-span-2 flex flex-wrap justify-end gap-2">
             <button onClick={() => { setShowAdd(false); resetForm(); }}
               className="px-3 py-1.5 text-xs rounded border border-border hover:bg-surface-hover">{t('common.cancel')}</button>
             <button onClick={handleAdd} disabled={busy === 'add'}

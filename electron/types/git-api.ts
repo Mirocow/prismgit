@@ -26,6 +26,17 @@ export interface StatusResult {
   behind: number;
   current?: string;
   tracking?: string;
+  /**
+   * Full SHA-1 of the commit HEAD points at; `undefined` on unborn HEAD.
+   *
+   * The History graph subscribes to this: `git reset --hard`, commit, rebase,
+   * pull etc. all move HEAD WITHOUT changing `current` (branch name) or
+   * `tracking` — so those two fields alone cannot detect "HEAD moved, the
+   * commit graph is stale". Any change in this hash must reload the graph.
+   * (User-reported: after `git reset --hard` the remote commits still
+   * rendered as if merged into the local branch.)
+   */
+  head?: string;
   files: FileStatus[];
   isClean: boolean;
   isMerging: boolean;
@@ -80,6 +91,54 @@ export interface RemoteInfo {
   name: string;
   refs: { fetch: string; push: string };
 }
+
+// ── Squash-to-branch (History tool) ─────────────────────────────────────────
+
+/** Where the squashed group of commits should land. */
+export interface SquashToBranchTarget {
+  /** 'existing' — put the squash on an already-existing local branch. */
+  kind: 'existing' | 'new';
+  /** kind='existing': the local branch to receive the squashed commit. */
+  branch?: string;
+  /** kind='new': the name of the branch to create. */
+  name?: string;
+  /**
+   * kind='new' only: where to fork the new branch from:
+   *  - 'range-base' (default) — the parent of the oldest selected commit
+   *    (the squash then contains exactly the selected changes, conflict-free);
+   *  - anything else is resolved as a ref (branch name, hash, 'HEAD').
+   */
+  base?: string;
+}
+
+export interface SquashToBranchParams {
+  /** Commit hashes ordered OLDEST → NEWEST (the UI reverses its list order). */
+  commits: string[];
+  target: SquashToBranchTarget;
+  /** Commit message for the squashed commit (required). */
+  message: string;
+  /** Preserve the original author (of the oldest commit). Default: true. */
+  keepAuthor?: boolean;
+  /**
+   * When the dry-run finds conflicts:
+   *  - false (default): touch nothing, return 'conflicts-preview' with the
+   *    file list so the UI can ask the user to confirm;
+   *  - true: run the live route (checkout + carrier cherry-pick) and leave
+   *    the conflicts in the working tree for the standard resolve flow.
+   */
+  proceedOnConflict?: boolean;
+  /** Check out the target branch afterwards. Default: new branch → true, existing → false. */
+  switchToTarget?: boolean;
+}
+
+export type SquashToBranchResult =
+  | { status: 'ok'; branch: string; commit: string; switchedTo?: string; switchWarning?: string }
+  /** Dry-run found conflicts; NOTHING was touched — ask the user, then retry with proceedOnConflict. */
+  | { status: 'conflicts-preview'; branch: string; conflicts: string[] }
+  /** Live route ran; conflicts are in the working tree — resolve in Changes and Continue. */
+  | { status: 'conflicts'; branch: string; conflicts: string[] }
+  /** The target already contains these changes — nothing was carried. */
+  | { status: 'empty'; branch: string };
 
 /**
  * Result of a periodic remote check for one repository in the sidebar list:
@@ -307,35 +366,81 @@ export interface PushResult {
   summary: string;
 }
 
+/** Result of pull()/checkout() when auto-stash (Preferences → Commands) kicked in. */
+export interface AutoStashResult {
+  autoStashed: boolean;
+  popFailed: boolean;
+}
+
 export interface GitApi {
   status: (repoPath: string) => Promise<StatusResult>;
+  /** Watcher-driven background refresh — identical StatusResult, computed in
+   *  the dedicated git worker process (keeps the main loop free of git
+   *  output pumping during IDE auto-save / build churn). */
+  statusBackground: (repoPath: string) => Promise<StatusResult>;
+  /** v3.6: raw git read executed in the dedicated background worker process
+   *  (read-only allow-list — see gitRawCore). Falls back to the in-process
+   *  shared instance when the worker is unavailable. */
+  rawBackground: (repoPath: string, args: string[]) => Promise<string>;
   add: (repoPath: string, files: string[]) => Promise<void>;
   addAll: (repoPath: string) => Promise<void>;
+  /** Stage only tracked-file modifications (git add -u) — no untracked. */
+  stageAllTracked: (repoPath: string) => Promise<void>;
   restore: (repoPath: string, files: string[], staged?: boolean) => Promise<void>;
   commit: (repoPath: string, message: string, amend?: boolean, signoff?: boolean, noVerify?: boolean) => Promise<string>;
-  push: (repoPath: string, remote?: string, branch?: string, setUpstream?: boolean, force?: boolean, tags?: boolean, targetBranch?: string) => Promise<PushResult>;
-  pull: (repoPath: string, remote?: string, branch?: string, rebase?: boolean, noFF?: boolean) => Promise<void>;
+  push: (repoPath: string, remote?: string, branch?: string, setUpstream?: boolean, force?: boolean, tags?: boolean, targetBranch?: string, forceMode?: 'lease' | 'force') => Promise<PushResult>;
+  pull: (repoPath: string, remote?: string, branch?: string, rebase?: boolean, noFF?: boolean) => Promise<AutoStashResult>;
   fetch: (repoPath: string, remote?: string, prune?: boolean, tags?: boolean) => Promise<void>;
   fetchAll: (repoPath: string, prune?: boolean) => Promise<void>;
+  /**
+   * Fetch ONE server-side refspec into FETCH_HEAD (no tracking refs created,
+   * no existing ref touched). Used by the Pull Requests / Reviews squash
+   * flow to materialize PR/MR commit objects locally before squashToBranch:
+   * GitHub `refs/pull/<n>/head`, GitLab `refs/merge-requests/<n>/head`.
+   */
+  fetchRef: (repoPath: string, remote: string, refspec: string) => Promise<void>;
   /** Deepen a shallow clone by N commits (git fetch --deepen=N). */
   fetchDeepen: (repoPath: string, remote?: string, commits?: number) => Promise<void>;
+  /**
+   * BUGFIX "не получаю все ветки": configured fetch refspecs per remote
+   * (`remote.<name>.fetch` values). Combine with isSingleBranchRefspec()
+   * (src/lib/remoteSpecs.ts) to detect single-branch clones whose
+   * refs/remotes will never contain all remote branches.
+   */
+  remoteFetchSpecs: (repoPath: string) => Promise<Record<string, string[]>>;
+  /**
+   * One-click remediation for single-branch clones: widen the refspec
+   * (`git remote set-branches <remote> '*'`) then fetch, so all remote
+   * branches appear in the Branches page.
+   */
+  fetchAllBranches: (repoPath: string, remote?: string) => Promise<void>;
   /** Set shallow fetch depth (git fetch --depth=N); depth <= 0 → --unshallow. */
   setFetchDepth: (repoPath: string, remote?: string, depth?: number) => Promise<void>;
   /** Read real remote properties (URLs, HEAD branch, tracking branches, config). */
   remoteProperties: (repoPath: string, name: string) => Promise<RemoteProperties>;
-  log: (repoPath: string, options?: { maxCount?: number; skip?: number; branch?: string; branches?: string[]; file?: string; follow?: boolean; all?: boolean; grep?: string; grepIgnoreCase?: boolean }) => Promise<LogEntry[]>;
+  log: (repoPath: string, options?: { maxCount?: number; skip?: number; branch?: string; branches?: string[]; file?: string; follow?: boolean; all?: boolean; grep?: string; grepIgnoreCase?: boolean; author?: string; since?: string; until?: string }) => Promise<LogEntry[]>;
   /** Resolve a commit by full/abbreviated hash (prefix search) — null when not found. */
   findCommit: (repoPath: string, query: string) => Promise<LogEntry | null>;
   branches: (repoPath: string) => Promise<BranchInfo[]>;
   remotes: (repoPath: string) => Promise<RemoteInfo[]>;
-  checkout: (repoPath: string, branch: string, options?: { newBranch?: boolean; force?: boolean; track?: boolean }) => Promise<void>;
+  checkout: (repoPath: string, branch: string, options?: { newBranch?: boolean; force?: boolean; track?: boolean }) => Promise<AutoStashResult>;
+  /**
+   * Would checking out `target` change .gitmodules? Compares HEAD..target
+   * for the .gitmodules path. Used to warn before checkout (SmartGit:
+   * "Warn when checkout changes submodule configuration"). Accepts local
+   * branch names and remote-tracking refs (origin/foo). Returns false on
+   * any error (missing .gitmodules, unborn HEAD) — never blocks checkout.
+   */
+  hasSubmoduleConfigChanges: (repoPath: string, target: string) => Promise<boolean>;
   checkoutFile: (repoPath: string, file: string, ref?: string) => Promise<void>;
+  checkoutFiles: (repoPath: string, files: string[], ref?: string) => Promise<void>;
   createBranch: (repoPath: string, name: string, startPoint?: string, force?: boolean, track?: boolean) => Promise<void>;
   deleteBranch: (repoPath: string, name: string, force?: boolean, remote?: boolean) => Promise<void>;
   renameBranch: (repoPath: string, oldName: string, newName: string) => Promise<void>;
   merge: (repoPath: string, branch: string, options?: { noFf?: boolean; squash?: boolean; ffOnly?: boolean; strategy?: string }) => Promise<{ conflicts: string[]; fastForward: boolean; alreadyUpToDate: boolean }>;
   abortMerge: (repoPath: string) => Promise<void>;
-  continueMerge: (repoPath: string) => Promise<void>;
+  /** Resolves a conflicted merge by committing it; returns the merge commit's full hash. */
+  continueMerge: (repoPath: string) => Promise<string>;
   /** Pre-merge preview: returns the list of files that would conflict if we merged `theirs` into `ours`. */
   mergeTree: (repoPath: string, ours: string, theirs: string) => Promise<{ conflicts: string[]; clean: boolean }>;
   /** Returns ahead/behind counts between two refs without touching the working tree. */
@@ -348,6 +453,8 @@ export interface GitApi {
   pollRemoteSummary: (repoPath: string) => Promise<RemoteCheckSummary>;
   /** Batch version over several repos with bounded concurrency. */
   pollRemoteSummaries: (paths: string[]) => Promise<Record<string, RemoteCheckSummary>>;
+  /** Clear the poll cache — forces a fresh fetch on the next poll. */
+  clearPollCache: (repoPath?: string) => Promise<void>;
   diff: (repoPath: string, file: string, options?: { staged?: boolean; ref?: string }) => Promise<DiffResult>;
   diffBranches: (repoPath: string, base: string, compare: string) => Promise<DiffResult>;
   diffCommit: (repoPath: string, hash: string, parentHash?: string) => Promise<DiffResult>;
@@ -356,6 +463,8 @@ export interface GitApi {
   mergeNestedCommits: (repoPath: string, hash: string) => Promise<LogEntry[]>;
   /** Tags pointing AT a commit with annotated-tag metadata (tagger, date, message). */
   tagsAt: (repoPath: string, hash: string) => Promise<{ name: string; annotated: boolean; tagger?: string; date?: string; message?: string }[]>;
+  /** Full-fidelity read of ONE tag (byte-exact multi-line message via cat-file) — the tag EDIT dialog's data source. null when the tag does not exist. */
+  tagShow: (repoPath: string, name: string) => Promise<{ name: string; annotated: boolean; message: string; tagger?: string; date?: string; targetHash: string } | null>;
   /** All tracked files (git ls-files) — file-name search for the Search tool. */
   trackedFiles: (repoPath: string) => Promise<string[]>;
   /**
@@ -368,8 +477,10 @@ export interface GitApi {
   commitExists: (repoPath: string, hash: string) => Promise<boolean>;
   stashList: (repoPath: string) => Promise<StashEntry[]>;
   stashPush: (repoPath: string, message?: string, includeUntracked?: boolean, keepIndex?: boolean, files?: string[]) => Promise<string>;
-  stashPop: (repoPath: string, index?: number) => Promise<void>;
-  stashApply: (repoPath: string, index?: number) => Promise<void>;
+  /** keepIndex — restore the staged/unstaged split (`git stash pop --index`). */
+  stashPop: (repoPath: string, index?: number, keepIndex?: boolean) => Promise<void>;
+  /** keepIndex — restore the staged/unstaged split (`git stash apply --index`). */
+  stashApply: (repoPath: string, index?: number, keepIndex?: boolean) => Promise<void>;
   /** All files in a stash: tracked changes + untracked files (stash parent[2]). */
   stashFiles: (repoPath: string, hash: string) => Promise<CommitFile[]>;
   /** Raw unified diff of ONE file inside a stash (tracked or untracked part). */
@@ -388,7 +499,7 @@ export interface GitApi {
   submoduleSync: (repoPath: string, name?: string) => Promise<void>;
   submoduleDeinit: (repoPath: string, name: string, force?: boolean) => Promise<void>;
   submoduleAdd: (repoPath: string, url: string, path: string, branch?: string) => Promise<void>;
-  clone: (url: string, targetPath: string, options?: { depth?: number; branch?: string; recursive?: boolean; shallowSubmodules?: boolean }) => Promise<string>;
+  clone: (url: string, targetPath: string, options?: { depth?: number; branch?: string; recursive?: boolean; shallowSubmodules?: boolean; sslVerify?: boolean }) => Promise<string>;
   init: (targetPath: string, bare?: boolean) => Promise<void>;
   addRemote: (repoPath: string, name: string, url: string) => Promise<void>;
   removeRemote: (repoPath: string, name: string) => Promise<void>;
@@ -412,10 +523,12 @@ export interface GitApi {
   applyPatch: (repoPath: string, patch: string | string[], options?: Record<string, null> | string[]) => Promise<string>;
   show: (repoPath: string, args: string[]) => Promise<string>;
   showBuffer: (repoPath: string, args: string[]) => Promise<Buffer>;
-  mirror: (remoteUrl: string, targetPath: string) => Promise<void>;
+  mirror: (remoteUrl: string, targetPath: string, options?: { sslVerify?: boolean }) => Promise<void>;
   countObjects: (repoPath: string, verbose?: boolean) => Promise<string>;
   updateServerInfo: (repoPath: string) => Promise<string>;
   listRemote: (repoPath: string, remote?: string) => Promise<string>;
+  /** ls-remote for a RAW url (no repo yet) — Clone dialog branch detection with SSH env. */
+  lsRemoteUrl: (url: string, args?: string[]) => Promise<string>;
   addAnnotatedTag: (repoPath: string, name: string, message: string, ref?: string) => Promise<string>;
 
   // SmartGit 20-24 extended features
@@ -434,6 +547,14 @@ export interface GitApi {
   cherryPickContinue: (repoPath: string, allowEmpty?: boolean) => Promise<{ empty?: boolean }>;
   /** Skip the current pick (git cherry-pick --skip) — drops an empty step. */
   cherryPickSkip: (repoPath: string) => Promise<void>;
+
+  /**
+   * History tool: carry a contiguous group of commits to ANOTHER branch as a
+   * single squashed commit (existing branch, or a NEW branch created on the
+   * fly). Read-only dry-run first — 'conflicts-preview' touches nothing until
+   * the caller retries with proceedOnConflict.
+   */
+  squashToBranch: (repoPath: string, params: SquashToBranchParams) => Promise<SquashToBranchResult>;
 
   revert: (repoPath: string, hashes: string[], noCommit?: boolean) => Promise<{ conflicts: string[] }>;
   revertAbort: (repoPath: string) => Promise<void>;
@@ -461,6 +582,10 @@ export interface GitApi {
   splitOffFiles: (repoPath: string, hash: string, files: string[], message: string) => Promise<void>;
 
   configGet: (repoPath: string, key: string, scope?: 'system' | 'global' | 'local') => Promise<string | undefined>;
+  /** Batched read — ONE `git config --list -z` subprocess for all keys. */
+  configGetMany: (repoPath: string, keys: string[]) => Promise<Record<string, string | undefined>>;
+  /** Batched write (sequential in main, lock-contention retried). value null/'' → unset. */
+  configSetMany: (repoPath: string, entries: { key: string; value: string | null }[]) => Promise<void>;
   configSet: (repoPath: string, key: string, value: string, scope?: 'system' | 'global' | 'local') => Promise<void>;
   configList: (repoPath: string, scope?: 'system' | 'global' | 'local') => Promise<GitConfigEntry[]>;
   configUnset: (repoPath: string, key: string, scope?: 'system' | 'global' | 'local') => Promise<void>;
@@ -469,11 +594,12 @@ export interface GitApi {
 
   reset: (repoPath: string, mode: 'soft' | 'mixed' | 'hard' | 'keep', ref?: string) => Promise<void>;
   resetFile: (repoPath: string, file: string, ref?: string) => Promise<void>;
+  resetFiles: (repoPath: string, files: string[], ref?: string) => Promise<void>;
 
   clean: (repoPath: string, paths: string[], dryRun?: boolean, force?: boolean, directories?: boolean) => Promise<string[]>;
 
   // GitHub-related utility
-  extractRepoInfo: (repoPath: string) => Promise<{ provider: 'github' | 'gitlab' | 'bitbucket' | 'unknown'; owner?: string; repo?: string; url?: string; webUrl?: string }>;
+  extractRepoInfo: (repoPath: string) => Promise<{ provider: 'github' | 'gitlab' | 'unknown'; owner?: string; repo?: string; url?: string; webUrl?: string }>;
 
   // File system integration
   revealInFileManager: (fullPath: string) => Promise<boolean>;
@@ -486,8 +612,12 @@ export interface GitApi {
   getIndexFlags: (repoPath: string, file: string) => Promise<{ assumeUnchanged: boolean; skipWorktree: boolean; tracked: boolean }>;
   /** Set/clear assume-unchanged or skip-worktree on a tracked file. */
   setIndexFlag: (repoPath: string, file: string, flag: 'assume-unchanged' | 'skip-worktree', value: boolean) => Promise<void>;
+  /** Set/clear assume-unchanged or skip-worktree on MULTIPLE files in one git call (much faster than N sequential calls). */
+  setIndexFlagBatch: (repoPath: string, files: string[], flag: 'assume-unchanged' | 'skip-worktree', value: boolean) => Promise<void>;
   /** Delete file: `git rm -f` when tracked, fs removal for untracked. */
   deleteFile: (repoPath: string, file: string) => Promise<void>;
+  /** Delete MULTIPLE files in one git call (much faster than N sequential calls). */
+  deleteFiles: (repoPath: string, files: string[]) => Promise<void>;
 
   // LFS support
   lfsStatus: (repoPath: string) => Promise<{ installed: boolean; files: { path: string; size: string; status: string }[] }>;
@@ -497,7 +627,15 @@ export interface GitApi {
   lfsPush: (repoPath: string) => Promise<void>;
   lfsFetch: (repoPath: string) => Promise<void>;
   lfsInstall: (repoPath: string) => Promise<void>;
+  /** Detect if .gitattributes has LFS filter rules (filter=lfs / diff=lfs / merge=lfs). */
+  detectLfsConfigured: (repoPath: string) => Promise<boolean>;
+  /** Remove LFS filter lines from .gitattributes. Returns number of lines removed. */
+  removeLfsFilter: (repoPath: string) => Promise<number>;
   lfsTrack: (repoPath: string, patterns: string[]) => Promise<void>;
+  /** Stop tracking a pattern with LFS (git lfs untrack). */
+  lfsUntrack: (repoPath: string, pattern: string) => Promise<void>;
+  /** Check LFS object integrity (git lfs fsck). */
+  lfsFsck: (repoPath: string) => Promise<{ ok: boolean; output: string }>;
   lfsList: (repoPath: string) => Promise<string[]>;
 
   // Split commit
@@ -542,6 +680,16 @@ export interface GitApi {
   // ===== Verify Database / Garbage Collect (Query menu) =====
   verifyDatabase: (repoPath: string) => Promise<string>;
   garbageCollect: (repoPath: string, aggressive?: boolean) => Promise<string>;
+  /** Repack all objects into a single packfile (git repack -a -d). */
+  repack: (repoPath: string) => Promise<void>;
+  /** Pack loose refs into .git/packed-refs (git pack-refs --all). */
+  packRefs: (repoPath: string) => Promise<void>;
+  /** Prune loose unreachable objects (git prune --expire=now). */
+  pruneObjects: (repoPath: string) => Promise<void>;
+  /** Expire old reflog entries (git reflog expire --expire=now --all). */
+  reflogExpire: (repoPath: string) => Promise<void>;
+  /** Full maintenance: reflog expire + aggressive gc + pack-refs. Returns count-objects stats. */
+  fullMaintenance: (repoPath: string) => Promise<string>;
   unreachableCommits: (repoPath: string) => Promise<UnreachableCommit[]>;
 
   // ===== Bugtraq issue-tracker links =====
@@ -566,37 +714,45 @@ export interface GitApi {
   noteAdd: (repoPath: string, commit: string, content: string, ref?: string, force?: boolean) => Promise<void>;
   noteRemove: (repoPath: string, commit: string, ref?: string) => Promise<void>;
 
-  /** Force compare (bypass maxFileSize limit). */
-  forceCompare: (repoPath: string, file: string, options?: { staged?: boolean; ref?: string }) => Promise<DiffResult>;
+  // NOTE: forceCompare IPC type was removed (dead renderer-side code).
+  // The underlying gitService.forceCompare is kept for integration tests.
 
   /** EOL-only change detection. */
   isEolOnlyChange: (repoPath: string, file: string) => Promise<boolean>;
+  /**
+   * BATCH EOL-only detection (perf): returns the subset of `files` whose
+   * changes are more than line-ending noise — one chunked
+   * `git diff --ignore-cr-at-eol --name-only` instead of N per-file diffs.
+   */
+  filesWithRealChanges: (repoPath: string, files: string[]) => Promise<string[]>;
 
   /** Push to Gerrit — refs/for/<branch>. */
   pushToGerrit: (repoPath: string, branch?: string, remote?: string, options?: { draft?: boolean; reviewers?: string[]; topic?: string }) => Promise<string>;
 
   /** Partial clone (--filter=blob:none). */
-  clonePartial: (url: string, targetPath: string, filter?: 'blob:none' | 'tree:0' | 'blob:limit=1m', options?: { depth?: number; branch?: string; recursive?: boolean }) => Promise<string>;
+  clonePartial: (url: string, targetPath: string, filter?: 'blob:none' | 'tree:0' | 'blob:limit=1m', options?: { depth?: number; branch?: string; recursive?: boolean; sslVerify?: boolean }) => Promise<string>;
 
   /** Setup PrismGit as credential helper. */
   setupCredentialHelper: (repoPath: string) => Promise<void>;
 
-  /** Bidirectional blame (past + future). */
-  blameBidirectional: (repoPath: string, file: string, ref?: string) => Promise<BidirectionalBlameResult>;
-
-  /** Pickaxe search — find commits that introduced or removed a string. */
-  pickaxeSearch: (repoPath: string, file: string, search: string, options?: { regex?: boolean; ignoreCase?: boolean }) => Promise<{ hash: string; subject: string; date: string; lineNumbers: number[] }[]>;
-
-  /** Detect renames with --find-renames=<threshold>%. */
-  detectRenames: (repoPath: string, options?: { threshold?: number; ref?: string }) => Promise<{ from: string; to: string; similarity: number }[]>;
+  // NOTE: blameBidirectional, pickaxeSearch, detectRenames IPC types were
+  // removed (dead renderer-side code). The underlying gitService.*
+  // functions are kept for integration tests.
 
   /** Check if commit has been pushed to any remote. */
   isCommitPushed: (repoPath: string, hash: string) => Promise<boolean>;
 
-  /** Squash multiple commits into one. */
-  squashCommits: (repoPath: string, fromHash: string, toHash: string, message?: string) => Promise<void>;
-  /** Coalesce two adjacent commits (combine messages). */
-  coalesceCommits: (repoPath: string, firstHash: string, secondHash: string) => Promise<void>;
+  /** Branches (local + remote-tracking) that CONTAIN the commit — the
+   *  «какой ветке принадлежит коммит» info in the History detail card. */
+  branchesContaining: (repoPath: string, hash: string) => Promise<{ local: string[]; remote: string[] }>;
+
+  // NOTE: squashCommits, coalesceCommits IPC types were removed (dead
+  // renderer-side code). The underlying gitService.* functions are kept
+  // for integration tests.
+
+  /** Squash-transfer: apply a group of commits onto ANOTHER branch as one
+   *  new commit, then check the original branch back out (History multi-select
+   *  → "Send to branch as one commit"). */
 
   // === SmartGit Manual v25/26 — extended backend (batch 1-7) ===
   /** Smart Pull — prevents divergence after remote force-push. */
@@ -617,8 +773,6 @@ export interface GitApi {
   commitSigned: (repoPath: string, message: string, options?: { gpgSign?: boolean; sshSign?: boolean; signingKey?: string; noVerify?: boolean }) => Promise<string>;
   /** Create signed tag (annotated + signed). */
   createSignedTag: (repoPath: string, name: string, message: string, ref?: string, sshSign?: boolean) => Promise<void>;
-  /** LFS fsck — validate LFS object integrity. */
-  lfsFsck: (repoPath: string) => Promise<LfsFsckResult>;
   /** Multi-repo batch operation. */
   batchOperation: (repos: string[], operation: 'fetch' | 'pull' | 'push' | 'status', options?: { remote?: string; branch?: string; force?: boolean }) => Promise<BatchOpResult[]>;
   /** Export repo config as JSON for backup/migration. */
@@ -632,6 +786,15 @@ export interface GitApi {
    * across the session.
    */
   invalidateCache: (repoPath?: string) => Promise<void>;
+  /**
+   * PERF (v3.1, repo-switch): soft trim — LRU-cap the per-repo caches
+   * (SimpleGit instances, gitDir, remotes, poll, read-coalescing states)
+   * without destroying them. Called by the renderer on repo switch-away /
+   * close so switching back to a recently-used repo is warm. Hard
+   * invalidation of a specific repo (removal, credential change) stays
+   * with invalidateCache.
+   */
+  trimRepoCaches: () => Promise<void>;
 }
 
 /** Recyclable commit (unreachable reflog commit). */

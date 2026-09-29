@@ -2,7 +2,8 @@ import * as os from "os";
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import { execSync } from 'child_process';
+import { execSync, execFileSync } from 'child_process';
+import { fileURLToPath } from 'node:url';
 import * as gitService from '../../electron/services/git';
 
 /**
@@ -23,7 +24,13 @@ import * as gitService from '../../electron/services/git';
  * buggy comparison against working tree) gives unrelated results.
  */
 describe('Stash → Diff bug fix — git-level verification', () => {
-  const TEST_REPO_DIR = path.join(os.tmpdir(), 'prismgit-repos', 'test-repo');
+  // Per-suite fixture name (parallel-safe — see gitService.real.test.ts).
+  const FIXTURE_NAME = 'test-repo-stashdiff';
+  const TEST_REPO_DIR = path.join(os.tmpdir(), 'prismgit-repos', FIXTURE_NAME);
+  const SETUP_SCRIPT = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    '../fixtures/setup-test-repo.sh',
+  );
   const STASH_FILE = path.join(TEST_REPO_DIR, 'src/stash-diff-test.txt');
   const MARKER_FILE = path.join(TEST_REPO_DIR, 'src/stash-marker.txt');
 
@@ -35,8 +42,8 @@ describe('Stash → Diff bug fix — git-level verification', () => {
   }
 
   beforeAll(() => {
-    // ALWAYS recreate: e2e suites share this fixture and may leave it dirty.
-    execSync('bash tests/fixtures/setup-test-repo.sh', { encoding: 'utf-8', cwd: process.cwd() });
+    // ALWAYS recreate: e2e suites may leave the fixture dirty.
+    execFileSync('bash', [SETUP_SCRIPT, FIXTURE_NAME], { encoding: 'utf-8' });
 
     // Save state of the marker file (it may exist from earlier stash tests)
     if (fs.existsSync(MARKER_FILE)) {

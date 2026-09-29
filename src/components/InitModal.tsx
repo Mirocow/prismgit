@@ -53,7 +53,7 @@ export function InitModal({ open, onClose }: InitModalProps) {
 
   return (
     <div
-      className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 animate-fade-in"
+      className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50 animate-fade-in"
       onClick={onClose}
     >
       <div
@@ -70,7 +70,7 @@ export function InitModal({ open, onClose }: InitModalProps) {
           </button>
         </div>
 
-        <div className="p-4 space-y-3">
+        <div className="p-4 space-y-4">
           <div>
             <label className="text-xs text-text-tertiary block mb-1">
               {t('dialogs.directoryLabel')}
@@ -100,7 +100,7 @@ export function InitModal({ open, onClose }: InitModalProps) {
           </label>
         </div>
 
-        <div className="flex justify-end gap-2 px-4 py-3 border-t border-border-default">
+        <div className="flex flex-wrap justify-end gap-2 px-4 py-3 border-t border-border-default">
           <button className="btn btn-secondary" onClick={onClose}>
             {t('common.cancel')}
           </button>

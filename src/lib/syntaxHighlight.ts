@@ -91,6 +91,21 @@ export function tokenizeLine(line: string, lang: SupportedLang): Token[] {
   return TOKENIZERS[lang](line);
 }
 
+// Shared LRU cache for tokenizeLine — used by DiffViewer, MergeRow, MergeResultEditor.
+const TOKENIZE_CACHE = new Map<string, Token[]>();
+const TOKENIZE_CACHE_MAX = 10_000;
+
+export function tokenizeLineCached(line: string, lang: SupportedLang): Token[] {
+  if (lang === 'text' || lang === 'csv' || lang === 'markdown') return tokenizeLine(line, lang);
+  const key = lang + '|' + line;
+  const cached = TOKENIZE_CACHE.get(key);
+  if (cached) { TOKENIZE_CACHE.delete(key); TOKENIZE_CACHE.set(key, cached); return cached; }
+  const tokens = tokenizeLine(line, lang);
+  if (TOKENIZE_CACHE.size >= TOKENIZE_CACHE_MAX) { const k = TOKENIZE_CACHE.keys().next().value; if (k !== undefined) TOKENIZE_CACHE.delete(k); }
+  TOKENIZE_CACHE.set(key, tokens);
+  return tokens;
+}
+
 /** Build HTML from a token array. */
 export function tokensToHtml(tokens: Token[]): string {
   let html = '';

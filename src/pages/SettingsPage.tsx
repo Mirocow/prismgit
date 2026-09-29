@@ -1,34 +1,129 @@
 import { useCallback, useEffect, useState } from 'react';
+import { AiProvidersGrid } from '../components/AiProvidersGrid';
 import { confirmDialog } from '../components/ConfirmDialog';
-import { Folder, Github, Loader, LogOut, Moon, Palette, Plus, RefreshCw, Settings as SettingsIcon, Sparkles, Sun, Trash } from '../components/icons';
-import { OllamaModelPicker } from '../components/OllamaModelPicker';
-import { CloudModelPicker } from '../components/CloudModelPicker';
+import { ExternalLink, Folder, GitBranch, Github, Loader, Lock, LogOut, Moon, Pencil, Plus, RefreshCw, Settings as SettingsIcon, Sparkles, Star, Sun, Trash, X, ArrowUp, ArrowDown } from '../components/icons';
+import { ThemeEditorDialog } from '../components/ThemeEditorDialog';
+import { InfoHint } from '../components/InfoHint';
+import { effectiveNavHotkeys, navItemsOrdered, NAV_HOTKEY_SLOTS } from '../components/navItems';
+import { SecuritySettings } from '../components/settings/SecuritySettings';
+import { useFavoriteToolsStore } from '../stores/favoriteToolsStore';
+import { ThemeZoneEditor } from '../components/ThemeZoneEditor';
 import { api, type GitConfigEntry } from '../lib/api';
-import { PROVIDER_PRESETS, getProviderPreset } from '../lib/aiCommitMessages';
+import { restoreAllConfirmations } from '../lib/confirmations';
 import { LOCALES, useI18n } from '../lib/i18n';
-import { getThemeMeta, THEMES } from '../lib/themes';
+import { getThemeMeta, THEMES, customThemeMeta, isCustomThemeId, type CustomThemeEntry } from '../lib/themes';
 import { cn } from '../lib/utils';
 import { useAuthStore } from '../stores/authStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useToastActions } from '../stores/toastStore';
 
+/**
+ * Controlled input that saves on blur but STAYS IN SYNC with the store:
+ * when `value` changes from outside (e.g. the provider switch handler
+ * rewriting aiUrl/aiModel/aiApiKey), the displayed draft is updated too.
+ *
+ * The previous uncontrolled `defaultValue` inputs kept showing the old
+ * provider's values and wrote the STALE draft back to the store on blur —
+ * which made the provider switch mechanism appear completely broken.
+ */
+function BlurSaveInput({
+  value,
+  onSave,
+  ...rest
+}: {
+  value: string;
+  onSave: (v: string) => void;
+} & Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'onBlur' | 'defaultValue'>) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => {
+    setDraft(value);
+  }, [value]);
+  return (
+    <input
+      {...rest}
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => {
+        if (draft !== value) onSave(draft);
+      }}
+    />
+  );
+}
+
 export function SettingsPage() {
-  const { settings, theme, setSetting, toggleTheme, setTheme } = useSettingsStore();
+  // PERFORMANCE: previously this subscribed to the entire `useSettingsStore()`
+  // — every keystroke in any settings input mutated `settings` and re-
+  // rendered the whole 2625-line page (10-30 ms). Now we subscribe to the
+  // individual fields the component actually reads. setSetting / setTheme /
+  // setThemeMode / toggleTheme are stable action references in Zustand, so
+  // they never trigger re-renders on their own.
+  const settings = useSettingsStore((s) => s.settings);
+  // v3.9 — favorites order block («Избранные инструменты») reactivity.
+  const favoriteTools = useFavoriteToolsStore((s) => s.favorites);
+  const moveFavorite = useFavoriteToolsStore((s) => s.move);
+  const toggleFavoriteTool = useFavoriteToolsStore((s) => s.toggleFavorite);
+  const theme = useSettingsStore((s) => s.theme);
+  const themeMode = useSettingsStore((s) => s.themeMode);
+  const setSetting = useSettingsStore((s) => s.setSetting);
+  const toggleTheme = useSettingsStore((s) => s.toggleTheme);
+  const setTheme = useSettingsStore((s) => s.setTheme);
+  const setThemeMode = useSettingsStore((s) => s.setThemeMode);
+  // ── Custom themes (visual editor) ──
+  const customThemes = ((settings as { customThemes?: CustomThemeEntry[] }).customThemes ?? []) as CustomThemeEntry[];
+  const [themeEditorOpen, setThemeEditorOpen] = useState(false);
+  const [themeEditorTarget, setThemeEditorTarget] = useState<CustomThemeEntry | null>(null);
+  const saveCustomTheme = (entry: CustomThemeEntry) => {
+    const list = customThemes.filter((e) => e.id !== entry.id);
+    list.push(entry);
+    void setSetting('customThemes', list);
+  };
+  const deleteCustomTheme = (id: string) => {
+    void setSetting('customThemes', customThemes.filter((e) => e.id !== id));
+    // Deleting the ACTIVE custom theme → fall back to the light default.
+    if (theme === id) void setTheme('light');
+  };
   const { user, authenticated, loginWithPAT, logout, loadAuthState } = useAuthStore();
   const currentRepo = useRepositoryStore((s) => s.currentRepo);
   const toast = useToastActions();
-  const { repos, removeRepo, loadRepos } = useRepositoryStore();
+  // PERFORMANCE: same shallow pick for repositoryStore — `repos` changes
+  // when repos are added/removed, `removeRepo/loadRepos/openRepository` are
+  // stable action references.
+  const repos = useRepositoryStore((s) => s.repos);
+  const removeRepo = useRepositoryStore((s) => s.removeRepo);
+  const loadRepos = useRepositoryStore((s) => s.loadRepos);
+  const openRepository = useRepositoryStore((s) => s.openRepository);
   const { t, locale, setLocale } = useI18n();
+
   const [pat, setPat] = useState('');
   const [loadingAuth, setLoadingAuth] = useState(false);
-  // Top-level tab: Application Settings vs Project Settings vs Themes
-  const [activeTab, setActiveTab] = useState<'application' | 'project' | 'themes' | 'ai' | 'show-integrations'>('application');
-  const showApp = activeTab === 'application';
+  // Top-level tab: grouped by semantic meaning
+  // - Appearance: theme picker + language + window style + startup prefs
+  // - Git: git config + performance + commit guides + diff + maintenance
+  // - AI: provider config + tool limits + AI guard
+  // - Security: SSH keys + credentials
+  // - Integrations: GitHub + GitLab + VS Code
+  // - Project: per-repo settings (only when a repo is open)
+  const [activeTab, setActiveTab] = useState<'appearance' | 'git' | 'ai' | 'security' | 'integrations' | 'repositories' | 'user-interface' | 'project'>('appearance');
+  // v2.3.11 — deep link: #/settings?tab=ai (used by the AI no-provider
+  // banners in the assistant panel / chat page). One-shot on mount; later
+  // in-app tab clicks simply win.
+  useEffect(() => {
+    const m = /(?:\?|&)tab=([a-z-]+)/.exec(window.location.hash);
+    const tab = m?.[1];
+    const valid = ['appearance', 'git', 'ai', 'security', 'integrations', 'repositories', 'user-interface', 'project'];
+    if (tab && valid.includes(tab)) setActiveTab(tab as typeof activeTab);
+  }, []);
+  const showApp = activeTab === 'appearance';
+  const showGit = activeTab === 'git';
   const showProject = activeTab === 'project' && !!currentRepo;
-  const showThemes = activeTab === 'themes';
+  const showThemes = activeTab === 'appearance';
   const showAi = activeTab === 'ai';
-  const showIntegrations = activeTab === 'show-integrations';
+  const showSecurity = activeTab === 'security';
+  const showAdvanced = activeTab === 'git';
+  const showIntegrations = activeTab === 'integrations';
+  const showRepositories = activeTab === 'repositories';
+  const showUserInterface = activeTab === 'user-interface';
 
   // === Git Config section state ===
   const [configScope, setConfigScope] = useState<'local' | 'global' | 'system'>('local');
@@ -45,6 +140,15 @@ export function SettingsPage() {
   const [vscodeChecking, setVscodeChecking] = useState(false);
   const [vscodeTool, setVscodeTool] = useState<{ diffTool: string; mergeTool: string; vscodeConfigured: boolean } | null>(null);
   const [vscodePathInput, setVscodePathInput] = useState('');
+
+  // === About panel — real versions from the main process (fix Б1) ===
+  // The old panel hardcoded "2.0.1" while package.json said 2.1.0.
+  const [appVersions, setAppVersions] = useState<{ app: string; electron: string; node: string } | null>(null);
+  useEffect(() => {
+    Promise.resolve(api.app?.getVersions?.())
+      .then((v) => setAppVersions(v ?? null))
+      .catch(() => setAppVersions(null));
+  }, []);
 
 
   const loadConfig = useCallback(async () => {
@@ -142,6 +246,110 @@ export function SettingsPage() {
     toast.info(t('settings.loggedOutGithub'));
   };
 
+  // ─── GitLab integration state ──────────────────────────────────────────
+  // Separate from GitHub auth — the user can be connected to both at once.
+  // The PAT is stored in the encrypted vault (electron/services/gitlab.ts
+  // uses setSecret/getSecret), NOT in plaintext settings JSON.
+  const [gitlabPat, setGitlabPat] = useState('');
+  const [gitlabBaseUrl, setGitlabBaseUrl] = useState('https://gitlab.com');
+  const [gitlabAuthLoading, setGitlabAuthLoading] = useState(false);
+  const [gitlabAuthed, setGitlabAuthed] = useState(false);
+  const [gitlabUser, setGitlabUser] = useState<{ username?: string; name?: string; avatar_url?: string } | null>(null);
+  // GitHub + GitLab "Test connection" button state — shows a spinner while
+  // the test IPC call is in flight, then a success/fail toast.
+  const [testingGithub, setTestingGithub] = useState(false);
+  const [testingGitlab, setTestingGitlab] = useState(false);
+
+  // Load GitLab auth state on mount + when the Integrations tab is opened.
+  useEffect(() => {
+    if (!showIntegrations) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const state = await api.gitlab.getAuthState();
+        if (cancelled) return;
+        setGitlabAuthed(!!state.token);
+        setGitlabUser(state.user ? { username: state.user.username, name: state.user.name, avatar_url: state.user.avatar_url } : null);
+        if (state.baseUrl) setGitlabBaseUrl(state.baseUrl);
+      } catch {
+        // GitLab not configured — that's fine, the form below lets the user
+        // authenticate.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [showIntegrations]);
+
+  const handleGitlabLogin = async () => {
+    if (!gitlabPat.trim()) {
+      toast.warning(t('settings.gitlabTokenRequired', { defaultValue: 'GitLab personal access token is required' }));
+      return;
+    }
+    setGitlabAuthLoading(true);
+    try {
+      const user = await api.gitlab.authWithPAT(gitlabPat.trim(), gitlabBaseUrl.trim() || undefined);
+      setGitlabAuthed(true);
+      setGitlabUser({ username: user.username, name: user.name, avatar_url: user.avatar_url });
+      setGitlabPat('');
+      toast.success(t('settings.gitlabConnected', { defaultValue: 'Connected to GitLab as {user}', user: user.username }));
+    } catch (e) {
+      toast.error(t('settings.gitlabAuthFailed', { defaultValue: 'GitLab authentication failed' }), String(e));
+    } finally {
+      setGitlabAuthLoading(false);
+    }
+  };
+
+  const handleGitlabLogout = async () => {
+    try {
+      await api.gitlab.logout();
+      setGitlabAuthed(false);
+      setGitlabUser(null);
+      toast.info(t('settings.gitlabDisconnected', { defaultValue: 'Disconnected from GitLab' }));
+    } catch { /* ignore */ }
+  };
+
+  // Test connection — verifies the token works WITHOUT persisting it. Useful
+  // when the user is unsure if their token has the right scopes or has expired.
+  const handleTestGithub = async () => {
+    if (!authenticated) {
+      toast.warning(t('settings.testConnectionNotAuthed', { defaultValue: 'Connect to GitHub first, then test the connection' }));
+      return;
+    }
+    setTestingGithub(true);
+    try {
+      const u = await api.github.getCurrentUser();
+      toast.success(
+        t('settings.testConnectionOk', { defaultValue: 'Connection OK' }),
+        t('settings.testConnectionGithubOk', { defaultValue: 'Authenticated as {login} ({name})', login: u.login, name: u.name || u.login })
+      );
+    } catch (e) {
+      toast.error(t('settings.testConnectionFailed', { defaultValue: 'Connection test failed' }), String(e));
+    } finally {
+      setTestingGithub(false);
+    }
+  };
+
+  const handleTestGitlab = async () => {
+    if (!gitlabAuthed) {
+      toast.warning(t('settings.testConnectionNotAuthed', { defaultValue: 'Connect to GitLab first, then test the connection' }));
+      return;
+    }
+    setTestingGitlab(true);
+    try {
+      // listProjects(1, 1) is the cheapest authenticated call — fetches
+      // exactly 1 project to verify the token works without pulling a
+      // huge list.
+      const projects = await api.gitlab.listProjects(1, 1);
+      toast.success(
+        t('settings.testConnectionOk', { defaultValue: 'Connection OK' }),
+        t('settings.testConnectionGitlabOk', { defaultValue: 'Authenticated — {count} projects accessible', count: projects.length })
+      );
+    } catch (e) {
+      toast.error(t('settings.testConnectionFailed', { defaultValue: 'Connection test failed' }), String(e));
+    } finally {
+      setTestingGitlab(false);
+    }
+  };
+
   const handleChooseCloneDir = async () => {
     const path = await api.fs.openDirectoryPicker();
     if (path) {
@@ -151,50 +359,96 @@ export function SettingsPage() {
   };
 
   return (
-    <div className="flex flex-col flex-1 overflow-y-auto bg-bg-primary">
-      <div className="max-w-3xl mx-auto p-6 w-full">
-        <div className="flex items-center justify-between gap-3 mb-4 pb-4 border-b border-border-default">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-accent-muted flex items-center justify-center">
-              <SettingsIcon size={20} className="text-accent" />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold text-text-primary tracking-tight">
-                {showApp ? t('settings.application') : t('settings.project')}
-              </h1>
-              <p className="text-xs text-text-tertiary">
-                {showApp
-                  ? t('settings.appDescription')
-                  : t('settings.projectDescription')}
-              </p>
-            </div>
-          </div>
-          {/* Task (Settings redesign) — removed the per-repo Settings button
-              from the top of the Settings page. Repository settings are now
-              accessed via right-click on the repo row in the Sidebar (the
-              'repo-settings' context-menu action), so duplicating the entry
-              point at the top of global Settings was redundant. */}
-        </div>
-
-        {/* Tab switcher */}
-        <div className="flex border-b border-border-default mb-4">
+    <div className="flex flex-col flex-1 overflow-hidden bg-bg-primary">
+      <div className="flex-1 flex overflow-hidden">
+        {/* Vertical sidebar — tabs on the left, grouped by meaning */}
+        <nav className="w-52 shrink-0 border-r border-border-default bg-bg-secondary overflow-y-auto py-3 px-2">
           <button
             className={cn(
-              'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors',
+              'w-full text-left px-3 py-2 text-sm font-medium rounded-md transition-colors mb-0.5',
               showApp
-                ? 'border-accent text-accent'
-                : 'border-transparent text-text-secondary hover:text-text-primary'
+                ? 'bg-accent-muted text-accent'
+                : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover'
             )}
-            onClick={() => setActiveTab('application')}
+            onClick={() => setActiveTab('appearance')}
           >
-            {t('settings.application')}
+            {t('settings.appearance', { defaultValue: 'Appearance' })}
           </button>
           <button
             className={cn(
-              'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5',
+              'w-full text-left px-3 py-2 text-sm font-medium rounded-md transition-colors mb-0.5',
+              showUserInterface
+                ? 'bg-accent-muted text-accent'
+                : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover'
+            )}
+            onClick={() => setActiveTab('user-interface')}
+          >
+            {t('settings.userInterface', { defaultValue: 'User interface' })}
+          </button>
+          <button
+            className={cn(
+              'w-full text-left px-3 py-2 text-sm font-medium rounded-md transition-colors mb-0.5',
+              showRepositories
+                ? 'bg-accent-muted text-accent'
+                : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover'
+            )}
+            onClick={() => setActiveTab('repositories')}
+          >
+            {t('settings.repositories', { defaultValue: 'Repositories' })}
+          </button>
+          <button
+            className={cn(
+              'w-full text-left px-3 py-2 text-sm font-medium rounded-md transition-colors mb-0.5 flex items-center gap-1.5',
+              showGit
+                ? 'bg-accent-muted text-accent'
+                : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover'
+            )}
+            onClick={() => setActiveTab('git')}
+          >
+            <GitBranch size={14} />
+            {t('settings.git')}
+          </button>
+          <button
+            className={cn(
+              'w-full text-left px-3 py-2 text-sm font-medium rounded-md transition-colors mb-0.5 flex items-center gap-1.5',
+              showAi
+                ? 'bg-accent-muted text-accent'
+                : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover'
+            )}
+            onClick={() => setActiveTab('ai')}
+          >
+            <Sparkles size={14} />
+            {t('settings.ai')}
+          </button>
+          <button
+            className={cn(
+              'w-full text-left px-3 py-2 text-sm font-medium rounded-md transition-colors mb-0.5 flex items-center gap-1.5',
+              showSecurity
+                ? 'bg-accent-muted text-accent'
+                : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover'
+            )}
+            onClick={() => setActiveTab('security')}
+          >
+            <Lock size={14} />
+            {t('settings.security')}
+          </button>
+          <button
+            className={cn(
+              'w-full text-left px-3 py-2 text-sm font-medium rounded-md transition-colors mb-0.5',
+              showIntegrations
+                ? 'bg-accent-muted text-accent'
+                : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover'
+            )}
+            onClick={() => setActiveTab('integrations')}
+          >
+            {t('settings.integrations', { defaultValue: 'Integrations' })}
+          </button>
+          <button
+            className={cn(
+              'w-full text-left px-3 py-2 text-sm font-medium rounded-md transition-colors mb-0.5',
               showProject
-                ? 'border-accent text-accent'
-                : 'border-transparent text-text-secondary hover:text-text-primary',
+                ? 'bg-accent-muted text-accent'
+                : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover',
               !currentRepo && 'opacity-50 cursor-not-allowed'
             )}
             onClick={() => currentRepo && setActiveTab('project')}
@@ -203,47 +457,16 @@ export function SettingsPage() {
           >
             {t('settings.project')}
             {currentRepo && (
-              <span className="text-2xs text-text-tertiary font-normal truncate max-w-32">
+              <span className="text-2xs text-text-tertiary font-normal truncate block max-w-40">
                 {currentRepo.name}
               </span>
             )}
           </button>
-          <button
-            className={cn(
-              'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors',
-              showIntegrations
-                ? 'border-accent text-accent'
-                : 'border-transparent text-text-secondary hover:text-text-primary'
-            )}
-            onClick={() => setActiveTab('show-integrations')}
-          >
-            {t('settings.integrations')}
-          </button>
-          <button
-            className={cn(
-              'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5',
-              showThemes
-                ? 'border-accent text-accent'
-                : 'border-transparent text-text-secondary hover:text-text-primary'
-            )}
-            onClick={() => setActiveTab('themes')}
-          >
-            <Palette size={14} />
-            {t('settings.themes')}
-          </button>
-          <button
-            className={cn(
-              'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5',
-              showAi
-                ? 'border-accent text-accent'
-                : 'border-transparent text-text-secondary hover:text-text-primary'
-            )}
-            onClick={() => setActiveTab('ai')}
-          >
-            <Sparkles size={14} />
-            {t('settings.ai')}
-          </button>
-        </div>
+        </nav>
+
+        {/* Content area — scrollable */}
+        <div className="flex-1 overflow-y-auto">
+          <div className="max-w-7xl mx-auto p-6 w-full">
 
         {/* No repo open for Project Settings tab */}
         {activeTab === 'project' && !currentRepo && (
@@ -253,26 +476,14 @@ export function SettingsPage() {
           </div>
         )}
 
+        {/* Security & SSH */}
+        {showSecurity && <SecuritySettings />}
+
         {/* Appearance — Application Settings */}
         {showApp && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.appearance')}</div>
-          <div className="p-5 space-y-5">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-sm font-medium">{t('settings.theme')}</div>
-                <div className="text-xs text-text-tertiary">
-                  {t('settings.themeDescription')}
-                </div>
-              </div>
-              <button
-                className="btn btn-secondary"
-                onClick={toggleTheme}
-              >
-                {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
-                {theme === 'dark' ? t('settings.lightMode') : t('settings.darkMode')}
-              </button>
-            </div>
+          <div className="p-5 space-y-8">
             {/* Language selector */}
             <div className="flex items-center justify-between">
               <div>
@@ -293,11 +504,33 @@ export function SettingsPage() {
                 ))}
               </select>
             </div>
+            {/* 4.5 — SmartGit "Restore all confirmation dialogs": clear the
+                persisted confirmations registry so every dialog asks again. */}
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-medium">{t('settings.restoreConfirmations')}</div>
+                <div className="text-xs text-text-tertiary">
+                  {t('settings.restoreConfirmationsHint')}
+                </div>
+              </div>
+              <button
+                className="btn btn-secondary"
+                onClick={async () => {
+                  await restoreAllConfirmations();
+                  toast.success(t('settings.restoreConfirmationsDone'));
+                }}
+              >
+                {t('settings.restoreConfirmations')}
+              </button>
+            </div>
             {/* UI Contrast slider — applies CSS `filter: contrast(N%)` on #root */}
             <div>
               <div className="flex items-center justify-between mb-2">
                 <div>
-                  <div className="text-sm font-medium">{t('settings.contrast')}</div>
+                  <div className="text-sm font-medium flex items-center gap-1.5">
+                    {t('settings.contrast')}
+                    <InfoHint text={t('settings.contrastInfo', { defaultValue: 'Регулирует ТОЛЬКО читаемость текста и яркость границ — фон и цвета статусов не меняются. 100 — родные цвета темы; выше — текст контрастнее, ниже — мягче. Настраивается отдельно для каждой темы.' })} />
+                  </div>
                   <div className="text-xs text-text-tertiary">
                     {t('settings.contrastHint')}
                   </div>
@@ -399,25 +632,31 @@ export function SettingsPage() {
             <div className="border-t border-border-subtle pt-4 mt-4">
               <div className="text-2xs uppercase text-text-tertiary mb-3 font-bold tracking-wider">{t('settings.perAreaFontSizes')}</div>
               <div className="grid grid-cols-2 gap-4">
-                <label className="flex items-center justify-between gap-2 p-2 rounded hover:bg-bg-hover transition-colors">
+                <label className="flex items-center justify-between gap-2 p-2.5 rounded hover:bg-bg-hover transition-colors">
                   <span className="text-xs">{t('settings.fontAreaTree')}</span>
                   <input type="number" min={8} max={20} value={settings.fontSizeTree ?? 12}
                     onChange={(e) => setSetting('fontSizeTree', Number(e.target.value))} className="w-16 text-xs" />
                 </label>
-                <label className="flex items-center justify-between gap-2 p-2 rounded hover:bg-bg-hover transition-colors">
+                <label className="flex items-center justify-between gap-2 p-2.5 rounded hover:bg-bg-hover transition-colors">
                   <span className="text-xs">{t('settings.fontAreaLists')}</span>
                   <input type="number" min={8} max={20} value={settings.fontSizeList ?? 12}
                     onChange={(e) => setSetting('fontSizeList', Number(e.target.value))} className="w-16 text-xs" />
                 </label>
-                <label className="flex items-center justify-between gap-2 p-2 rounded hover:bg-bg-hover transition-colors">
+                <label className="flex items-center justify-between gap-2 p-2.5 rounded hover:bg-bg-hover transition-colors">
                   <span className="text-xs">{t('settings.fontAreaDiff')}</span>
                   <input type="number" min={8} max={20} value={settings.fontSizeDiff ?? 11}
                     onChange={(e) => setSetting('fontSizeDiff', Number(e.target.value))} className="w-16 text-xs" />
                 </label>
-                <label className="flex items-center justify-between gap-2 p-2 rounded hover:bg-bg-hover transition-colors">
+                <label className="flex items-center justify-between gap-2 p-2.5 rounded hover:bg-bg-hover transition-colors">
                   <span className="text-xs">{t('settings.fontAreaMonospace')}</span>
                   <input type="number" min={8} max={20} value={settings.fontSizeMonospace ?? 11}
                     onChange={(e) => setSetting('fontSizeMonospace', Number(e.target.value))} className="w-16 text-xs" />
+                </label>
+                {/* Left bar (Sidebar) — the only per-area size wired to the sidebar */}
+                <label className="flex items-center justify-between gap-2 p-2.5 rounded hover:bg-bg-hover transition-colors">
+                  <span className="text-xs">{t('settings.fontAreaSidebar')}</span>
+                  <input type="number" min={8} max={20} value={settings.fontSizeSidebar ?? 12}
+                    onChange={(e) => setSetting('fontSizeSidebar', Number(e.target.value))} className="w-16 text-xs" />
                 </label>
               </div>
               <div className="text-2xs text-text-tertiary mt-2 px-2">{t('settings.fontSizesApplyHint')}</div>
@@ -440,11 +679,56 @@ export function SettingsPage() {
         </section>
         )}
 
-        {/* Git */}
-        {showProject && (
+        {/* Git — global, always visible (default author, clone dir, history) */}
+        {showGit && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.git')}</div>
-          <div className="p-5 space-y-5">
+          <div className="p-5 space-y-8">
+            {/* Default commit author — written to new repos on init/clone,
+                used as a commit-time fallback. Fixes "Please tell me who
+                you are" on repositories created via PrismGit. */}
+            <div>
+              <div className="text-sm font-medium">{t('settings.authorIdentity')}</div>
+              <div className="text-xs text-text-tertiary mb-2">
+                {t('settings.authorIdentityHint')}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-w-xl">
+                <BlurSaveInput
+                  className="text-sm"
+                  placeholder={t('settings.authorNamePlaceholder')}
+                  value={settings.gitUserName ?? ''}
+                  onSave={(v) => setSetting('gitUserName', v.trim())}
+                />
+                <BlurSaveInput
+                  className="text-sm"
+                  placeholder={t('settings.authorEmailPlaceholder')}
+                  value={settings.gitUserEmail ?? ''}
+                  onSave={(v) => setSetting('gitUserEmail', v.trim())}
+                />
+              </div>
+              {currentRepo && (
+                <button
+                  className="btn btn-secondary text-xs mt-2"
+                  onClick={async () => {
+                    try {
+                      const name = (settings.gitUserName ?? '').trim();
+                      const email = (settings.gitUserEmail ?? '').trim();
+                      if (name) await api.git.configSet(currentRepo.path, 'user.name', name);
+                      if (email) await api.git.configSet(currentRepo.path, 'user.email', email);
+                      if (!name && !email) {
+                        toast.warning(t('settings.authorIdentity'), t('settings.authorIdentityHint'));
+                        return;
+                      }
+                      toast.success(t('settings.authorApplyRepoDone'));
+                    } catch (e) {
+                      toast.error(t('common.error'), String(e));
+                    }
+                  }}
+                >
+                  {t('settings.authorApplyRepo')}
+                </button>
+              )}
+            </div>
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-sm font-medium">{t('settings.defaultCloneDir')}</div>
@@ -464,7 +748,10 @@ export function SettingsPage() {
             </div>
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-sm font-medium">{t('settings.maxHistoryEntries')}</div>
+                <div className="text-sm font-medium flex items-center gap-1.5">
+                  {t('settings.maxHistoryEntries')}
+                  <InfoHint text={t('settings.maxHistoryInfo', { defaultValue: 'Лимит для ЖУРНАЛА ПЕРЕСЫЛКИ (Reflog-записей), а не для графа истории: граф в History грузится страницами по 50 коммитов с кнопкой «Ещё». Больше — дольше сканирование при открытии репозитория.' })} />
+                </div>
                 <div className="text-xs text-text-tertiary">
                   {t('settings.maxHistoryEntriesHint')}
                 </div>
@@ -512,12 +799,15 @@ export function SettingsPage() {
               </label>
               <div className="flex items-center justify-between">
                 <div>
-                  <div className="text-sm font-medium">{t('settings.remoteCheckInterval')}</div>
+                  <div className="text-sm font-medium flex items-center gap-1.5">
+                    {t('settings.remoteCheckInterval')}
+                    <InfoHint text={t('settings.remoteCheckIntervalInfo', { defaultValue: 'Как часто фоновая проверка обновляет ↓/↑ по репозиториям. 0 — выключить. Проверка идёт только для избранных (★) и открытого репозиториев, если область ниже — «Избранные».' })} />
+                  </div>
                   <div className="text-xs text-text-tertiary">
                     {t('settings.remoteCheckIntervalHint')}
                   </div>
                 </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
+                <div className="flex items-center gap-2 shrink-0">
                   <input
                     type="number"
                     min={0}
@@ -531,64 +821,350 @@ export function SettingsPage() {
                   <span className="text-xs text-text-tertiary">{t('settings.secUnit')}</span>
                 </div>
               </div>
+              {/* Background-check scope — favorites-only by default (user
+                  report: background poll of EVERY sidebar repo made the app
+                  "неимоверно тупить"; the periodic cycle now touches only
+                  starred repos + the open repo). 'all' restores the legacy
+                  full-list behavior. */}
+              <div className="flex items-center justify-between mt-3" data-testid="remote-check-scope-setting">
+                <div>
+                  <div className="text-sm font-medium flex items-center gap-1.5">
+                    {t('settings.remoteCheckScope')}
+                    <InfoHint text={t('settings.remoteCheckScopeInfo', { defaultValue: 'Какие репозитории проверяет фоновый цикл. «Избранные» — только ★ и открытый (быстро, по умолчанию). «Все» — каждый репозиторий в сайдбаре: на большом списке это заметно нагружает машину и сеть.' })} />
+                  </div>
+                  <div className="text-xs text-text-tertiary">
+                    {t('settings.remoteCheckScopeHint')}
+                  </div>
+                </div>
+                <select
+                  className="text-sm shrink-0"
+                  value={settings.repoRemoteCheckScope ?? 'favorites'}
+                  onChange={(e) => setSetting('repoRemoteCheckScope', e.target.value as 'all' | 'favorites')}
+                  data-testid="remote-check-scope-select"
+                >
+                  <option value="favorites">{t('settings.remoteCheckScopeFavorites')}</option>
+                  <option value="all">{t('settings.remoteCheckScopeAll')}</option>
+                </select>
+              </div>
+              {/* History page auto-refresh — was previously unconfigurable.
+                  The History page re-ran `git log -100` on EVERY
+                  lastRefresh bump (every commit / fetch / push / file
+                  watcher tick), which the user reported as "летит огромное
+                  кол-во запросов". Now: opt-in, with a configurable cadence. */}
+              <label className="flex items-center justify-between cursor-pointer mt-3" data-testid="auto-refresh-history-setting">
+                <div>
+                  <div className="text-sm font-medium">{t('settings.autoRefreshHistory', { defaultValue: 'Auto-refresh History page' })}</div>
+                  <div className="text-xs text-text-tertiary">
+                    {t('settings.autoRefreshHistoryHint', { defaultValue: 'Periodically re-run git log on the History page so new commits appear without manual refresh. Off by default to avoid excessive git log calls.' })}
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={settings.autoRefreshHistory ?? false}
+                  onChange={(e) => setSetting('autoRefreshHistory', e.target.checked)}
+                />
+              </label>
+              {settings.autoRefreshHistory && (
+                <div className="flex items-center justify-between mt-2">
+                  <div>
+                    <div className="text-sm font-medium">{t('settings.historyRefreshInterval', { defaultValue: 'History refresh interval' })}</div>
+                    <div className="text-xs text-text-tertiary">
+                      {t('settings.historyRefreshIntervalHint', { defaultValue: 'How often to re-run `git log` on the History page. 0 = disabled.' })}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <input
+                      type="number"
+                      min={0}
+                      max={3600}
+                      step={30}
+                      value={settings.historyAutoRefreshIntervalSec ?? 0}
+                      onChange={(e) => setSetting('historyAutoRefreshIntervalSec', Math.max(0, Number(e.target.value)))}
+                      className="w-20 text-sm"
+                    />
+                    <span className="text-xs text-text-tertiary">{t('settings.secUnit')}</span>
+                  </div>
+                </div>
+              )}
+              {/* Changes page journal — `git log -N` cadence + commit count.
+                  User asked for this in: "Сделать настраиваемым из Setting
+                  частоту обращения к 'git log -20' сейчас летит огромное
+                  кол-во запросов". Two knobs:
+                    - commit count (5..100, default 20)
+                    - debounce interval (0..300s, default 5) */}
+              <div className="flex items-center justify-between mt-3 border-t border-border-subtle pt-3">
+                <div>
+                  <div className="text-sm font-medium">{t('settings.changesJournalCount', { defaultValue: 'Changes journal — commit count' })}</div>
+                  <div className="text-xs text-text-tertiary">
+                    {t('settings.changesJournalCountHint', { defaultValue: 'How many commits the recent-commits list on the Changes page fetches (git log -N). Lower = faster and fewer bytes parsed.' })}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <input
+                    type="number"
+                    min={5}
+                    max={100}
+                    step={5}
+                    value={settings.changesJournalCount ?? 20}
+                    onChange={(e) => setSetting('changesJournalCount', Math.min(100, Math.max(5, Number(e.target.value))))}
+                    className="w-20 text-sm"
+                  />
+                  <span className="text-xs text-text-tertiary">{t('settings.commitsUnit', { defaultValue: 'commits' })}</span>
+                </div>
+              </div>
+              <div className="flex items-center justify-between mt-2">
+                <div>
+                  <div className="text-sm font-medium">{t('settings.changesJournalInterval', { defaultValue: 'Changes journal — refresh interval' })}</div>
+                  <div className="text-xs text-text-tertiary">
+                    {t('settings.changesJournalIntervalHint', { defaultValue: 'Minimum seconds between journal reloads. Higher = fewer git log calls (file-watcher ticks + commits + stage ops all coalesce). 0 = reload on every event (not recommended).' })}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <input
+                    type="number"
+                    min={0}
+                    max={300}
+                    step={1}
+                    value={settings.changesJournalIntervalSec ?? 5}
+                    onChange={(e) => setSetting('changesJournalIntervalSec', Math.max(0, Number(e.target.value)))}
+                    className="w-20 text-sm"
+                  />
+                  <span className="text-xs text-text-tertiary">{t('settings.secUnit')}</span>
+                </div>
+              </div>
+              {/* Auto-push to origin — opt-in periodic push of the current
+                  branch's outgoing commits. Disabled by default. */}
+              <label className="flex items-center justify-between cursor-pointer mt-3 border-t border-border-subtle pt-3" data-testid="auto-push-setting">
+                <div>
+                  <div className="text-sm font-medium">{t('settings.autoPush', { defaultValue: 'Periodically push to origin' })}</div>
+                  <div className="text-xs text-text-tertiary">
+                    {t('settings.autoPushHint', { defaultValue: 'Push the current branch’s outgoing commits to its upstream on origin on a timer. Off by default — opt-in only.' })}
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={settings.autoPushEnabled ?? false}
+                  onChange={(e) => setSetting('autoPushEnabled', e.target.checked)}
+                />
+              </label>
+              {settings.autoPushEnabled && (
+                <div className="flex items-center justify-between mt-2">
+                  <div>
+                    <div className="text-sm font-medium">{t('settings.autoPushInterval', { defaultValue: 'Auto-push interval' })}</div>
+                    <div className="text-xs text-text-tertiary">
+                      {t('settings.autoPushIntervalHint', { defaultValue: 'How often to push outgoing commits. Min 60s.' })}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <input
+                      type="number"
+                      min={60}
+                      max={3600}
+                      step={30}
+                      value={settings.autoPushIntervalSec ?? 300}
+                      onChange={(e) => setSetting('autoPushIntervalSec', Math.max(60, Number(e.target.value)))}
+                      className="w-20 text-sm"
+                    />
+                    <span className="text-xs text-text-tertiary">{t('settings.secUnit')}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Git performance settings — the same feature.manyFiles /
+                core.fsmonitor / fetch.writeCommitGraph that git recommends
+                for large repos. Applied globally via env override in
+                git-env.ts, but the user can toggle them here. */}
+            <div className="border-t border-border-subtle pt-4">
+              <div className="text-2xs uppercase text-text-tertiary mb-3 font-bold tracking-wider">{t('settings.gitPerformance', { defaultValue: 'Git Performance' })}</div>
+              <div className="text-2xs text-text-tertiary mb-3">
+                {t('settings.gitPerformanceHint', { defaultValue: 'These settings are applied globally via env override and affect ALL repositories. They are the same as running the git config commands manually, but without modifying your --global config.' })}
+              </div>
+              <div className="space-y-3">
+                <label className="flex items-center justify-between cursor-pointer">
+                  <div>
+                    <div className="text-sm font-medium">feature.manyFiles</div>
+                    <div className="text-xs text-text-tertiary">
+                      {t('settings.manyFilesHint', { defaultValue: 'Optimize index for repos with many files (index v4, reduced traversal). Speeds up git status by 30-50%.' })}
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={settings.gitManyFiles ?? true}
+                    onChange={(e) => setSetting('gitManyFiles', e.target.checked)}
+                  />
+                </label>
+                <label className="flex items-center justify-between cursor-pointer">
+                  <div>
+                    <div className="text-sm font-medium">core.fsmonitor</div>
+                    <div className="text-xs text-text-tertiary">
+                      {t('settings.fsmonitorHint', { defaultValue: 'FileSystem Monitor — git tracks changed files without scanning the whole tree. Massive speedup on repos with 100k+ files.' })}
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={settings.gitFsmonitor ?? true}
+                    onChange={(e) => setSetting('gitFsmonitor', e.target.checked)}
+                  />
+                </label>
+                <label className="flex items-center justify-between cursor-pointer">
+                  <div>
+                    <div className="text-sm font-medium">fetch.writeCommitGraph</div>
+                    <div className="text-xs text-text-tertiary">
+                      {t('settings.commitGraphHint', { defaultValue: 'Write commit-graph cache after fetch — speeds up git log, blame, and history graph traversal by 40-60%.' })}
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={settings.gitWriteCommitGraph ?? true}
+                    onChange={(e) => setSetting('gitWriteCommitGraph', e.target.checked)}
+                  />
+                </label>
+              </div>
             </div>
           </div>
         </section>
         )}
 
-        {/* Repositories */}
-        {showProject && (
+        {/* Advanced / Low-level Properties */}
+        {showAdvanced && (
         <section className="panel mb-4">
-          <div className="panel-header">
-            <span>{t('settings.knownRepositories', { count: repos.length })}</span>
-            <button
-              className="icon-btn !w-6 !h-6"
-              title={t('common.refresh')}
-              onClick={() => loadRepos()}
-            >
-              <RefreshCw size={12} />
-            </button>
-          </div>
-          <div className="p-2">
-            {repos.length === 0 ? (
-              <div className="p-6 text-center text-sm text-text-tertiary">
-                <Folder size={24} className="mx-auto mb-2 opacity-40" />
-                {t('settings.noReposAdded')}
+          <div className="panel-header">{t('settings.advancedTitle', { defaultValue: 'Advanced Properties' })}</div>
+          <div className="p-5 space-y-8">
+            <div className="text-xs text-text-tertiary p-3 bg-bg-tertiary rounded">
+              {t('settings.advancedWarning', { defaultValue: 'These properties affect low-level behavior. Changes apply immediately.' })}
+            </div>
+
+            {/* DEDUP: the commit line guides (50/72) previously had TWO
+                settings surfaces — these numeric inputs AND the
+                commitLineGuides select in Interface → Commands. They
+                configured the same guides; the select is the single owner
+                now. */}
+
+            {/* Diff settings */}
+            <div className="border-t border-border-subtle pt-4">
+              <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold mb-3">
+                {t('settings.diffSettings', { defaultValue: 'Diff Viewer' })}
               </div>
-            ) : (
-              repos.map((r) => (
-                <div
-                  key={r.path}
-                  className="group flex items-center gap-3 px-3 py-2 hover:bg-bg-hover rounded-md transition-colors"
-                >
-                  <div className="w-7 h-7 rounded-md bg-bg-tertiary border border-border-default flex items-center justify-center flex-shrink-0">
-                    <Folder size={13} className="text-text-tertiary" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium">{r.name}</div>
-                    <div className="text-xs text-text-tertiary font-mono truncate">
-                      {r.path}
-                    </div>
-                  </div>
-                  <button
-                    className="opacity-0 group-hover:opacity-100 icon-btn !w-6 !h-6 hover:!text-status-deleted transition-opacity"
-                    title={t('common.remove')}
-                    onClick={() => removeRepo(r.path)}
-                  >
-                    <Plus size={12} className="rotate-45" />
-                  </button>
+              <label className="flex items-center justify-between cursor-pointer">
+                <div>
+                  <div className="text-sm font-medium">{t('settings.maxDiffFileSize', { defaultValue: 'Max file size for diff' })}</div>
+                  <div className="text-xs text-text-tertiary">{t('settings.maxDiffFileSizeHint', { defaultValue: 'Files larger than this show a "too large" message instead of inline diff.' })}</div>
                 </div>
-              ))
-            )}
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={10000}
+                    max={50000000}
+                    step={100000}
+                    value={settings.maxDiffFileSize ?? 1000000}
+                    onChange={(e) => setSetting('maxDiffFileSize', Math.max(10000, Number(e.target.value)))}
+                    className="w-24 text-sm"
+                  />
+                  <span className="text-xs text-text-tertiary">{t('settings.bytesUnit', { defaultValue: 'bytes' })}</span>
+                </div>
+              </label>
+              <label className="flex items-center justify-between cursor-pointer mt-3">
+                <div>
+                  <div className="text-sm font-medium">{t('settings.diffShowLineNumbers', { defaultValue: 'Show line numbers in diff' })}</div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={settings.diffShowLineNumbers ?? true}
+                  onChange={(e) => setSetting('diffShowLineNumbers', e.target.checked)}
+                />
+              </label>
+              <label className="flex items-center justify-between cursor-pointer mt-3">
+                <div>
+                  <div className="text-sm font-medium">{t('settings.diffWordHighlight', { defaultValue: 'Word-level highlighting' })}</div>
+                  <div className="text-xs text-text-tertiary">{t('settings.diffWordHighlightHint', { defaultValue: 'Highlight changed words within a line, not just the whole line.' })}</div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={settings.diffWordHighlight ?? true}
+                  onChange={(e) => setSetting('diffWordHighlight', e.target.checked)}
+                />
+              </label>
+            </div>
+
+            {/* Git defaults */}
+            <div className="border-t border-border-subtle pt-4">
+              <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold mb-3">
+                {t('settings.gitDefaults', { defaultValue: 'Git Defaults' })}
+              </div>
+              <label className="flex items-center justify-between cursor-pointer">
+                <div>
+                  <div className="text-sm font-medium">{t('settings.defaultBranchName', { defaultValue: 'Default branch name' })}</div>
+                  <div className="text-xs text-text-tertiary">{t('settings.defaultBranchNameHint', { defaultValue: 'Branch name for new repos (git init).' })}</div>
+                </div>
+                <input
+                  type="text"
+                  value={settings.defaultBranchName ?? 'main'}
+                  onChange={(e) => setSetting('defaultBranchName', e.target.value)}
+                  className="w-32 text-sm font-mono"
+                />
+              </label>
+              <label className="flex items-center justify-between cursor-pointer mt-3">
+                <div>
+                  <div className="text-sm font-medium">{t('settings.commitEncoding', { defaultValue: 'Commit message encoding' })}</div>
+                  <div className="text-xs text-text-tertiary">{t('settings.commitEncodingHint', { defaultValue: 'UTF-8 is recommended. System uses the OS default encoding.' })}</div>
+                </div>
+                <select
+                  value={settings.commitEncoding ?? 'utf-8'}
+                  onChange={(e) => setSetting('commitEncoding', e.target.value as 'utf-8' | 'system')}
+                  className="w-32 text-sm"
+                >
+                  <option value="utf-8">UTF-8</option>
+                  <option value="system">{t('settings.systemEncoding', { defaultValue: 'System' })}</option>
+                </select>
+              </label>
+              <label className="flex items-center justify-between cursor-pointer mt-3">
+                <div>
+                  <div className="text-sm font-medium">{t('settings.allowEmptyCommits', { defaultValue: 'Allow empty commits' })}</div>
+                  <div className="text-xs text-text-tertiary">{t('settings.allowEmptyCommitsHint', { defaultValue: 'Enable git commit --allow-empty.' })}</div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={settings.allowEmptyCommits ?? false}
+                  onChange={(e) => setSetting('allowEmptyCommits', e.target.checked)}
+                />
+              </label>
+            </div>
+
+            {/* Maintenance */}
+            <div className="border-t border-border-subtle pt-4">
+              <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold mb-3">
+                {t('settings.maintenance', { defaultValue: 'Maintenance' })}
+              </div>
+              <label className="flex items-center justify-between cursor-pointer">
+                <div>
+                  <div className="text-sm font-medium">{t('settings.cleanupMaxLooseObjects', { defaultValue: 'Max loose objects before auto-gc' })}</div>
+                  <div className="text-xs text-text-tertiary">{t('settings.cleanupMaxLooseObjectsHint', { defaultValue: 'When loose objects exceed this count, a gc is recommended.' })}</div>
+                </div>
+                <input
+                  type="number"
+                  min={100}
+                  max={100000}
+                  step={100}
+                  value={settings.cleanupMaxLooseObjects ?? 2000}
+                  onChange={(e) => setSetting('cleanupMaxLooseObjects', Math.max(100, Number(e.target.value)))}
+                  className="w-24 text-sm"
+                />
+              </label>
+            </div>
+
+            {/* NOTE: the Custom Theme Overrides JSON textarea used to live
+                here — replaced by the visual Custom Theme editor available
+                in Appearance → Themes («Создать тему…»). */}
           </div>
         </section>
         )}
 
         {/* External Tools */}
-        {showProject && (
+        {showIntegrations && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.externalTools')}</div>
-          <div className="p-5 space-y-4">
+          <div className="p-5 space-y-6">
             {/* --- Visual Studio Code integration --- */}
             <div className="pb-3 mb-1 border-b border-border-subtle">
               <div className="flex items-center justify-between mb-2">
@@ -738,6 +1314,43 @@ export function SettingsPage() {
                 {t('settings.variables')} <code className="mono">$LOCAL $BASE $REMOTE $MERGED</code>
               </div>
             </div>
+            {/* DEDUP: the tool NAME inputs (diff.tool / merge.tool) used to live
+                in a SECOND «External Tools» panel further down the Integrations
+                tab — two panels, same header, overlapping job. The names now
+                live next to the commands they configure. */}
+            <div className="border-t border-border-subtle pt-3">
+              <div className="text-2xs text-text-tertiary mb-2">
+                {t('settings.extToolsConfigure')} {t('settings.variables')} <code className="mono text-accent">{`{filePath}`}</code>,{' '}
+                <code className="mono text-accent">{`{repositoryRootPath}`}</code>,{' '}
+                <code className="mono text-accent">{`{commit}`}</code>,{' '}
+                <code className="mono text-accent">{`{leftFile}`}</code>,{' '}
+                <code className="mono text-accent">{`{rightFile}`}</code>,{' '}
+                <code className="mono text-accent">{`{baseFile}`}</code>.
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  className="flex-1 text-xs font-mono"
+                  placeholder="diff.tool name (e.g., vscode-diff)"
+                  defaultValue={settings.diffTool || ''}
+                  onBlur={(e) => setSetting('diffTool', e.target.value)}
+                />
+              </div>
+              <div className="flex items-center gap-2 mt-2">
+                <input
+                  type="text"
+                  className="flex-1 text-xs font-mono"
+                  placeholder="merge.tool name (e.g., vscode-merge)"
+                  defaultValue={settings.mergeTool || ''}
+                  onBlur={(e) => setSetting('mergeTool', e.target.value)}
+                />
+              </div>
+              <div className="text-2xs text-text-tertiary mt-1">
+                {t('settings.extToolsWrite')} <code>diff.tool</code> {t('settings.and')} <code>merge.tool</code>.{' '}
+                {t('settings.extToolsCommandHint')} <code>[difftool "..."]</code> /{' '}
+                <code>[mergetool "..."]</code>{t('settings.extToolsSectionsSuffix')}
+              </div>
+            </div>
           </div>
         </section>
         )}
@@ -746,7 +1359,7 @@ export function SettingsPage() {
         {showProject && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.pullStrategy')}</div>
-          <div className="p-5 space-y-4">
+          <div className="p-5 space-y-6">
             <div>
               <label className="text-xs text-text-tertiary block mb-2">{t('settings.whenPulling')}</label>
               <div className="flex gap-4">
@@ -810,7 +1423,7 @@ export function SettingsPage() {
                 </button>
               </div>
             </div>
-            <div className="p-5 space-y-3">
+            <div className="p-5 space-y-5">
               <input
                 type="text"
                 className="w-full text-xs"
@@ -827,8 +1440,8 @@ export function SettingsPage() {
                   configEntries
                     .filter((e) => !configFilter || e.key.toLowerCase().includes(configFilter.toLowerCase()))
                     .map((entry, i) => (
-                      <div key={`${entry.key}-${i}`} className="group flex items-center gap-2 px-3 py-1.5 border-b border-border-subtle last:border-b-0 text-xs">
-                        <code className="font-mono text-text-secondary flex-shrink-0 w-56 truncate" title={entry.key}>
+                      <div key={`${entry.key}-${i}`} className="group flex items-center gap-2 px-3 py-2 border-b border-border-subtle last:border-b-0 text-xs">
+                        <code className="font-mono text-text-secondary shrink-0 w-56 truncate" title={entry.key}>
                           {entry.key}
                         </code>
                         {editingKey === `${entry.key}-${i}` ? (
@@ -912,11 +1525,71 @@ export function SettingsPage() {
           </section>
         )}
 
+        {/* Repositories — shown in Appearance tab (not Project) because the
+            user needs to manage known repos even when no repo is open.
+            Was: showProject (only visible with a repo open) — that made it
+            impossible to open/remove repos from Settings when the user
+            had just launched the app with no repo. */}
+        {showRepositories && (
+        <section className="panel mb-4">
+          <div className="panel-header">
+            <span>{t('settings.knownRepositories', { count: repos.length })}</span>
+            <button
+              className="icon-btn !w-6 !h-6"
+              title={t('common.refresh')}
+              onClick={() => loadRepos()}
+            >
+              <RefreshCw size={12} />
+            </button>
+          </div>
+          <div className="p-2">
+            {repos.length === 0 ? (
+              <div className="p-6 text-center text-sm text-text-tertiary">
+                <Folder size={24} className="mx-auto mb-2 opacity-40" />
+                {t('settings.noReposAdded')}
+              </div>
+            ) : (
+              repos.map((r) => (
+                <div
+                  key={r.path}
+                  className="group flex items-center gap-3 px-3 py-2 hover:bg-bg-hover rounded-md transition-colors cursor-pointer"
+                  onClick={() => openRepository(r.path)}
+                >
+                  <div className="w-7 h-7 rounded-md bg-bg-tertiary border border-border-default flex items-center justify-center shrink-0">
+                    <Folder size={13} className="text-text-tertiary" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium">{r.name}</div>
+                    <div className="text-xs text-text-tertiary font-mono truncate">
+                      {r.path}
+                    </div>
+                  </div>
+                  <button
+                    className="opacity-0 group-hover:opacity-100 icon-btn !w-6 !h-6 hover:!text-accent transition-opacity"
+                    title={t('shell.openRepoShortcut')}
+                    onClick={(e) => { e.stopPropagation(); openRepository(r.path); }}
+                  >
+                    <ExternalLink size={12} />
+                  </button>
+                  <button
+                    className="opacity-0 group-hover:opacity-100 icon-btn !w-6 !h-6 hover:!text-status-deleted transition-opacity"
+                    title={t('common.remove')}
+                    onClick={(e) => { e.stopPropagation(); removeRepo(r.path); }}
+                  >
+                    <Plus size={12} className="rotate-45" />
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
+        )}
+
         {/* SmartGit Manual: Preferences → Commands */}
-        {showApp && (
+        {showUserInterface && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.commands')}</div>
-          <div className="p-5 space-y-3 text-sm">
+          <div className="p-5 space-y-5 text-sm">
             <label className="flex items-center gap-3 cursor-pointer">
               <input
                 type="checkbox"
@@ -982,55 +1655,301 @@ export function SettingsPage() {
                 </div>
               </div>
             </label>
-          </div>
-        </section>
-        )}
+            {/* 2.1 — Warn when checkout changes .gitmodules */}
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={settings.warnSubmoduleChangesOnCheckout ?? true}
+                onChange={(e) => setSetting('warnSubmoduleChangesOnCheckout', e.target.checked)}
+              />
+              <div className="flex-1">
+                <div>{t('settings.warnSubmoduleCheckout')}</div>
+                <div className="text-2xs text-text-tertiary mt-0.5">
+                  {t('settings.warnSubmoduleCheckoutHint')}
+                </div>
+              </div>
+            </label>
+            {/* 2.2 — Hint when rename detection is slow */}
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={settings.warnSlowRenameDetection ?? true}
+                onChange={(e) => setSetting('warnSlowRenameDetection', e.target.checked)}
+              />
+              <div className="flex-1">
+                <div>{t('settings.warnSlowRenames')}</div>
+                <div className="text-2xs text-text-tertiary mt-0.5">
+                  {t('settings.warnSlowRenamesHint')}
+                </div>
+              </div>
+            </label>
 
-        {/* SmartGit Manual: External Tools system */}
-        {showApp && (
-        <section className="panel mb-4">
-          <div className="panel-header">{t('settings.externalTools')}</div>
-          <div className="p-5 text-sm space-y-3">
-            <div className="text-2xs text-text-tertiary">
-              {t('settings.extToolsConfigure')} {t('settings.variables')} <code className="mono text-accent">{`{filePath}`}</code>,{' '}
-              <code className="mono text-accent">{`{repositoryRootPath}`}</code>,{' '}
-              <code className="mono text-accent">{`{commit}`}</code>,{' '}
-              <code className="mono text-accent">{`{leftFile}`}</code>,{' '}
-              <code className="mono text-accent">{`{rightFile}`}</code>,{' '}
-              <code className="mono text-accent">{`{baseFile}`}</code>.
+            {/* 1.1 — Commit Comments handling (core.commentChar) */}
+            <div>
+              <div className="mb-1">{t('settings.commitCommentsMode')}</div>
+              <select
+                className="text-xs px-2 py-1 bg-bg-tertiary border border-border-default rounded"
+                value={settings.commitCommentsMode ?? 'ask'}
+                onChange={(e) => setSetting('commitCommentsMode', e.target.value as 'as-is' | 'ask' | 'strip')}
+              >
+                <option value="as-is">{t('settings.commitCommentsAsIs')}</option>
+                <option value="ask">{t('settings.commitCommentsAsk')}</option>
+                <option value="strip">{t('settings.commitCommentsStrip')}</option>
+              </select>
+              <div className="text-2xs text-text-tertiary mt-0.5">
+                {t('settings.commitCommentsHint')}
+              </div>
             </div>
-            <div className="flex items-center gap-2">
+
+            {/* 1.2 — If nothing is staged */}
+            <div>
+              <div className="mb-1">{t('settings.commitNothingStaged')}</div>
+              <select
+                className="text-xs px-2 py-1 bg-bg-tertiary border border-border-default rounded"
+                value={settings.commitNothingStaged ?? 'ask'}
+                onChange={(e) => setSetting('commitNothingStaged', e.target.value as 'ask' | 'all-except-untracked' | 'all-including-untracked')}
+              >
+                <option value="ask">{t('settings.commitNothingStagedAsk')}</option>
+                <option value="all-except-untracked">{t('settings.commitNothingStagedExcept')}</option>
+                <option value="all-including-untracked">{t('settings.commitNothingStagedIncluding')}</option>
+              </select>
+              <div className="text-2xs text-text-tertiary mt-0.5">
+                {t('settings.commitNothingStagedHint')}
+              </div>
+            </div>
+
+            {/* 1.3 — Commit dialog suggestions */}
+            <label className="flex items-center gap-3 cursor-pointer">
               <input
-                type="text"
-                className="flex-1 text-xs font-mono"
-                placeholder="diff.tool name (e.g., vscode-diff)"
-                defaultValue={settings.diffTool || ''}
-                onBlur={(e) => setSetting('diffTool', e.target.value)}
+                type="checkbox"
+                checked={settings.commitSuggestAddUntracked ?? false}
+                onChange={(e) => setSetting('commitSuggestAddUntracked', e.target.checked)}
               />
-            </div>
-            <div className="flex items-center gap-2">
+              <div className="flex-1">
+                <div>{t('settings.commitSuggestAddUntracked')}</div>
+              </div>
+            </label>
+            <label className="flex items-center gap-3 cursor-pointer">
               <input
-                type="text"
-                className="flex-1 text-xs font-mono"
-                placeholder="merge.tool name (e.g., vscode-merge)"
-                defaultValue={settings.mergeTool || ''}
-                onBlur={(e) => setSetting('mergeTool', e.target.value)}
+                type="checkbox"
+                checked={settings.commitSuggestRemoveMissing ?? true}
+                onChange={(e) => setSetting('commitSuggestRemoveMissing', e.target.checked)}
               />
-            </div>
-            <div className="text-2xs text-text-tertiary">
-              {t('settings.extToolsWrite')} <code>diff.tool</code> {t('settings.and')} <code>merge.tool</code>.{' '}
-              {t('settings.extToolsCommandHint')} <code>[difftool "..."]</code> /{' '}
-              <code>[mergetool "..."]</code>{t('settings.extToolsSectionsSuffix')}
+              <div className="flex-1">
+                <div>{t('settings.commitSuggestRemoveMissing')}</div>
+              </div>
+            </label>
+
+            {/* 1.4 — Line length guides 50/72 */}
+            <div>
+              <div className="mb-1">{t('settings.commitLineGuides')}</div>
+              <select
+                className="text-xs px-2 py-1 bg-bg-tertiary border border-border-default rounded"
+                value={settings.commitLineGuides ?? 'none'}
+                onChange={(e) => setSetting('commitLineGuides', e.target.value as 'none' | '50' | '72' | '50+72')}
+              >
+                <option value="none">{t('settings.commitLineGuidesNone')}</option>
+                <option value="50">{t('settings.commitLineGuides50')}</option>
+                <option value="72">{t('settings.commitLineGuides72')}</option>
+                <option value="50+72">{t('settings.commitLineGuidesBoth')}</option>
+              </select>
+              <div className="text-2xs text-text-tertiary mt-0.5">
+                {t('settings.commitLineGuidesHint')}
+              </div>
             </div>
           </div>
         </section>
         )}
 
         {/* SmartGit Manual: Low-Level Properties editor */}
-        {showApp && (
+        {/* ─── Sidebar & Navigation — tool order + hotkeys (user request:
+              «снабди весь левый сайдбар горячими клавишами» + «дай
+              возможность через Settings сортировать пункты меню») ─── */}
+        {showUserInterface && (
+        <section className="panel mb-4">
+          <div className="panel-header flex items-center gap-1.5">
+            {t('settings.sidebarNavTitle', { defaultValue: 'Сайдбар и навигация' })}
+            <InfoHint text={t('settings.sidebarNavHint', { defaultValue: 'Порядок пунктов левого сайдбара и горячие клавиши инструментов. Ctrl+1..9 — основные инструменты, Alt+1..9 — остальные; каждая комбинация может быть переназначена или снята (—). Изменения применяются сразу.' })} />
+          </div>
+          <div className="p-4 space-y-2.5">
+            {/* v3.9 — FAVORITES ordering («сортировать надо те что в\n                фаворитах»): the starred tools render as the sidebar's top\n                «Избранные» section; this block reorders them. */}
+            <div className="mb-2 pb-3 border-b border-border-subtle">
+              <div className="flex items-center gap-1.5 text-2xs font-semibold uppercase tracking-wider text-text-tertiary mb-1.5">
+                <Star size={10} className="text-status-modified fill-current" />
+                {t('settings.sidebarFavTitle', { defaultValue: 'Избранные инструменты' })}
+                <InfoHint text={t('settings.sidebarFavHint', { defaultValue: 'Раздел «Избранные» вверху сайдбара. Порядок задаётся стрелками (↑/↓), ✕ убирает инструмент из избранных (вернуть можно звёздочкой у пункта в сайдбаре).' })} />
+              </div>
+              {(() => {
+                const favorites = favoriteTools;
+                const order = (settings as { navOrder?: string[] }).navOrder;
+                const allItems = navItemsOrdered(order);
+                if (favorites.length === 0) {
+                  return (
+                    <div className="text-2xs text-text-tertiary px-2 py-1">
+                      {t('settings.sidebarFavEmpty', { defaultValue: 'Нет избранных — отметьте инструменты звёздочкой в сайдбаре.' })}
+                    </div>
+                  );
+                }
+                return favorites.map((path, idx) => {
+                  const item = allItems.find((i) => i.path === path);
+                  if (!item) return null;
+                  const Icon = item.icon;
+                  return (
+                    <div key={path} className="flex items-center gap-2 py-1.5 px-2 rounded hover:bg-bg-hover" data-testid="sidebar-fav-row">
+                      <span className="flex items-center gap-0.5 shrink-0">
+                        <button
+                          className="icon-btn !w-5 !h-5"
+                          title={t('settings.sidebarFavMoveUp', { defaultValue: 'Переместить выше в избранном' })}
+                          disabled={idx === 0}
+                          onClick={() => moveFavorite(path, -1)}
+                        >
+                          <ArrowUp size={10} />
+                        </button>
+                        <button
+                          className="icon-btn !w-5 !h-5"
+                          title={t('settings.sidebarFavMoveDown', { defaultValue: 'Переместить ниже в избранном' })}
+                          disabled={idx === favorites.length - 1}
+                          onClick={() => moveFavorite(path, 1)}
+                        >
+                          <ArrowDown size={10} />
+                        </button>
+                      </span>
+                      <span className="flex items-center gap-1.5 text-sm text-text-primary min-w-0 flex-1">
+                        <Icon size={13} className="text-text-tertiary shrink-0" />
+                        <span className="truncate">{item.label}</span>
+                      </span>
+                      <button
+                        className="icon-btn !w-5 !h-5 hover:!text-status-deleted shrink-0"
+                        title={t('settings.sidebarFavRemove', { defaultValue: 'Убрать из избранных' })}
+                        onClick={() => toggleFavoriteTool(path)}
+                      >
+                        <X size={10} />
+                      </button>
+                    </div>
+                  );
+                });
+              })()}
+              {/* v2.3.5 — Back/Forward history depth (project-scoped, default 10).
+                  The user: «по умолчанию должно быть в истории 10 шагов и
+                  количество должно настраиваться в Settings». */}
+              <div className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-bg-hover">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="text-sm text-text-primary truncate">
+                    {t('settings.navHistoryLimit', { defaultValue: 'Шагов в истории Назад/Вперёд' })}
+                  </span>
+                  <InfoHint text={t('settings.navHistoryLimitHint', { defaultValue: 'Сколько последних переходов помнят кнопки Назад/Вперёд (Alt+←/→). История действует только внутри открытого проекта и сбрасывается при переключении репозитория. По умолчанию — 10.' })} />
+                </div>
+                <select
+                  className="text-sm px-2 py-1 bg-bg-secondary border border-border-default rounded"
+                  value={settings.navHistoryLimit ?? 10}
+                  onChange={(e) => setSetting('navHistoryLimit', Number(e.target.value))}
+                  data-testid="nav-history-limit-select"
+                >
+                  {[5, 10, 15, 20, 30, 50, 100].map((n) => (
+                    <option key={n} value={n}>{n}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            {(() => {
+              const overrides = (settings as { navHotkeys?: Record<string, string> }).navHotkeys;
+              const order = (settings as { navOrder?: string[] }).navOrder;
+              const items = navItemsOrdered(order);
+              const hotkeys = effectiveNavHotkeys(overrides);
+              const takenBy = (combo: string, exceptPath: string) =>
+                Object.entries(hotkeys).find(([p, sc]) => p !== exceptPath && sc === combo)?.[0];
+              const currentOrder = items.map((i) => i.path);
+              const move = (idx: number, dir: -1 | 1) => {
+                const next = [...currentOrder];
+                const target = idx + dir;
+                if (target < 0 || target >= next.length) return;
+                [next[idx], next[target]] = [next[target], next[idx]];
+                void setSetting('navOrder', next);
+              };
+              const assign = (path: string, combo: string) => {
+                // Steal the combo from its current owner so two tools never
+                // share a key (last assignment wins, the loser falls back
+                // to unbound until the user reassigns it).
+                const next: Record<string, string> = { ...(overrides ?? {}) };
+                if (combo === 'None') {
+                  next[path] = 'None';
+                } else {
+                  const loser = takenBy(combo, path);
+                  if (loser) next[loser] = 'None';
+                  next[path] = combo;
+                }
+                void setSetting('navHotkeys', next);
+              };
+              return items.map((item, idx) => {
+                const current = hotkeys[item.path] ?? 'None';
+                const freeSlots = NAV_HOTKEY_SLOTS.filter(
+                  (slot) => !takenBy(slot, item.path)
+                );
+                const optionSet = new Set<string>(['None', current, ...freeSlots]);
+                return (
+                  <div key={item.path} className="flex items-center gap-2 py-1.5 px-2 rounded hover:bg-bg-hover">
+                    <span className="flex items-center gap-0.5 shrink-0">
+                      <button
+                        className="icon-btn !w-5 !h-5"
+                        title={t('settings.sidebarNavMoveUp', { defaultValue: 'Переместить выше' })}
+                        disabled={idx === 0}
+                        onClick={() => move(idx, -1)}
+                      >
+                        <ArrowUp size={10} />
+                      </button>
+                      <button
+                        className="icon-btn !w-5 !h-5"
+                        title={t('settings.sidebarNavMoveDown', { defaultValue: 'Переместить ниже' })}
+                        disabled={idx === items.length - 1}
+                        onClick={() => move(idx, 1)}
+                      >
+                        <ArrowDown size={10} />
+                      </button>
+                    </span>
+                    <span className="flex items-center gap-1.5 text-sm text-text-primary min-w-0 flex-1">
+                      <item.icon size={13} className="text-text-tertiary shrink-0" />
+                      <span className="truncate">{item.label}</span>
+                      <span className="text-2xs text-text-tertiary truncate hidden md:inline">{item.group}</span>
+                    </span>
+                    <select
+                      className="text-xs bg-bg-tertiary border border-border-default rounded px-1.5 py-1 shrink-0"
+                      value={current}
+                      onChange={(e) => assign(item.path, e.target.value)}
+                      title={t('settings.sidebarNavHotkeyLabel', { defaultValue: 'Горячая клавиша инструмента' })}
+                    >
+                      {Array.from(optionSet).map((slot) => (
+                        <option key={slot} value={slot}>
+                          {slot === 'None' ? t('settings.sidebarNavNone', { defaultValue: '—' }) : slot}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                );
+              });
+            })()}
+            <div className="flex items-center gap-2 pt-2 mt-1 border-t border-border-subtle">
+              <button
+                className="btn btn-secondary text-xs"
+                onClick={() => {
+                  void setSetting('navOrder', undefined);
+                  void setSetting('navHotkeys', undefined);
+                }}
+              >
+                <RefreshCw size={11} />
+                {t('settings.sidebarNavReset', { defaultValue: 'Сбросить порядок и клавиши' })}
+              </button>
+              <span className="text-2xs text-text-tertiary">
+                {t('settings.sidebarNavOrderHint', { defaultValue: 'Порядок действует внутри групп сайдбара; избранное всегда сверху.' })}
+              </span>
+            </div>
+          </div>
+        </section>
+        )}
+
+        {showUserInterface && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.lowLevelProps')}</div>
-          <div className="p-5 text-sm space-y-3">
+          <div className="p-5 text-sm space-y-5">
             <div className="text-2xs text-text-tertiary">
               {t('settings.lowLevelHint')} <code>smartgit.properties</code>. {t('settings.lowLevelRestart')}
             </div>
@@ -1071,190 +1990,11 @@ smartgit.refresh.inspectEol=true
             <Sparkles size={16} />
             {t('settings.aiCommitMessages')}
           </div>
-          <div className="p-5 text-sm space-y-4">
-            {/* Provider + Model — primary config */}
-            <div>
-              <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold mb-2">
-                {t('settings.aiProviderSection') || 'Provider'}
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs text-text-tertiary block mb-1">{t('settings.provider')}</label>
-                  <select
-                    className="w-full text-sm bg-bg-tertiary border border-border-default rounded px-2 py-1.5"
-                    value={settings.aiProvider || ''}
-                    onChange={async (e) => {
-                      const newProviderId = e.target.value;
-                      const oldProviderId = settings.aiProvider || '';
-                      // ── 1. Save current provider's config ──
-                      // Read current flat values and merge into configs.
-                      const currentUrl = settings.aiUrl || '';
-                      const currentApiKey = settings.aiApiKey || '';
-                      const currentModel = settings.aiModel || '';
-                      const existingConfigs = settings.aiProviderConfigs || {};
-                      const updatedConfigs = { ...existingConfigs };
-                      if (oldProviderId) {
-                        const existing = updatedConfigs[oldProviderId] || {};
-                        updatedConfigs[oldProviderId] = {
-                          url: currentUrl || existing.url,
-                          apiKey: currentApiKey || existing.apiKey,
-                          model: currentModel || existing.model,
-                        };
-                      }
-                      // ── 2. Get new provider's saved config or defaults ──
-                      if (newProviderId) {
-                        const preset = getProviderPreset(newProviderId);
-                        const savedConfig = updatedConfigs[newProviderId];
-                        const newUrl = savedConfig?.url || preset.defaultUrl;
-                        const newModel = savedConfig?.model || preset.defaultModel;
-                        const newApiKey = savedConfig?.apiKey || '';
-                        // ── 3. Apply ALL settings atomically ──
-                        await Promise.all([
-                          setSetting('aiProviderConfigs', updatedConfigs),
-                          setSetting('aiProvider', newProviderId),
-                          setSetting('aiUrl', newUrl),
-                          setSetting('aiModel', newModel),
-                          setSetting('aiApiKey', newApiKey),
-                        ]);
-                      } else {
-                        // Provider set to empty (disabled)
-                        await setSetting('aiProvider', '');
-                      }
-                    }}
-                  >
-                    <option value="">{t('settings.disabledOption')}</option>
-                    {PROVIDER_PRESETS.map(p => (
-                      <option key={p.id} value={p.id}>
-                        {p.label}{p.freeTier ? ' — FREE' : ''}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs text-text-tertiary block mb-1">{t('settings.model')}</label>
-                  {/* For Ollama, hide the manual Model input — the model is
-                      chosen via the OllamaModelPicker below (which fetches
-                      the live model list from the server and shows metadata:
-                      parameter count, file size, quantization, family).
-                      For other providers (OpenAI/Anthropic/Mistral/custom),
-                      keep the free-text input — there's no server to query. */}
-                  {settings.aiProvider === 'ollama' ? (
-                    <input
-                      type="text"
-                      className="w-full text-sm font-mono bg-bg-tertiary border border-border-default rounded px-2 py-1.5 opacity-60"
-                      placeholder={settings.aiModel || 'Pick from list below ↓'}
-                      value={settings.aiModel || ''}
-                      readOnly
-                      title="Model is chosen via the picker below"
-                    />
-                  ) : (
-                    <input
-                      type="text"
-                      className="w-full text-sm font-mono bg-bg-tertiary border border-border-default rounded px-2 py-1.5"
-                      placeholder="gpt-4o-mini"
-                      defaultValue={settings.aiModel || ''}
-                      onBlur={(e) => setSetting('aiModel', e.target.value)}
-                    />
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Provider description + API key hint — shown when a provider
-                is selected. Helps the user understand what the provider
-                offers (free tier? latency?) and where to get an API key. */}
-            {settings.aiProvider && (() => {
-              const preset = getProviderPreset(settings.aiProvider);
-              return (
-                <div className="text-2xs text-text-tertiary mt-2 p-2 rounded bg-bg-tertiary border border-border-subtle">
-                  <div className="flex items-center gap-2 mb-1">
-                    {preset.freeTier && (
-                      <span className="px-1.5 py-0.5 rounded bg-status-added/15 text-status-added font-semibold text-3xs uppercase">
-                        FREE
-                      </span>
-                    )}
-                    <span>{preset.description}</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <span className="opacity-70">API key:</span>
-                    {preset.apiKeyHint.startsWith('http') ? (
-                      <a
-                        href={preset.apiKeyHint}
-                        onClick={(e) => { e.preventDefault(); api.app.openExternal(preset.apiKeyHint); }}
-                        className="text-accent hover:underline"
-                      >
-                        {preset.apiKeyHint}
-                      </a>
-                    ) : (
-                      <span>{preset.apiKeyHint}</span>
-                    )}
-                  </div>
-                </div>
-              );
-            })()}
-
-            {/* Connection — URL + API key */}
-            <div>
-              <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold mb-2">
-                {t('settings.aiConnectionSection') || 'Connection'}
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs text-text-tertiary block mb-1">{t('settings.apiUrl')}</label>
-                  <input
-                    type="text"
-                    className="w-full text-sm font-mono bg-bg-tertiary border border-border-default rounded px-2 py-1.5"
-                    placeholder="https://api.openai.com/v1/chat/completions"
-                    defaultValue={settings.aiUrl || ''}
-                    onBlur={(e) => setSetting('aiUrl', e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-text-tertiary block mb-1">{t('settings.apiKey')}</label>
-                  <input
-                    type="password"
-                    className="w-full text-sm font-mono bg-bg-tertiary border border-border-default rounded px-2 py-1.5"
-                    placeholder="sk-..."
-                    defaultValue={settings.aiApiKey || ''}
-                    onBlur={(e) => setSetting('aiApiKey', e.target.value)}
-                  />
-                </div>
-              </div>
-              <div className="text-2xs text-text-tertiary mt-2">
-                {t('settings.ollamaHint')} <code className="mono bg-bg-tertiary px-1 rounded">http://localhost:11434</code>. {t('settings.ollamaPullHint')} (<code className="mono bg-bg-tertiary px-1 rounded">ollama pull llama3.2</code>).
-              </div>
-            </div>
-
-            {/* Ollama model picker — fetches /api/tags from the Ollama server,
-                shows a dropdown of available models. User can select instead of
-                typing the model name manually. */}
-            {/* Model picker — different pickers for different providers:
-                - Ollama: rich picker with metadata (params, size, quantization, family)
-                - Anthropic: no /models endpoint — manual text input only
-                - All other cloud providers (OpenAI, Groq, Cerebras, OpenRouter,
-                  Z.ai, Mistral, GitHub Models, Hugging Face, Custom):
-                  CloudModelPicker — fetches /models from the provider's API */}
-            {settings.aiProvider === 'ollama' && (
-              <OllamaModelPicker
-                url={settings.aiUrl || 'http://localhost:11434'}
-                selectedModel={settings.aiModel || ''}
-                onSelect={(model) => setSetting('aiModel', model)}
-              />
-            )}
-            {settings.aiProvider && settings.aiProvider !== 'ollama' && settings.aiProvider !== 'anthropic' && settings.aiProvider !== 'custom' && (
-              <CloudModelPicker
-                preset={getProviderPreset(settings.aiProvider)}
-                url={settings.aiUrl || ''}
-                apiKey={settings.aiApiKey}
-                selectedModel={settings.aiModel || ''}
-                onSelect={(model) => setSetting('aiModel', model)}
-              />
-            )}
-            {settings.aiProvider === 'custom' && (
-              <div className="pt-3 border-t border-border-subtle text-2xs text-text-tertiary italic">
-                Custom endpoint — enter the model name manually. If the endpoint has a /models endpoint, you can switch to a named provider above to use the model picker.
-              </div>
-            )}
+          <div className="p-5 text-sm space-y-6">
+            {/* AI providers — unlimited registry rendered as a grid.
+                Replaces the old per-preset dropdown + flat connection fields.
+                Handles activation (legacy-field mirroring), testing, editing. */}
+            <AiProvidersGrid />
 
             {/* Enable toggle */}
             <div className="pt-3 border-t border-border-subtle">
@@ -1321,7 +2061,7 @@ smartgit.refresh.inspectEol=true
                 chat messages. */}
             <div className="pt-3 border-t border-border-subtle">
               <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold mb-2">
-                Context Size
+                {t('settings.aiContextSizeTitle', { defaultValue: 'Размер контекста' })}
               </div>
               <label className="flex items-center gap-2 text-xs">
                 <span className="text-text-tertiary">Max context (characters)</span>
@@ -1347,7 +2087,7 @@ smartgit.refresh.inspectEol=true
             {/* Tool Limits — control how much data AI tools return. */}
             <div className="pt-3 border-t border-border-subtle">
               <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold mb-2">
-                Tool Limits
+                {t('settings.aiToolLimitsTitle', { defaultValue: 'Лимиты инструментов' })}
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <label className="flex items-center gap-2 text-xs">
@@ -1395,12 +2135,12 @@ smartgit.refresh.inspectEol=true
             {/* AI Guard — control which destructive actions the AI can perform. */}
             <div className="pt-3 border-t border-border-subtle">
               <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold mb-2">
-                AI Guard
+                {t('settings.aiGuardTitle', { defaultValue: 'AI-страж' })}
               </div>
               <div className="text-2xs text-text-tertiary mb-2">
                 Control which destructive git actions the AI Assistant is allowed to perform. "Deny" blocks the action entirely — the AI will tell the user to do it manually.
               </div>
-              <div className="space-y-1.5">
+              <div className="space-y-2.5">
                 {([
                   ['discard', 'Discard changes (reset --hard + clean)'],
                   ['syncWithRemote', 'Sync with remote (reset --hard origin)'],
@@ -1463,10 +2203,10 @@ smartgit.refresh.inspectEol=true
         )}
 
         {/* SmartGit Manual: Force Push Policies */}
-        {showApp && (
+        {showGit && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.forcePushPolicy')}</div>
-          <div className="p-5 space-y-3 text-sm">
+          <div className="p-5 space-y-5 text-sm">
             <div>
               <label className="text-xs text-text-tertiary block mb-1">{t('settings.policy')}</label>
               <select
@@ -1480,15 +2220,30 @@ smartgit.refresh.inspectEol=true
               </select>
             </div>
             <div>
+              <label className="text-xs text-text-tertiary block mb-1">{t('settings.forcePushFlag')}</label>
+              <select
+                className="w-full text-sm"
+                value={settings.forcePushMode || 'force'}
+                onChange={(e) => setSetting('forcePushMode', e.target.value as 'lease' | 'force')}
+              >
+                <option value="force">--force</option>
+                <option value="lease">--force-with-lease</option>
+              </select>
+              <div className="text-2xs text-text-tertiary mt-1">{t('settings.forcePushFlagHint')}</div>
+            </div>
+            <div>
               <label className="text-xs text-text-tertiary block mb-1">
                 {t('settings.protectedBranchesLabel')}
               </label>
               <textarea
                 className="w-full font-mono text-xs h-20 resize-none p-2 border border-border-default rounded bg-bg-tertiary"
                 placeholder={'main\nmaster\ndevelop\nrelease/*'}
-                defaultValue={(settings.protectedBranches || ['main', 'master', 'develop', 'release/*']).join('\n')}
+                defaultValue={(settings.protectedBranches || []).join('\n')}
                 onBlur={(e) => setSetting('protectedBranches', e.target.value.split('\n').map(s => s.trim()).filter(Boolean))}
               />
+              <div className="text-2xs text-text-tertiary mt-1">
+                {t('settings.protectedBranchesHint')}
+              </div>
             </div>
             <div className="text-2xs text-text-tertiary">
               {t('settings.forcePushHint')} <code>feature-only</code>, {t('settings.forcePushHint2')}{' '}
@@ -1499,10 +2254,10 @@ smartgit.refresh.inspectEol=true
         )}
 
         {/* Output / Command Log Settings */}
-        {showApp && (
+        {showUserInterface && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.outputPanel')}</div>
-          <div className="p-5 space-y-3 text-sm">
+          <div className="p-5 space-y-5 text-sm">
             <label className="flex items-center justify-between">
               <div>
                 <div className="text-sm font-medium">{t('settings.commandLogLimit')}</div>
@@ -1533,9 +2288,30 @@ smartgit.refresh.inspectEol=true
               </span>
             </div>
             <div className="p-5">
-              {/* Quick light/dark toggle button — kept for users who just
-                  want to flip between the two defaults without picking a
-                  specific palette. */}
+
+              {/* */}
+              <div className="flex items-center justify-between mb-4 pb-4">
+                {/* 4.2 — SmartGit "Automatically select light/dark": follow the
+                    OS preference; resolves the light/dark pair of the chosen
+                    theme family (e.g. github-light ↔ github-dark). */}
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={themeMode === 'auto'}
+                    onChange={(e) => void setThemeMode(e.target.checked ? 'auto' : 'manual')}
+                  />
+                  <div className="flex-1">
+                    <div>{t('settings.themeAuto')}</div>
+                    <div className="text-2xs text-text-tertiary mt-0.5">
+                      {t('settings.themeAutoHint')}
+                    </div>
+                  </div>
+                </label>
+              </div>
+
+              {/* Quick light/dark toggle button — flips across the curated
+                  poles (Ayu Light ↔ One Dark); custom themes flip by their
+                  own isDark flag. */}
               <div className="flex items-center justify-between mb-4 pb-4 border-b border-border-subtle">
                 <div>
                   <div className="text-sm font-medium">{t('settings.quickToggle')}</div>
@@ -1544,23 +2320,33 @@ smartgit.refresh.inspectEol=true
                   </div>
                 </div>
                 <button className="btn btn-secondary" onClick={toggleTheme}>
-                  {theme === 'dark' || getThemeMeta(theme)?.isDark ? <Sun size={14} /> : <Moon size={14} />}
-                  {theme === 'dark' || getThemeMeta(theme)?.isDark ? t('settings.lightMode') : t('settings.darkMode')}
+                  {(isCustomThemeId(theme) ? customThemes.find((e) => e.id === theme)?.isDark : getThemeMeta(theme)?.isDark) ? <Sun size={14} /> : <Moon size={14} />}
+                  {(isCustomThemeId(theme) ? customThemes.find((e) => e.id === theme)?.isDark : getThemeMeta(theme)?.isDark) ? t('settings.lightMode') : t('settings.darkMode')}
                 </button>
               </div>
 
-              {/* Theme grid — each card shows a pseudo-window preview of the
-                  theme with its name. Click to apply. */}
+              {/* Theme grid — 6 curated themes + the user's custom themes.
+                  Each card shows a pseudo-window preview; custom cards carry
+                  edit/delete actions; the last card is «Create a theme…»
+                  which opens the visual Custom Theme editor. */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {THEMES.map((meta) => {
+                {[...THEMES, ...customThemes.map(customThemeMeta)].map((meta) => {
                   const isActive = theme === meta.id;
                   const p = meta.preview;
+                  const label = meta.labelKey.startsWith('@') ? meta.labelKey.slice(1) : t(meta.labelKey);
+                  const customEntry = isCustomThemeId(meta.id)
+                    ? customThemes.find((e) => e.id === meta.id)
+                    : undefined;
                   return (
-                    <button
+                    <div
                       key={meta.id}
+                      role="button"
+                      tabIndex={0}
                       onClick={() => setTheme(meta.id)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setTheme(meta.id); } }}
+                      aria-label={label}
                       className={cn(
-                        'text-left rounded-md border-2 transition-all overflow-hidden',
+                        'text-left rounded-md border-2 transition-all overflow-hidden cursor-pointer relative',
                         isActive
                           ? 'border-accent shadow-md'
                           : 'border-border-default hover:border-border-strong hover:shadow-sm'
@@ -1594,7 +2380,7 @@ smartgit.refresh.inspectEol=true
                           className="ml-1 text-2xs font-medium truncate flex-1"
                           style={{ color: p.textPrimary }}
                         >
-                          {t(meta.labelKey)}
+                          {label}
                         </span>
                         {/* Active check-mark */}
                         {isActive && (
@@ -1680,7 +2466,8 @@ smartgit.refresh.inspectEol=true
                           </div>
                         </div>
                       </div>
-                      {/* Footer — theme name + dark/light indicator */}
+                      {/* Footer — theme name + dark/light indicator + custom
+                          theme actions (edit / delete). */}
                       <div
                         className="flex items-center justify-between px-2 py-1 border-t"
                         style={{
@@ -1689,24 +2476,71 @@ smartgit.refresh.inspectEol=true
                         }}
                       >
                         <span
-                          className="text-2xs font-medium"
+                          className="text-2xs font-medium min-w-0 truncate"
                           style={{ color: p.textPrimary }}
                         >
-                          {t(meta.labelKey)}
+                          {label}
                         </span>
-                        <span
-                          className="text-2xs px-1.5 py-0 rounded-sm"
-                          style={{
-                            color: meta.isDark ? p.textSecondary : p.textSecondary,
-                            border: `1px solid ${p.border}`,
-                          }}
-                        >
-                          {meta.isDark ? t('settings.themeDarkTag') : t('settings.themeLightTag')}
+                        <span className="flex items-center gap-1 shrink-0">
+                          <span
+                            className="text-2xs px-1.5 py-0 rounded-sm"
+                            style={{
+                              color: p.textSecondary,
+                              border: `1px solid ${p.border}`,
+                            }}
+                          >
+                            {meta.isDark ? t('settings.themeDarkTag') : t('settings.themeLightTag')}
+                          </span>
+                          {customEntry && (
+                            <>
+                              <button
+                                className="icon-btn !w-5 !h-5"
+                                title={t('settings.themeEditTooltip', { defaultValue: 'Редактировать тему' })}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setThemeEditorTarget(customEntry);
+                                  setThemeEditorOpen(true);
+                                }}
+                              >
+                                <Pencil size={10} style={{ color: p.textPrimary }} />
+                              </button>
+                              <button
+                                className="icon-btn !w-5 !h-5"
+                                title={t('settings.themeDeleteTooltip', { defaultValue: 'Удалить тему' })}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void confirmDialog({
+                                    title: t('settings.themeEditorDeleteTitle', { defaultValue: 'Удалить тему?' }),
+                                    message: t('settings.themeEditorDeleteMessage', { name: customEntry.name }),
+                                    confirmLabel: t('common.delete', { defaultValue: 'Удалить' }),
+                                    danger: true,
+                                  }).then((ok) => { if (ok) deleteCustomTheme(customEntry.id); });
+                                }}
+                              >
+                                <Trash size={10} style={{ color: p.statusDeleted }} />
+                              </button>
+                            </>
+                          )}
                         </span>
                       </div>
-                    </button>
+                    </div>
                   );
                 })}
+
+                {/* «Create a theme…» — opens the visual Custom Theme editor. */}
+                <button
+                  className="text-left rounded-md border-2 border-dashed border-border-default hover:border-accent transition-all flex items-center justify-center min-h-[120px] text-text-tertiary hover:text-accent"
+                  onClick={() => { setThemeEditorTarget(null); setThemeEditorOpen(true); }}
+                  title={t('settings.themeCreateHint', { defaultValue: 'Визуальный редактор: поверхности, текст, акцент, статусы и фон сайдбара' })}
+                >
+                  <span className="flex flex-col items-center gap-1.5">
+                    <Plus size={18} />
+                    <span className="text-xs font-medium">{t('settings.themeCreateButton', { defaultValue: 'Создать тему…' })}</span>
+                    <span className="text-2xs px-3 text-center leading-snug">
+                      {t('settings.themeCreateHint', { defaultValue: 'Визуальный редактор: поверхности, текст, акцент, статусы и фон сайдбара' })}
+                    </span>
+                  </span>
+                </button>
               </div>
 
               {/* Color swatches — shows the key accent + status colors of
@@ -1718,7 +2552,10 @@ smartgit.refresh.inspectEol=true
                 </div>
                 <div className="flex flex-wrap gap-3">
                   {(() => {
-                    const meta = getThemeMeta(theme);
+                    const customActive = isCustomThemeId(theme)
+                      ? customThemes.find((e) => e.id === theme)
+                      : undefined;
+                    const meta = getThemeMeta(theme) ?? (customActive ? customThemeMeta(customActive) : undefined);
                     if (!meta) return null;
                     const p = meta.preview;
                     const swatches: { name: string; color: string }[] = [
@@ -1751,15 +2588,21 @@ smartgit.refresh.inspectEol=true
                   })()}
                 </div>
               </div>
+
+              {/* v2.3 — Zone color editor: each UI zone is recolored
+                  INDEPENDENTLY (fixes «настраиваешь одну зону — меняются
+                  другие области»). Writes --zone-* keys into the same
+                  customThemeOverrides storage that the JSON editor uses. */}
+              <ThemeZoneEditor />
             </div>
           </section>
         )}
 
         {/* Settings redesign — UI Density (Compact / Comfortable) */}
-        {showApp && (
+        {showUserInterface && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.densityTitle')}</div>
-          <div className="p-5 space-y-3">
+          <div className="p-5 space-y-5">
             <p className="text-xs text-text-tertiary">{t('settings.densityHint')}</p>
             <div className="flex items-center gap-1">
               {(['compact', 'comfortable'] as const).map((d) => (
@@ -1782,10 +2625,10 @@ smartgit.refresh.inspectEol=true
         )}
 
         {/* Settings redesign — Date Format (Relative / Absolute / Both) */}
-        {showApp && (
+        {showUserInterface && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.dateFormatTitle')}</div>
-          <div className="p-5 space-y-3">
+          <div className="p-5 space-y-5">
             <p className="text-xs text-text-tertiary">{t('settings.dateFormatHint')}</p>
             <div className="flex items-center gap-1">
               {(['relative', 'absolute', 'both'] as const).map((f) => (
@@ -1808,10 +2651,10 @@ smartgit.refresh.inspectEol=true
         )}
 
         {/* Settings redesign — Zoom (stepper control) */}
-        {showApp && (
+        {showUserInterface && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.zoomTitle')}</div>
-          <div className="p-5 space-y-3">
+          <div className="p-5 space-y-5">
             <p className="text-xs text-text-tertiary">{t('settings.zoomHint')}</p>
             <div className="flex items-center gap-2">
               <button
@@ -1840,10 +2683,10 @@ smartgit.refresh.inspectEol=true
 
         {/* Task 18 — VSCode-style footer display settings. Each checkbox
             toggles a StatusBar footer section. */}
-        {showApp && (
+        {showUserInterface && (
         <section className="panel mb-4">
           <div className="panel-header">{t('settings.footerSectionTitle')}</div>
-          <div className="p-5 space-y-3">
+          <div className="p-5 space-y-5">
             <p className="text-xs text-text-tertiary">{t('settings.footerSectionDesc')}</p>
             <div className="grid grid-cols-2 gap-2">
               {([
@@ -1884,7 +2727,7 @@ smartgit.refresh.inspectEol=true
           <div className="p-5 text-sm space-y-2">
             <div className="flex justify-between">
               <span className="text-text-tertiary">{t('settings.version')}</span>
-              <span className="font-mono">2.0.1</span>
+              <span className="font-mono">{appVersions?.app ?? '…'}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-text-tertiary">{t('settings.platform')}</span>
@@ -1892,7 +2735,11 @@ smartgit.refresh.inspectEol=true
             </div>
             <div className="flex justify-between">
               <span className="text-text-tertiary">Electron</span>
-              <span className="font-mono">v32</span>
+              <span className="font-mono">v{appVersions?.electron || '—'}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-text-tertiary">Node</span>
+              <span className="font-mono">v{appVersions?.node || '—'}</span>
             </div>
           </div>
         </section>
@@ -1907,7 +2754,7 @@ smartgit.refresh.inspectEol=true
               {t('settings.github')}
             </span>
           </div>
-          <div className="p-5 space-y-4">
+          <div className="p-5 space-y-6">
             {authenticated && user ? (
               <div className="flex items-center gap-3 p-3 bg-bg-tertiary rounded">
                 <img
@@ -1919,6 +2766,15 @@ smartgit.refresh.inspectEol=true
                   <div className="text-sm font-medium">{user.name || user.login}</div>
                   <div className="text-xs text-text-tertiary">@{user.login}</div>
                 </div>
+                <button
+                  className="btn btn-secondary text-xs"
+                  onClick={handleTestGithub}
+                  disabled={testingGithub}
+                  title={t('settings.testConnectionTooltip', { defaultValue: 'Verify the GitHub token still works (calls /user)' })}
+                >
+                  {testingGithub ? <RefreshCw size={12} className="animate-spin" /> : <Github size={12} />}
+                  {t('settings.testConnection', { defaultValue: 'Test' })}
+                </button>
                 <button className="btn btn-danger text-xs" onClick={handleLogout}>
                   <LogOut size={12} />
                   {t('settings.logout')}
@@ -1970,86 +2826,106 @@ smartgit.refresh.inspectEol=true
         </section>
         )}
 
-        {/* SmartGit Manual: CI/CD Integration (Jenkins, TeamCity, GitLab CI) */}
+        {/* GitLab integration — separate from GitHub. The PAT is stored in
+            the encrypted vault (not plaintext settings). Used by the Clone
+            modal (GitLab projects tab) + Pull Requests page (GitLab MRs). */}
         {showIntegrations && (
         <section className="panel mb-4">
-          <div className="panel-header">{t('settings.ciCd')}</div>
-          <div className="p-5 space-y-3 text-sm">
-            <div className="text-2xs text-text-tertiary">
-              {t('settings.ciCdHint')}
-            </div>
-            {/* Jenkins */}
-            <div className="border-t border-border-subtle pt-3">
-              <div className="text-xs font-semibold mb-2">Jenkins</div>
-              <div className="grid grid-cols-2 gap-2">
-                <input
-                  type="text"
-                  className="text-xs font-mono"
-                  placeholder="https://ci.example.com"
-                  defaultValue={settings.jenkinsUrl || ''}
-                  onBlur={(e) => setSetting('jenkinsUrl', e.target.value)}
-                />
-                <input
-                  type="password"
-                  className="text-xs font-mono"
-                  placeholder="user:api-token"
-                  defaultValue={settings.jenkinsToken || ''}
-                  onBlur={(e) => setSetting('jenkinsToken', e.target.value)}
-                />
+          <div className="panel-header">
+            <span className="flex items-center gap-2">
+              <GitBranch size={12} />
+              {t('settings.gitlab', { defaultValue: 'GitLab' })}
+            </span>
+          </div>
+          <div className="p-5 space-y-6">
+            {gitlabAuthed && gitlabUser ? (
+              <div className="flex items-center gap-3 p-3 bg-bg-tertiary rounded">
+                {gitlabUser.avatar_url && <img src={gitlabUser.avatar_url} alt={gitlabUser.username} className="w-10 h-10 rounded-full" />}
+                <div className="flex-1">
+                  <div className="text-sm font-medium">{gitlabUser.name || gitlabUser.username}</div>
+                  <div className="text-xs text-text-tertiary">@{gitlabUser.username}</div>
+                </div>
+                <button
+                  className="btn btn-secondary text-xs"
+                  onClick={handleTestGitlab}
+                  disabled={testingGitlab}
+                  title={t('settings.testConnectionTooltip', { defaultValue: 'Verify the GitLab token still works (lists 1 project)' })}
+                >
+                  {testingGitlab ? <RefreshCw size={12} className="animate-spin" /> : <GitBranch size={12} />}
+                  {t('settings.testConnection', { defaultValue: 'Test' })}
+                </button>
+                <button className="btn btn-danger text-xs" onClick={handleGitlabLogout}>
+                  <LogOut size={12} />
+                  {t('settings.logout')}
+                </button>
               </div>
-            </div>
-            {/* TeamCity */}
-            <div className="border-t border-border-subtle pt-3">
-              <div className="text-xs font-semibold mb-2">TeamCity</div>
-              <div className="grid grid-cols-2 gap-2">
-                <input
-                  type="text"
-                  className="text-xs font-mono"
-                  placeholder="https://teamcity.example.com"
-                  defaultValue={settings.teamcityUrl || ''}
-                  onBlur={(e) => setSetting('teamcityUrl', e.target.value)}
-                />
-                <input
-                  type="password"
-                  className="text-xs font-mono"
-                  placeholder="access token"
-                  defaultValue={settings.teamcityToken || ''}
-                  onBlur={(e) => setSetting('teamcityToken', e.target.value)}
-                />
+            ) : (
+              <div>
+                <div className="text-sm mb-2">
+                  {t('settings.gitlabAuthenticatePat', { defaultValue: 'Authenticate with a GitLab Personal Access Token' })}
+                </div>
+                <div className="text-xs text-text-tertiary mb-3">
+                  {t('settings.gitlabCreateTokenAt', { defaultValue: 'Create a token at' })}{' '}
+                  <a
+                    href="#"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      api.app.openExternal('https://gitlab.com/-/user_settings/personal_access_tokens?name=PrismGit&scopes=read_api,read_repository');
+                    }}
+                    className="text-accent hover:underline"
+                  >
+                    gitlab.com/-/user_settings/personal_access_tokens
+                  </a>{' '}
+                  {t('settings.gitlabWithScopes', { defaultValue: 'with scopes' })} <code className="font-mono">read_api</code>{' '}
+                  {t('settings.and')} <code className="font-mono">read_repository</code>
+                </div>
+                <div className="grid grid-cols-2 gap-2 mb-2">
+                  <input
+                    type="text"
+                    className="text-sm font-mono"
+                    placeholder="https://gitlab.com"
+                    value={gitlabBaseUrl}
+                    onChange={(e) => setGitlabBaseUrl(e.target.value)}
+                    title={t('settings.gitlabBaseUrlTitle', { defaultValue: 'GitLab instance URL — https://gitlab.com for cloud, or your self-hosted URL' })}
+                  />
+                  <input
+                    type="password"
+                    className="text-sm font-mono"
+                    placeholder="glpat-..."
+                    value={gitlabPat}
+                    onChange={(e) => setGitlabPat(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleGitlabLogin()}
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    className="btn btn-primary text-xs"
+                    onClick={handleGitlabLogin}
+                    disabled={gitlabAuthLoading || !gitlabPat.trim()}
+                  >
+                    {gitlabAuthLoading ? <RefreshCw size={12} className="animate-spin" /> : <GitBranch size={12} />}
+                    {t('settings.connect')}
+                  </button>
+                </div>
               </div>
-            </div>
-            {/* GitLab CI */}
-            <div className="border-t border-border-subtle pt-3">
-              <div className="text-xs font-semibold mb-2">GitLab CI</div>
-              <div className="grid grid-cols-3 gap-2">
-                <input
-                  type="text"
-                  className="text-xs font-mono"
-                  placeholder="https://gitlab.com"
-                  defaultValue={settings.gitlabUrl || ''}
-                  onBlur={(e) => setSetting('gitlabUrl', e.target.value)}
-                />
-                <input
-                  type="password"
-                  className="text-xs font-mono"
-                  placeholder="private token"
-                  defaultValue={settings.gitlabToken || ''}
-                  onBlur={(e) => setSetting('gitlabToken', e.target.value)}
-                />
-                <input
-                  type="number"
-                  className="text-xs font-mono"
-                  placeholder="project ID"
-                  defaultValue={settings.gitlabProjectId || ''}
-                  onBlur={(e) => setSetting('gitlabProjectId', e.target.value ? Number(e.target.value) : undefined)}
-                />
-              </div>
-            </div>
+            )}
           </div>
         </section>
         )}
 
       </div>
+        </div>
+      </div>
+
+      {/* Custom Theme editor (create / edit user themes). */}
+      <ThemeEditorDialog
+        open={themeEditorOpen}
+        editing={themeEditorTarget}
+        currentTheme={theme}
+        onClose={() => setThemeEditorOpen(false)}
+        onSave={saveCustomTheme}
+        onDelete={deleteCustomTheme}
+      />
     </div>
   );
 }

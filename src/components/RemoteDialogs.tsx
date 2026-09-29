@@ -33,7 +33,7 @@ function DialogShell({ title, subtitle, children, buttons, onClose }: {
         <h3 className="text-base font-medium">{title}</h3>
         {subtitle && <p className="text-xs text-text-tertiary mt-1 mb-3">{subtitle}</p>}
         <div className={subtitle ? '' : 'mt-3'}>{children}</div>
-        <div className="flex justify-end gap-2 mt-4">{buttons}</div>
+        <div className="flex flex-wrap justify-end gap-2 mt-4">{buttons}</div>
       </div>
     </div>
   );
@@ -87,7 +87,7 @@ export function RenameDialog({
       }
     >
       <div className="flex items-center gap-2">
-        <label className="text-xs text-text-tertiary flex-shrink-0 w-11">{t('dialogs.nameLabel')}</label>
+        <label className="text-xs text-text-tertiary shrink-0 w-11">{t('dialogs.nameLabel')}</label>
         <input
           type="text"
           className="flex-1 text-sm font-mono"
@@ -162,7 +162,7 @@ export function RemoteConfigDialog({
         </>
       }
     >
-      <div className="space-y-3">
+      <div className="space-y-4">
         {mode === 'add' && (
           <div>
             <label className="text-xs text-text-tertiary block mb-1">{t('dialogs.nameLabelShort')}</label>

@@ -7,7 +7,9 @@ export const zh: Record<string, string> = {
   'common.cancel': '取消',
   'common.save': '保存',
   'common.delete': '删除',
+  'common.checkout': '检出',
   'common.remove': '移除',
+  'common.skip': '跳过',
   'common.add': '添加',
   'common.create': '创建',
   'common.edit': '编辑',
@@ -15,7 +17,9 @@ export const zh: Record<string, string> = {
   'common.refresh': '刷新',
   'common.search': '搜索',
   'common.clear': '清除',
+  'common.errorDetails': '详细信息',
   'common.close': '关闭',
+  'common.dismiss': '忽略',
   'common.copy': '复制',
   'common.success': '成功',
   'common.error': '错误',
@@ -46,6 +50,15 @@ export const zh: Record<string, string> = {
   'nav.submodules': '子模块',
   'nav.subtrees': '子树',
   'nav.lfs': 'Git LFS',
+
+  // LFS health check
+  'lfs.healthCheckTitle': 'Git LFS 已配置但未安装',
+  'lfs.healthCheckMessage': '此仓库使用 Git LFS（.gitattributes 中有 LFS 过滤器规则），但系统中未安装 git-lfs。\n\n这可能导致 checkout、restore 和其他 git 操作出错。选择一个选项：\n\n• 移除 LFS 过滤器 — 从 .gitattributes 中删除 filter=lfs 行（提交更改以使其永久生效）\n• 跳过 — 继续使用 LFS 已禁用（LFS 跟踪的文件显示指针内容）',
+  'lfs.removeFilter': '移除 LFS 过滤器',
+  'lfs.skip': '跳过',
+  'lfs.filterRemoved': '从 .gitattributes 中移除了 {count} 行 LFS 过滤器规则。提交更改以使其永久生效。',
+  'lfs.noFilterFound': '在 .gitattributes 中未找到 LFS 过滤器规则。',
+  'lfs.skipHint': 'LFS 已跳过。从 https://git-lfs.com 安装 git-lfs 以获得完整 LFS 支持。',
   'nav.notes': '备注',
   'nav.settings': '设置',
   'nav.favorites': '收藏夹',
@@ -184,6 +197,7 @@ export const zh: Record<string, string> = {
   'settings.appDescription': '全局应用偏好 (外观、集成、AI、CI/CD)',
   'settings.projectDescription': '仓库配置 (Git、远程、拉取策略、配置)',
   'settings.appearance': '外观',
+  'settings.userInterface': '用户界面',
   'settings.theme': '主题',
   'settings.language': '语言',
   'settings.contrast': 'UI 对比度',
@@ -212,6 +226,18 @@ export const zh: Record<string, string> = {
   'clone.credentialHelper': '使用 PrismGit 作为凭据助手',
   'clone.skipSubmodules': '跳过子模块初始化',
   'clone.clone': '克隆',
+  'clone.ssh.title': 'SSH 连接',
+  'clone.ssh.usingProfile': '配置：{name}',
+  'clone.ssh.usingKey': '托管密钥：{name}',
+  'clone.ssh.usingSystem': '系统 ssh — 该主机没有配置档案',
+  'clone.ssh.hintSystem': '在 设置 → 安全 → SSH 连接 中添加配置档案，以使用托管密钥或密码。',
+  'clone.ssh.test': '测试',
+  'clone.ssh.testing': '测试中…',
+  'clone.ssh.ok': '已连接',
+  'clone.ssh.failed': '失败',
+  'clone.targetGroup': 'Sidebar 分组',
+  'clone.targetGroupHint': '克隆的仓库将出现在 Sidebar 树中的位置。选择 "(根)" 将其添加到顶层。',
+  'clone.targetGroupRoot': '(根 — 无分组)',
 
   // Diff
   'diff.unified': '统一',
@@ -262,6 +288,23 @@ export const zh: Record<string, string> = {
   'vscode.toolNotConfigured': '未配置',
   // MED-4 — line-context menu extras
   'common.copied': '已复制',
+  'common.clearFilter': '清除筛选',
   'common.copyFailed': '复制失败',
+  'common.copyHash': '复制提交哈希',
   'common.copyLineNumber': '复制行号 ({n})',
+
+  // ── v3.4 localization completion ──
+  'common.lines': '行',
+  'common.load': '加载',
+  'common.settings': '设置',
+
+  // ── v3.4 hardcoded-string sweep ──
+  'common.noRows': '暂无数据',
+  'common.dismissNotification': '关闭通知',
+  'common.copyCode': '复制代码',
+  'common.apiKeySaved': 'API 密钥已保存',
+  'common.loadingEllipsis': '加载中…',
+
+  // ── v3.4 hardcoded-string sweep ──
+  'toolbar.stageAllTooltip': '暂存所有更改',
 };

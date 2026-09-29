@@ -5,9 +5,10 @@ import { useSettingsStore } from '../stores/settingsStore';
  *
  * The checkbox lives on the remote (Configure remote properties dialog), the
  * flag itself is stored app-side per repo — exactly like SmartGit does. The
- * actual polling loop lives in hooks/useBackgroundFetch.ts.
+ * actual fetching happens in the main-process sidebar remote poll
+ * (pollRemoteSummary fetches exactly these opted-in remotes for every
+ * repository in the list — including the currently open one).
  */
-export const BACKGROUND_FETCH_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
 export function getBackgroundFetchRemotes(repoPath: string): string[] {
   const map = useSettingsStore.getState().settings.backgroundFetchRemotes;

@@ -7,7 +7,9 @@ export const ru: Record<string, string> = {
   'common.cancel': 'Отмена',
   'common.save': 'Сохранить',
   'common.delete': 'Удалить',
+  'common.checkout': 'Переключиться',
   'common.remove': 'Убрать',
+  'common.skip': 'Пропустить',
   'common.add': 'Добавить',
   'common.create': 'Создать',
   'common.edit': 'Изменить',
@@ -15,7 +17,9 @@ export const ru: Record<string, string> = {
   'common.refresh': 'Обновить',
   'common.search': 'Поиск',
   'common.clear': 'Очистить',
+  'common.errorDetails': 'Подробности',
   'common.close': 'Закрыть',
+  'common.dismiss': 'Закрыть',
   'common.copy': 'Копировать',
   'common.success': 'Успешно',
   'common.error': 'Ошибка',
@@ -46,6 +50,15 @@ export const ru: Record<string, string> = {
   'nav.submodules': 'Подмодули',
   'nav.subtrees': 'Поддеревья',
   'nav.lfs': 'Git LFS',
+
+  // LFS health check
+  'lfs.healthCheckTitle': 'Git LFS настроен, но не установлен',
+  'lfs.healthCheckMessage': 'Этот репозиторий использует Git LFS (в .gitattributes есть LFS-фильтры), но git-lfs не установлен в системе.\n\nЭто может вызывать ошибки при checkout, restore и других git-операциях. Выберите вариант:\n\n• Удалить LFS-фильтр — удаляет строки filter=lfs из .gitattributes (закоммитьте изменение, чтобы сделать его постоянным)\n• Пропустить — продолжить с отключённым LFS (файлы под LFS показывают pointer-контент)',
+  'lfs.removeFilter': 'Удалить LFS-фильтр',
+  'lfs.skip': 'Пропустить',
+  'lfs.filterRemoved': 'Удалено {count} строк(и) LFS-фильтра из .gitattributes. Закоммитьте изменение, чтобы сделать его постоянным.',
+  'lfs.noFilterFound': 'LFS-фильтры не найдены в .gitattributes.',
+  'lfs.skipHint': 'LFS пропущен. Установите git-lfs с https://git-lfs.com для полной поддержки LFS.',
   'nav.notes': 'Заметки',
   'nav.settings': 'Настройки',
   'nav.favorites': 'Избранное',
@@ -184,6 +197,7 @@ export const ru: Record<string, string> = {
   'settings.appDescription': 'Глобальные настройки приложения (внешний вид, интеграции, AI, CI/CD)',
   'settings.projectDescription': 'Настройки репозитория (Git, remote, стратегия pull, конфигурация)',
   'settings.appearance': 'Внешний вид',
+  'settings.userInterface': 'Пользовательский интерфейс',
   'settings.theme': 'Тема',
   'settings.language': 'Язык',
   'settings.contrast': 'Контрастность UI',
@@ -212,6 +226,18 @@ export const ru: Record<string, string> = {
   'clone.credentialHelper': 'Использовать PrismGit как credential helper',
   'clone.skipSubmodules': 'Пропустить инициализацию подмодулей',
   'clone.clone': 'Клонировать',
+  'clone.ssh.title': 'SSH-подключение',
+  'clone.ssh.usingProfile': 'Профиль: {name}',
+  'clone.ssh.usingKey': 'Управляемый ключ: {name}',
+  'clone.ssh.usingSystem': 'Системный ssh — профиль для этого хоста не задан',
+  'clone.ssh.hintSystem': 'Добавьте профиль в Настройки → Безопасность → SSH-подключения, чтобы использовать управляемый ключ или пароль.',
+  'clone.ssh.test': 'Проверить',
+  'clone.ssh.testing': 'Проверка…',
+  'clone.ssh.ok': 'Подключено',
+  'clone.ssh.failed': 'Не удалось',
+  'clone.targetGroup': 'Группа в Sidebar',
+  'clone.targetGroupHint': 'Где в дереве Sidebar появится клонированный репозиторий. Выберите "(корень)" для верхнего уровня.',
+  'clone.targetGroupRoot': '(корень — без группы)',
 
   // Diff
   'diff.unified': 'Единый',
@@ -262,6 +288,23 @@ export const ru: Record<string, string> = {
   'vscode.toolNotConfigured': 'Не настроено',
   // MED-4 — line-context menu extras
   'common.copied': 'Скопировано',
+  'common.clearFilter': 'Сбросить фильтр',
   'common.copyFailed': 'Не удалось скопировать',
+  'common.copyHash': 'Скопировать хэш коммита',
   'common.copyLineNumber': 'Скопировать номер строки ({n})',
+
+  // ── v3.4 localization completion ──
+  'common.lines': 'строк',
+  'common.load': 'Загрузить',
+  'common.settings': 'Настройки',
+
+  // ── v3.4 hardcoded-string sweep ──
+  'common.noRows': 'Нет записей',
+  'common.dismissNotification': 'Закрыть уведомление',
+  'common.copyCode': 'Копировать код',
+  'common.apiKeySaved': 'API-ключ сохранён',
+  'common.loadingEllipsis': 'Загрузка...',
+
+  // ── v3.4 hardcoded-string sweep ──
+  'toolbar.stageAllTooltip': 'Индексировать все изменения',
 };

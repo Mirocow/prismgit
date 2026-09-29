@@ -29,15 +29,33 @@ import type {
   BugtraqConfig,
   RemoteCheckSummary,
   PushResult,
+  SquashToBranchTarget,
+  SquashToBranchParams,
+  SquashToBranchResult,
 } from '../../electron/types/git-api';
 import type {
   GithubUser,
   GithubRepository,
   GithubPullRequest,
+  GithubPRFile,
+  GithubPRComment,
+  GithubPRCommit,
   CommitCheckStatus,
 } from '../../electron/types/github-api';
+import type {
+  GitLabUser,
+  GitLabProject,
+  GitLabMergeRequest,
+  GitLabMergeRequestDetail,
+  GitLabMRFile,
+  GitLabMRNote,
+  GitLabMRCommit,
+  GitLabPipeline,
+  GitLabApi,
+} from '../../electron/types/gitlab-api';
 import type { AppSettings, RepositoryEntry, RepositoryMetadata, RepoGroup } from '../../electron/types/settings-api';
 import type { CommandLogEntry } from '../../electron/types/command-log-api';
+import type { SshKeyMeta, SshTestResult, SshSystemKey, CredentialsStatus, SecretEntryMeta, SshProfile, SshProfileInput, SshProfileTestParams, SshUrlResolution } from '../../electron/types/ssh-api';
 
 export type {
   StatusResult,
@@ -70,15 +88,38 @@ export type {
   BugtraqConfig,
   RemoteCheckSummary,
   PushResult,
+  SquashToBranchTarget,
+  SquashToBranchParams,
+  SquashToBranchResult,
   CommandLogEntry,
   GithubUser,
   GithubRepository,
   GithubPullRequest,
+  GithubPRFile,
+  GithubPRComment,
+  GithubPRCommit,
   CommitCheckStatus,
+  GitLabUser,
+  GitLabProject,
+  GitLabMergeRequest,
+  GitLabMergeRequestDetail,
+  GitLabMRFile,
+  GitLabMRNote,
+  GitLabMRCommit,
+  GitLabPipeline,
   AppSettings,
   RepositoryEntry,
   RepositoryMetadata,
   RepoGroup,
+  SshKeyMeta,
+  SshTestResult,
+  SshSystemKey,
+  SshProfile,
+  SshProfileInput,
+  SshProfileTestParams,
+  SshUrlResolution,
+  CredentialsStatus,
+  SecretEntryMeta,
 };
 
 // Runtime-agnostic api: delegate to Tauri adapter when running under

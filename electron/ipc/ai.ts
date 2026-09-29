@@ -1,7 +1,114 @@
-import { ipcMain } from 'electron';
+import { ipcMain, net } from 'electron';
 import * as ai from '../services/ai.js';
 import type { AiProviderConfig } from '../services/ai.js';
 import { loadAIMemory, saveAIMemoryEntry, buildMemorySummary } from '../services/aiMemory.js';
+
+/**
+ * Unified model-list / connectivity check for the multi-provider registry
+ * (Settings → AI → provider grid). Dispatches by provider kind:
+ *
+ *   - 'ollama'             → GET {base}/api/tags (rich metadata: size,
+ *                            family, parameter_size, quantization)
+ *   - 'anthropic'          → GET {base}/v1/models (x-api-key + version header)
+ *   - everything else      → OpenAI-compatible GET {base}/models (Bearer)
+ *                            (OpenAI, Groq, OpenRouter, Cerebras, Gemini,
+ *                             Mistral, GitHub Models, Z.ai, vLLM, LM Studio,
+ *                             any custom compatible endpoint)
+ *
+ * Doubles as a "Test connection" action — the latency is measured and any
+ * HTTP/transport error is returned verbatim so the user sees WHY the
+ * provider is unreachable.
+ */
+export interface ProviderModelInfo {
+  id: string;
+  size?: number;
+  family?: string;
+  parameterSize?: string;
+  quantization?: string;
+  format?: string;
+}
+
+export async function providerListModels(
+  kind: string,
+  url: string,
+  apiKey?: string
+): Promise<{ ok: boolean; error: string | null; models: ProviderModelInfo[]; latencyMs: number }> {
+  const started = Date.now();
+  // Derive the base URL: strip trailing slashes and /chat/completions
+  // suffix so we can append /models for the models endpoint.
+  // Without this, a URL like "https://openrouter.ai/api/v1/chat/completions"
+  // would produce "https://openrouter.ai/api/v1/chat/completions/models"
+  // → 404. We need "https://openrouter.ai/api/v1/models" instead.
+  const base = (url || '').trim().replace(/\/+$/, '').replace(/\/chat\/completions$/, '');
+  try {
+    if (kind === 'ollama') {
+      const b = base || 'http://localhost:11434';
+      const res = await fetch(`${b}/api/tags`);
+      if (!res.ok) {
+        return { ok: false, error: `HTTP ${res.status} ${res.statusText}`, models: [], latencyMs: Date.now() - started };
+      }
+      const data = await res.json();
+      const models: ProviderModelInfo[] = (data.models || []).map((m: {
+        name: string;
+        size?: number;
+        details?: { family?: string; parameter_size?: string; quantization_level?: string; format?: string };
+      }) => ({
+        id: m.name,
+        size: m.size,
+        family: m.details?.family,
+        parameterSize: m.details?.parameter_size,
+        quantization: m.details?.quantization_level,
+        format: m.details?.format,
+      }));
+      return { ok: true, error: null, models, latencyMs: Date.now() - started };
+    }
+
+    if (kind === 'anthropic') {
+      const b = base || 'https://api.anthropic.com';
+      const headers: Record<string, string> = {
+        'x-api-key': apiKey || '',
+        'anthropic-version': '2023-06-01',
+      };
+      const res = await fetch(`${b}/v1/models`, { headers });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        return { ok: false, error: `HTTP ${res.status}: ${text.slice(0, 300) || res.statusText}`, models: [], latencyMs: Date.now() - started };
+      }
+      const data = await res.json();
+      const models: ProviderModelInfo[] = (data.data || data.models || []).map((m: { id?: string; name?: string }) => ({
+        id: m.id || m.name || '',
+      })).filter((m: ProviderModelInfo) => m.id);
+      return { ok: true, error: null, models, latencyMs: Date.now() - started };
+    }
+
+    // OpenAI-compatible (default) — GET {base}/models
+    if (!base) {
+      return { ok: false, error: 'URL is not configured', models: [], latencyMs: Date.now() - started };
+    }
+    const headers: Record<string, string> = {};
+    if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+    const res = await fetch(`${base}/models`, { headers });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      return { ok: false, error: `HTTP ${res.status}: ${text.slice(0, 300) || res.statusText}`, models: [], latencyMs: Date.now() - started };
+    }
+    const data = await res.json();
+    // OpenAI format: { data: [{ id }] }; some servers return a bare array;
+    // Ollama's OpenAI-compat layer returns { models: [...] } — accept all.
+    const rawList: Array<{ id?: string; name?: string }> =
+      Array.isArray(data) ? data : (data.data || data.models || []);
+    const models: ProviderModelInfo[] = rawList
+      .map((m) => ({ id: m.id || m.name || '' }))
+      .filter((m) => m.id);
+    return { ok: true, error: null, models, latencyMs: Date.now() - started };
+  } catch (e) {
+    const msg = String(e);
+    const friendly = msg.includes('fetch') || msg.includes('ECONNREFUSED') || msg.includes('ENOTFOUND')
+      ? `Cannot connect to ${base || 'server'}. Check that the server is running and the URL is correct. (${msg})`
+      : msg;
+    return { ok: false, error: friendly, models: [], latencyMs: Date.now() - started };
+  }
+}
 
 export function registerAiIpc(): void {
   ipcMain.handle(
@@ -150,7 +257,19 @@ export function registerAiIpc(): void {
         if (httpMethod !== 'GET' && httpMethod !== 'HEAD' && config.body) {
           fetchOpts.body = config.body;
         }
-        const res = await fetch(config.url, fetchOpts);
+        // net.fetch rides Chromium's network stack — system proxy, system
+        // DNS and the OS trust store; the things Node's global fetch
+        // (undici) IGNORES on macOS. This is the fix for cloud LLM
+        // providers dying behind a system proxy: undici attempted a DIRECT
+        // connection, failed, and the renderer's direct-fetch fallback was
+        // blocked by the page CSP — leaving "Failed to connect" as the
+        // only possible outcome. Falls back to globalThis.fetch when net
+        // is unavailable (non-Electron hosts).
+        const useNetFetch =
+          typeof net !== 'undefined' && typeof net.fetch === 'function';
+        const res = useNetFetch
+          ? await net.fetch(config.url, fetchOpts)
+          : await globalThis.fetch(config.url, fetchOpts);
         const text = await res.text();
         return { ok: res.ok, status: res.status, statusText: res.statusText, body: text };
       } catch (e) {
@@ -189,4 +308,11 @@ export function registerAiIpc(): void {
     const entries = loadAIMemory(repoPath);
     return buildMemorySummary(entries);
   });
+
+  // ── Multi-provider registry: unified model list / connectivity test ──
+  // kind: 'ollama' | 'anthropic' | anything OpenAI-compatible.
+  ipcMain.handle(
+    'ai:providerListModels',
+    (_e, kind: string, url: string, apiKey?: string) => providerListModels(kind, url, apiKey)
+  );
 }

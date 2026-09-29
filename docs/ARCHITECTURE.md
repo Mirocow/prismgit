@@ -71,6 +71,60 @@ Wraps `simple-git` library with:
 - **Split commit** — interactive rebase with edit action
 - **Line staging** — stage/unstage specific line ranges
 
+#### Background Git Worker (`gitPollCore.ts` / `gitStatusCore.ts` / `gitStatsCore.ts` / `childTracker.ts` / `gitPollWorker.ts` / `gitPollProcess.ts`)
+
+The app's BACKGROUND git work runs in a **dedicated `utilityProcess`**, not
+on the main event loop — one OS process serving THREE job kinds:
+
+- **`poll`** — the repository-list remote check (the sidebar's `git fetch` +
+  incoming/outgoing/dirty counters);
+- **`status`** — the watcher-driven working-tree refresh (the exact
+  `gitService.status()` computation: porcelain parse + repo-state reads) that
+  used to pump/parse git output on the main loop on every IDE auto-save /
+  build churn (renderer asks via `git:statusBackground` →
+  `gitService.statusBackground`);
+- **`stats`** — the sidebar metadata sweep (`storage.refreshRepoStats` /
+  `refreshAllRepoStats`): `git log -1` + branch list + remotes +
+  `rev-list --count` per repo — 4 spawns × N repos that used to run on the
+  MAIN loop on every repo open and on every "Check all repositories" click
+  (the reported full-UI freeze; the fetch half of that button was already in
+  this worker — the stats half joined it in v3.4).
+
+Modules:
+- `gitPollCore.ts` — electron-free poll job core (fetch + 4 local reads);
+  also the in-process fallback for non-Electron hosts (vitest) and for a
+  sick worker (crash / failed fork / protocol timeout → job re-runs
+  in-process, so the sidebar never blanks).
+- `gitStatusCore.ts` — electron-free status job core (the full StatusResult
+  computation, `runStatusJob(req, git?)`); `gitService.status()` delegates
+  to it with its SHARED instance (keeps read coalescing + command log), the
+  worker runs it with a private instance. `resolveHeadSha` /
+  `detectRepoStateFromGitDir` (pure fs probes) live here too.
+- `gitStatsCore.ts` — electron-free stats job core (`runStatsJob(req)`,
+  `isRepo` flag included) + the in-process fallback; the metadata WRITE
+  stays in main (`storage.setRepoMetadata`).
+- `childTracker.ts` — worker-side `child_process.spawn` wrapper that tracks
+  every git child; `disposeGitPollWorker()` sends `{kind:'shutdown'}` so the
+  worker kills its in-flight git children BEFORE it exits — otherwise an
+  orphaned `git fetch` keeps the network/AV busy for up to the OS TCP
+  timeout after the app is gone (the "closing the app leaves the machine
+  sluggish" report). Hard kill follows after a 500 ms grace window.
+- `gitPollWorker.ts` — the utilityProcess entry (`dist-electron/
+  gitPollWorker.js`); plain-data protocol
+  `{kind:'poll'|'status'|'stats',id,request}` →
+  `{kind:'poll-result'|'status-result'|'stats-result',id,result}`, `ready`
+  handshake on boot; malformed messages ignored.
+- `gitPollProcess.ts` — main-side manager: lazy fork, request buffering
+  until `ready`, crash-storm cooldown (no fork per tick), per-kind job
+  watchdogs (poll 10 min, status/stats 5 min), graceful-then-hard
+  `disposeGitPollWorker()` on app quit.
+- Settings and secrets (SSH askpass, HTTP auth args) are resolved in the
+  MAIN process and passed as plain serializable data — the worker never
+  imports electron/settings/storage. The status job's `gitDir` is resolved
+  main-side through the session cache (zero extra subprocesses).
+- Verification: `scripts/verify-checkall-quit.mjs` re-runs the whole story
+  (main pings during the check, spawn attribution, quit time, orphan scan).
+
 #### GitHub Service (`github.ts`)
 
 - HTTPS client for GitHub REST API

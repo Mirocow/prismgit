@@ -820,19 +820,82 @@ describe('octopusMerge', () => {
   });
 });
 
-describe('autoStash', () => {
-  it('temporarily cleans the tree, runs fn, restores dirty state and return value', async () => {
-    const repo = await mkRepo('autostash');
-    write(repo, 'a.txt', 'dirty work\n');
-    let cleanDuringFn = false;
-    const ret = await gitService.autoStash(repo, async () => {
-      cleanDuringFn = (await gitService.status(repo)).isClean;
-      return 42;
-    });
-    expect(ret).toBe(42);
-    expect(cleanDuringFn).toBe(true);
-    expect((await gitService.status(repo)).isClean).toBe(false);
-    expect(read(repo, 'a.txt')).toBe('dirty work\n');
+// The old autoStash(fn) callback helper was removed — it had ZERO callers in
+// the app (dead code). The setting-driven behavior now lives inside pull() /
+// checkout() via autoStashIfNeeded(). These tests cover it end-to-end.
+describe('auto-stash on pull (autoStashOnCommonCommands setting)', () => {
+  let storage: typeof import('../../electron/services/storage');
+
+  function setupRemoteAndClone(name: string): { bare: string; clone: string; origin: string } {
+    // origin work repo with a 2-file seed commit
+    const origin = path.join(ROOT, `${name}-origin`);
+    fs.mkdirSync(origin, { recursive: true });
+    shGit('init -q -b main .', origin);
+    write(origin, 'a.txt', 'v1\n');
+    write(origin, 'b.txt', 'seed b\n');
+    shGit('add -A .', origin);
+    shGit('commit -qm seed', origin);
+    // bare remote
+    const bare = path.join(ROOT, `${name}-bare.git`);
+    fs.mkdirSync(bare, { recursive: true });
+    shGit('init --bare -q -b main .', bare);
+    shGit(`push -q "${bare}" main`, origin);
+    // clone of the bare remote
+    const clone = path.join(ROOT, `${name}-clone`);
+    shGit(`clone -q "${bare}" "${clone}"`);
+    shGit('config user.name T', clone);
+    shGit('config user.email t@t.com', clone);
+    return { bare, clone, origin };
+  }
+
+  /** Advance the remote: commit a.txt=v2 in origin and push to bare. */
+  function advanceRemote(origin: string, bare: string): void {
+    write(origin, 'a.txt', 'v2\n');
+    shGit('add a.txt', origin);
+    shGit('commit -qm "remote v2"', origin);
+    shGit(`push -q "${bare}" main`, origin);
+  }
+
+  beforeAll(async () => {
+    storage = await import('../../electron/services/storage');
+  });
+
+  afterAll(() => {
+    // Reset for any other tests sharing the settings singleton
+    storage.setSetting('autoStashOnCommonCommands', false);
+    storage.setSetting('includeUntrackedInStash', false);
+  });
+
+  it('setting OFF (default): dirty tree + pull --rebase is rejected, no stash cycle', async () => {
+    storage.setSetting('autoStashOnCommonCommands', false);
+    const { origin, clone, bare } = setupRemoteAndClone('as-off');
+    advanceRemote(origin, bare);
+    write(clone, 'b.txt', 'local edit\n');
+    await expect(gitService.pull(clone, 'origin', 'main', true)).rejects.toThrow();
+    // local change untouched, remote commit NOT merged
+    expect(read(clone, 'b.txt')).toBe('local edit\n');
+    expect(read(clone, 'a.txt')).toBe('v1\n');
+  });
+
+  it('setting ON: dirty tree is stashed, pull --rebase succeeds, stash popped back', async () => {
+    storage.setSetting('autoStashOnCommonCommands', true);
+    storage.setSetting('includeUntrackedInStash', true);
+    const { origin, clone, bare } = setupRemoteAndClone('as-on');
+    advanceRemote(origin, bare);
+    // dirty tracked file + untracked file
+    write(clone, 'b.txt', 'local edit\n');
+    write(clone, 'untracked.txt', 'keep me\n');
+    const res = await gitService.pull(clone, 'origin', 'main', true);
+    expect(res.autoStashed).toBe(true);
+    expect(res.popFailed).toBe(false);
+    // remote commit merged
+    expect(read(clone, 'a.txt')).toBe('v2\n');
+    // local changes restored
+    expect(read(clone, 'b.txt')).toBe('local edit\n');
+    expect(read(clone, 'untracked.txt')).toBe('keep me\n');
+    // no leftover autostash entries
+    const stashes = await gitService.stashList(clone);
+    expect(stashes.filter(s => s.message?.includes('prismgit-autostash'))).toHaveLength(0);
   });
 });
 
@@ -888,6 +951,7 @@ describe('history surgery (squashCommits / coalesceCommits)', () => {
     expect(subjects[1]).toContain('commit 2');             // coalesced message below
   });
 });
+
 
 // =====================================================================
 // clonePartial (partial clone filter)
@@ -1000,10 +1064,15 @@ describe('policy & helpers (isForcePushAllowed / setupCredentialHelper)', () => 
     expect(gitService.isForcePushAllowed('main', 'deny').allowed).toBe(false);
     expect(gitService.isForcePushAllowed('feature/x', 'allow').allowed).toBe(true);
     expect(gitService.isForcePushAllowed(undefined, 'feature-only').allowed).toBe(false);
-    expect(gitService.isForcePushAllowed('main', 'feature-only').allowed).toBe(false);
-    expect(gitService.isForcePushAllowed('develop', 'feature-only').allowed).toBe(false);
-    expect(gitService.isForcePushAllowed('release/2.0', 'feature-only').allowed).toBe(false); // wildcard
-    const feat = gitService.isForcePushAllowed('feature/x', 'feature-only');
+    // NO fabricated default list: with no explicit list, every branch
+    // (including main) is allowed under feature-only (opt-in protection).
+    expect(gitService.isForcePushAllowed('main', 'feature-only').allowed).toBe(true);
+    // An explicitly listed branch blocks — with LOCAL, honest wording
+    const list = ['main', 'master', 'develop', 'release/*'];
+    expect(gitService.isForcePushAllowed('main', 'feature-only', list).allowed).toBe(false);
+    expect(gitService.isForcePushAllowed('develop', 'feature-only', list).allowed).toBe(false);
+    expect(gitService.isForcePushAllowed('release/2.0', 'feature-only', list).allowed).toBe(false); // wildcard
+    const feat = gitService.isForcePushAllowed('feature/x', 'feature-only', list);
     expect(feat.allowed).toBe(true);
     expect(feat.reason).toContain('feature/x');
   });
@@ -1119,9 +1188,22 @@ describe('editCommitMessage (non-HEAD reword)', () => {
 });
 
 // =====================================================================
-// LFS family — git-lfs binary is NOT installed here; graceful degradation
+// LFS family — graceful degradation when git-lfs is unavailable.
+// The service exposes a kill-switch (PRISMGIT_LFS_DISABLE=1) so this suite
+// is deterministic on ANY machine — including dev boxes where git-lfs IS
+// installed (which used to make lfsStatus report installed:true and fail
+// these tests).
 // =====================================================================
 describe('LFS without git-lfs binary (graceful degradation)', () => {
+  const REAL_LFS_DISABLE = process.env.PRISMGIT_LFS_DISABLE;
+  beforeAll(() => {
+    process.env.PRISMGIT_LFS_DISABLE = '1';
+  });
+  afterAll(() => {
+    if (REAL_LFS_DISABLE === undefined) delete process.env.PRISMGIT_LFS_DISABLE;
+    else process.env.PRISMGIT_LFS_DISABLE = REAL_LFS_DISABLE;
+  });
+
   it('lfsStatus / lfsList / lfsFsck / lfsListLocks degrade to safe defaults', async () => {
     const repo = await mkRepo('lfs-graceful');
     expect(await gitService.lfsStatus(repo)).toEqual({ installed: false, files: [] });
@@ -1171,6 +1253,191 @@ describe('push with targetBranch (Push To... refspec `local:target`)', () => {
     const localHash = (await gitService.raw(src, ['rev-parse', 'feature/auth'])).trim();
     const ls = await gitService.raw(src, ['ls-remote', 'origin', 'refs/heads/main']);
     expect(ls.split(/\s+/)[0]).toBe(localHash);
+  });
+
+  // ── 0.1 — force-push policy enforcement in push() ───────────────────────
+  // The forcePushPolicy / protectedBranches settings previously had UI but
+  // push() never consulted them (dead setting). These tests pin the behavior.
+  // The protected list is OPT-IN and EMPTY by default — the app must never
+  // fabricate a list and claim a server-side protection that does not exist.
+  it('force-push policy "deny" rejects force push with a clear error', async () => {
+    const storage = await import('../../electron/services/storage');
+    const src = await mkRepo('policy-deny');
+    const bare = bareRemote('policy-deny-origin.git');
+    await gitService.addRemote(src, 'origin', bare);
+    storage.setSetting('forcePushPolicy', 'deny');
+    try {
+      await expect(gitService.push(src, 'origin', 'main', false, true)).rejects
+        .toThrow(/force-push denied by PrismGit policy/);
+    } finally {
+      storage.setSetting('forcePushPolicy', undefined);
+    }
+  });
+
+  it('force-push policy "feature-only" rejects protected branches, allows feature branches', async () => {
+    const storage = await import('../../electron/services/storage');
+    const src = await mkRepo('policy-feature');
+    const bare = bareRemote('policy-feature-origin.git');
+    await gitService.addRemote(src, 'origin', bare);
+    await gitService.raw(src, ['checkout', '-b', 'release/1.0']);
+    storage.setSetting('forcePushPolicy', 'feature-only');
+    storage.setSetting('protectedBranches', ['main', 'master', 'develop', 'release/*']);
+    try {
+      await expect(gitService.push(src, 'origin', 'release/1.0', true, true)).rejects
+        .toThrow(/protected/i);
+      // Non-protected branch → allowed
+      await gitService.raw(src, ['checkout', '-b', 'feature/ok']);
+      write(src, 'ok.txt', '1\n');
+      await gitService.addAll(src);
+      await gitService.commit(src, 'ok');
+      const res = await gitService.push(src, 'origin', 'feature/ok', true, true);
+      expect(res.updated).toBe(true);
+    } finally {
+      storage.setSetting('forcePushPolicy', undefined);
+      storage.setSetting('protectedBranches', undefined);
+    }
+  });
+
+  it('DEFAULT settings ship NO fabricated protected list — force push to main works', async () => {
+    // User-reported bug: with NO settings configured, `git push --force origin
+    // main` was blocked with a FALSE "Branch 'main' is protected" (the local
+    // GitLab had no protection at all). isForcePushAllowed used to fabricate a
+    // default list ['main','master','develop','release/*']; the default must
+    // stay EMPTY — protection is opt-in via Preferences → Commands, and a
+    // REAL server-side protection is reported by the server on push.
+    const storage = await import('../../electron/services/storage');
+    const src = await mkRepo('policy-default');
+    const bare = bareRemote('policy-default-origin.git');
+    await gitService.addRemote(src, 'origin', bare);
+    storage.setSetting('forcePushPolicy', undefined);
+    storage.setSetting('protectedBranches', undefined);
+    try {
+      const res = await gitService.push(src, 'origin', 'main', false, true);
+      expect(res.updated).toBe(true);
+      // The honest policy reason for the default state: allowed everywhere
+      const verdict = gitService.isForcePushAllowed('main', 'feature-only', undefined);
+      expect(verdict.allowed).toBe(true);
+      // And an explicitly listed branch still blocks with LOCAL wording
+      const blocked = gitService.isForcePushAllowed('main', 'feature-only', ['main']);
+      expect(blocked.allowed).toBe(false);
+      expect(blocked.reason).toMatch(/local protected list/i);
+    } finally {
+      storage.setSetting('forcePushPolicy', undefined);
+      storage.setSetting('protectedBranches', undefined);
+    }
+  });
+
+  // ── Force-push FLAG: --force (default) vs --force-with-lease ────────────
+  // push() used to hardcode --force-with-lease for every force push. Now the
+  // effective flag is: explicit forceMode param > forcePushMode setting >
+  // 'force' (real git push --force — user request: "push --force everywhere").
+  // The forcePushPolicy / protectedBranches gate applies to BOTH modes.
+
+  /**
+   * Divergence fixture: src + a teammate clone share a bare remote.
+   * After setup: remote = base+teammate, src = base+local, and src has NOT
+   * fetched → its remote-tracking ref is STALE. A non-FF push must use
+   * --force to succeed; --force-with-lease must reject ("stale info").
+   */
+  async function mkStaleDivergence(tag: string): Promise<string> {
+    const src = await mkRepo(`flag-${tag}`);
+    const bare = bareRemote(`flag-${tag}-origin.git`);
+    await gitService.addRemote(src, 'origin', bare);
+    await gitService.raw(src, ['checkout', '-b', 'feature/stale']);
+    write(src, 'base.txt', 'base\n');
+    await gitService.addAll(src);
+    await gitService.commit(src, 'base');
+    await gitService.push(src, 'origin', 'feature/stale', true);
+
+    // Teammate clone pushes a NEW commit → the remote moves ahead.
+    const mate = path.join(ROOT, `flag-${tag}-mate`);
+    shGit(`clone -q "${bare}" "${mate}"`, ROOT);
+    shGit('checkout -q -b feature/stale origin/feature/stale', mate);
+    write(mate, 'mate.txt', 'teammate\n');
+    shGit('add .', mate);
+    shGit('commit -q -m teammate', mate);
+    shGit('push -q origin feature/stale', mate);
+
+    // src diverges locally WITHOUT fetching → stale remote-tracking ref.
+    write(src, 'local.txt', 'local\n');
+    await gitService.addAll(src);
+    await gitService.commit(src, 'local rewrite');
+    return src;
+  }
+
+  it('DEFAULT force flag is --force: overwrites a diverged remote despite a stale tracking ref', async () => {
+    const storage = await import('../../electron/services/storage');
+    storage.setSetting('forcePushMode', undefined);
+    const src = await mkStaleDivergence('default');
+    try {
+      // Non-FF push. --force-with-lease would reject (stale info); the real
+      // --force default overwrites unconditionally.
+      const res = await gitService.push(src, 'origin', 'feature/stale', false, true);
+      expect(res.updated).toBe(true);
+      const localHash = (await gitService.raw(src, ['rev-parse', 'feature/stale'])).trim();
+      const remote = (await gitService.raw(src, ['ls-remote', 'origin', 'refs/heads/feature/stale'])).trim().split(/\s+/)[0];
+      expect(remote).toBe(localHash);
+    } finally {
+      storage.setSetting('forcePushMode', undefined);
+    }
+  });
+
+  it('forceMode "lease" uses --force-with-lease: rejects when the remote-tracking ref is stale', async () => {
+    const storage = await import('../../electron/services/storage');
+    storage.setSetting('forcePushMode', undefined);
+    const src = await mkStaleDivergence('lease');
+    try {
+      await expect(gitService.push(src, 'origin', 'feature/stale', false, true, false, undefined, 'lease'))
+        .rejects.toThrow(/stale info|rejected|refused/i);
+    } finally {
+      storage.setSetting('forcePushMode', undefined);
+    }
+  });
+
+  it('forcePushMode setting "lease" flips the app-wide default to --force-with-lease', async () => {
+    const storage = await import('../../electron/services/storage');
+    storage.setSetting('forcePushMode', 'lease');
+    const src = await mkStaleDivergence('setting');
+    try {
+      await expect(gitService.push(src, 'origin', 'feature/stale', false, true))
+        .rejects.toThrow(/stale info|rejected|refused/i);
+    } finally {
+      storage.setSetting('forcePushMode', undefined);
+    }
+  });
+
+  it('explicit forceMode "force" overrides the "lease" setting and overwrites the remote', async () => {
+    const storage = await import('../../electron/services/storage');
+    storage.setSetting('forcePushMode', 'lease');
+    const src = await mkStaleDivergence('override');
+    try {
+      const res = await gitService.push(src, 'origin', 'feature/stale', false, true, false, undefined, 'force');
+      expect(res.updated).toBe(true);
+      const localHash = (await gitService.raw(src, ['rev-parse', 'feature/stale'])).trim();
+      const remote = (await gitService.raw(src, ['ls-remote', 'origin', 'refs/heads/feature/stale'])).trim().split(/\s+/)[0];
+      expect(remote).toBe(localHash);
+    } finally {
+      storage.setSetting('forcePushMode', undefined);
+    }
+  });
+
+  it('protected-branch policy applies to BOTH force modes', async () => {
+    const storage = await import('../../electron/services/storage');
+    const src = await mkRepo('flag-policy');
+    const bare = bareRemote('flag-policy-origin.git');
+    await gitService.addRemote(src, 'origin', bare);
+    storage.setSetting('forcePushPolicy', 'feature-only');
+    storage.setSetting('protectedBranches', ['main', 'master', 'develop', 'release/*']);
+    try {
+      await expect(gitService.push(src, 'origin', 'main', false, true, false, undefined, 'force'))
+        .rejects.toThrow(/protected/i);
+      await expect(gitService.push(src, 'origin', 'main', false, true, false, undefined, 'lease'))
+        .rejects.toThrow(/protected/i);
+    } finally {
+      storage.setSetting('forcePushPolicy', undefined);
+      storage.setSetting('protectedBranches', undefined);
+      storage.setSetting('forcePushMode', undefined);
+    }
   });
 
   it('keeps the plain single-ref refspec when the target equals the source', async () => {

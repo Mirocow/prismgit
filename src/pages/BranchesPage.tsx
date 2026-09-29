@@ -7,12 +7,14 @@ import {
 import { MergePanel } from '../components/MergePanel';
 import { EmptyState } from '../components/EmptyState';
 import { FilterInput } from '../components/FilterInput';
-import { BranchTrackingIndicator } from '../components/BranchTrackingIndicator';
+import { BranchSyncIndicator } from '../components/BranchSyncIndicator';
 import { generateBranchNames, type LLMProvider } from '../lib/aiCommitMessages';
 import type { AppSettings } from '../../electron/types/settings-api';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
-import { useGitStore } from '../stores/gitStore';
+import { useGitStore, surfaceConflictedState } from '../stores/gitStore';
+import { offerSslBypass } from '../stores/sslBypassStore';
+import { offerAuthBypass } from '../stores/authBypassStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useOperationLogStore } from '../stores/operationLogStore';
@@ -29,9 +31,14 @@ import {
 import { isBackgroundFetchEnabled, setBackgroundFetchForRepo } from '../lib/backgroundFetch';
 import { describePushResult } from '../lib/pushResult';
 import { getRepoInProgressState } from '../lib/repoState';
+import { showErrorDialog } from '../stores/errorDialogStore';
 import { resolveDefaultRemote } from '../lib/remotes';
+import { filterSymbolicHeads, filterSymbolicHeadNames } from '../lib/branchFilter';
+import { isSingleBranchRefspec } from '../lib/remoteSpecs';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
+import { confirmWithRemember, CONFIRMATION_IDS } from '../lib/confirmations';
 import { useI18n } from '../lib/i18n';
+import { useDateFormatter } from '../lib/formatDate';
 
 /**
  * MED-3 — Build an LLMProvider from AppSettings, or null if AI is not
@@ -59,6 +66,8 @@ export function BranchesPage() {
   const isInProgress = !!(status?.isMerging || status?.isRebasing || status?.isCherryPicking || status?.isReverting);
   const toast = useToastActions();
   const { t } = useI18n();
+  // 0.7 — honors settings.dateFormat (relative / absolute / both)
+  const fmtDate = useDateFormatter();
 
   // SmartGit: while a sequencer state (cherry-pick / revert / merge / rebase /
   // bisect) is in progress the branch is effectively "detached from its remote"
@@ -66,6 +75,16 @@ export function BranchesPage() {
   // other HEAD-movers) would DISCARD it, so they are blocked until the user
   // finishes it on the Changes page (Continue / Skip / Abort / Reset).
   const repoState = getRepoInProgressState(status);
+  // RENDER-SAFE pure predicate — safe to call from JSX (`disabled={...}`)
+  // during render. NEVER toast from here: this used to fire a toast on every
+  // re-render (two multi-selection buttons + the EmptyState action each call
+  // it in their `disabled` prop), and BranchesPage re-renders in bursts on
+  // mount (load() sets branches/tags/stashes, then refreshStatus lands, then
+  // the 3s watcher refresher) — the user got "более 10 сообщений на 1 экране"
+  // of identical "Merge in progress" boxes after switching tools mid-merge.
+  // The toast lives in blockedByRepoState() below, called ONLY from click
+  // handlers (one toast per actual user action).
+  const isBlockedByRepoState = (): boolean => !!repoState;
   const blockedByRepoState = (): boolean => {
     if (!repoState) return false;
     toast.error(
@@ -100,6 +119,14 @@ export function BranchesPage() {
   const [renameTarget, setRenameTarget] = useState<{ kind: 'branch' | 'remote'; oldName: string } | null>(null);
   const [configRemote, setConfigRemote] = useState<{ mode: 'configure' | 'add'; name?: string } | null>(null);
   const [remotesMap, setRemotesMap] = useState<Record<string, RemoteInfo>>({});
+  // BUGFIX "не получаю все ветки": configured fetch refspecs per remote —
+  // used to detect single-branch clones whose refs/remotes will never
+  // contain all branches that exist on the remote (Remotes page shows them
+  // via live ls-remote, Branches page only shows locally fetched refs).
+  const [fetchSpecs, setFetchSpecs] = useState<Record<string, string[]>>({});
+  // Groups expanded past the initial render page ("Show all N" button) —
+  // previously items past the first 200 per group were SILENTLY invisible.
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [remoteBusy, setRemoteBusy] = useState<string | null>(null);
   const [mergeTarget, setMergeTarget] = useState<string | null>(null);
   const [draggedBranch, setDraggedBranch] = useState<string | null>(null);
@@ -158,31 +185,79 @@ export function BranchesPage() {
   // Esc clears branch multi-selection (when no dialog is open)
   useEscapeKey(selectedBranches.size > 0, () => clearBranches());
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
-      const [branchList, remoteList, tagList, stashList] = await Promise.all([
+      const [branchList, remoteList, tagList, stashList, specMap] = await Promise.all([
         api.git.branches(repo.path),
         api.git.remotes(repo.path).catch(() => [] as RemoteInfo[]),
         api.git.tags(repo.path).catch(() => [] as TagInfo[]),
         api.git.stashList(repo.path).catch(() => [] as StashEntry[]),
+        api.git.remoteFetchSpecs(repo.path).catch(() => ({}) as Record<string, string[]>),
       ]);
       setBranches(branchList);
       setRemotesMap(Object.fromEntries(remoteList.map((r) => [r.name, r])));
       setTags(tagList);
       setStashes(stashList);
+      setFetchSpecs(specMap);
     } catch (e) {
-      toast.error(t('branches.loadFailed'), String(e));
+      if (!silent) toast.error(t('branches.loadFailed'), String(e));
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [repo.path, toast]);
 
   useEffect(() => { load(); }, [load]);
 
+  // Live refresh: background fetches (the sidebar remote poll fetches the
+  // remotes opted in via "Perform background Poll or Fetch") update
+  // refs/remotes while the user sits on this page — without this, newly
+  // fetched remote branches only appear after navigating away/back or
+  // pressing Refresh. Debounced 3s; silent (no spinner, no error toast) so
+  // background churn never interrupts the user. Optional-chained: the Tauri
+  // adapter has no watcher.onChanged — live refresh degrades gracefully.
+  const watcherTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    const off = api.watcher?.onChanged?.(() => {
+      if (watcherTimer.current) clearTimeout(watcherTimer.current);
+      watcherTimer.current = setTimeout(() => {
+        watcherTimer.current = null;
+        load(true);
+      }, 3000);
+    });
+    return () => {
+      if (watcherTimer.current) clearTimeout(watcherTimer.current);
+      watcherTimer.current = null;
+      off?.();
+    };
+  }, [load]);
+
+  // 2.1 — SmartGit "Warn when checkout changes submodule configuration".
+  // Resolves true when checkout may proceed: the setting is off, the target
+  // ships the same .gitmodules, or the user confirmed the change. Errors
+  // from the diff probe never block checkout (best-effort warning).
+  const guardSubmoduleCheckout = useCallback(async (target: string): Promise<boolean> => {
+    if (settings?.warnSubmoduleChangesOnCheckout === false) return true;
+    try {
+      const changed = await api.git.hasSubmoduleConfigChanges(repo.path, target);
+      if (!changed) return true;
+      return await confirmWithRemember(CONFIRMATION_IDS.checkoutSubmoduleChange, {
+        title: t('branches.submoduleWarnTitle'),
+        message: t('branches.submoduleWarnMessage', { branch: target }),
+        confirmLabel: t('branches.checkout'),
+        danger: true,
+      });
+    } catch {
+      return true;
+    }
+  }, [repo.path, settings?.warnSubmoduleChangesOnCheckout, t]);
+
   const handleCheckout = async (branch: BranchInfo, opts?: { autoStash?: boolean }) => {
     if (branch.current) return;
     if (blockedByCherryPick()) return;
+    // 2.1 — SmartGit "Warn when checkout changes submodule configuration":
+    // if the target branch ships a different .gitmodules, confirm first.
+    if (!(await guardSubmoduleCheckout(branch.name))) return;
     const autoStash = opts?.autoStash ?? false;
     try {
       await useOperationLogStore.getState().logOperation(
@@ -224,7 +299,55 @@ export function BranchesPage() {
         }
         return; // user cancelled — keep current branch
       }
-      toast.error(t('branches.checkoutFailed'), msg);
+      // Errors of explicit user actions surface as a centered dialog, not a
+      // toast (user request: «словил сообщение а не диалоговое окно»).
+      showActionError('branches.checkoutFailed', msg);
+    }
+  };
+
+  /**
+   * Surface a failed git ACTION as a centered modal dialog (user report:
+   * «При переключении на Remote ветку словил сообщение а не диалоговое
+   * окно») — errors of explicit user actions are dialogs, not toasts. */
+  const showActionError = (titleKey: string, e: unknown): void => {
+    showErrorDialog({ title: t(titleKey), detail: String(e) });
+  };
+
+  /**
+   * Checkout a REMOTE branch (e.g. origin/main) — SmartGit semantics.
+   *
+   * BUGFIX ("fatal: a branch named 'main' already exists"): the three
+   * remote-checkout entry points (context menu, double-click, row ✓ button)
+   * used to always run `git checkout --track origin/main`, which dies when
+   * a local branch with the same short name already exists — even though
+   * switching to that local branch is exactly what the user wants. Now:
+   *   - local branch with the same name exists → delegate to handleCheckout
+   *     (plain switch, incl. its auto-stash recovery path);
+   *   - no local branch → confirm + `--track` (create tracking branch).
+   */
+  const handleCheckoutRemote = async (b: BranchInfo) => {
+    if (blockedByRepoState()) return;
+    const localName = b.name.replace(/^[^/]+\//, '');
+    const localBranch = branches.find((x) => !x.remote && x.name === localName);
+    if (localBranch) {
+      toast.info(t('branches.switchedToLocalNote', { local: localName, remote: b.name }));
+      if (localBranch.current) return;
+      await handleCheckout(localBranch);
+      return;
+    }
+    if (!(await confirmDialog({
+      title: t('branches.checkoutRemoteTitle', { name: b.name }),
+      message: t('branches.checkoutRemoteMessage', { local: localName, remote: b.name }),
+      confirmLabel: t('branches.checkout'),
+    }))) return;
+    if (!(await guardSubmoduleCheckout(b.name))) return; // 2.1 — .gitmodules diff warning
+    try {
+      await api.git.checkout(repo.path, b.name, { track: true });
+      toast.success(t('branches.checkedOutTracking', { local: localName, remote: b.name }));
+      await load();
+      refreshStatus(repo.path);
+    } catch (e) {
+      showActionError('branches.checkoutFailed', e);
     }
   };
 
@@ -305,7 +428,8 @@ export function BranchesPage() {
   const handleDelete = async (branch: BranchInfo) => {
     // First attempt: non-force. If git refuses (not fully merged), offer force
     // — but warn that unmerged commits become Recyclable (recoverable 90 days).
-    if (!(await confirmDialog({
+    // 4.5 — supports persistent "Don't ask again" (confirmations registry).
+    if (!(await confirmWithRemember(CONFIRMATION_IDS.branchDelete, {
       title: t('branches.deleteConfirmTitle', { name: branch.name }),
       message: t('branches.deleteConfirmMessage'),
       confirmLabel: t('common.delete'),
@@ -318,7 +442,7 @@ export function BranchesPage() {
     } catch (e) {
       const msg = String(e);
       if (/not fully merged|branch.*not merged/i.test(msg)) {
-        const ok = await confirmDialog({
+        const ok = await confirmWithRemember(CONFIRMATION_IDS.branchForceDelete, {
           title: t('branches.forceDeleteTitle', { name: branch.name }),
           message: t('branches.forceDeleteMessage'),
           confirmLabel: t('branches.forceDelete'),
@@ -393,11 +517,60 @@ export function BranchesPage() {
       await load();
       await refreshStatus(repo.path);
     } catch (e) {
+      if (offerSslBypass(e, { repoPath: repo.path, retry: () => handleFetchRemote(name) })) return;
+      if (offerAuthBypass(e, { repoPath: repo.path, remoteName: name, retry: () => handleFetchRemote(name) })) return;
       toast.error(t('branches.fetchFailed', { name }), String(e));
     } finally {
       setRemoteBusy(null);
     }
   };
+
+  // BUGFIX "не получаю все ветки": one-click remediation for single-branch
+  // clones — widens remote.<name>.fetch to '*' (git remote set-branches)
+  // then fetches, so every branch that exists on the remote lands in
+  // refs/remotes and becomes visible in this list.
+  const handleFetchAllBranches = async (name: string) => {
+    setRemoteBusy(name);
+    try {
+      await api.git.fetchAllBranches(repo.path, name);
+      toast.success(t('branches.fetchAllBranchesDone', { name }));
+      await load();
+      await refreshStatus(repo.path);
+    } catch (e) {
+      if (offerSslBypass(e, { repoPath: repo.path, retry: () => handleFetchAllBranches(name) })) return;
+      if (offerAuthBypass(e, { repoPath: repo.path, remoteName: name, retry: () => handleFetchAllBranches(name) })) return;
+      toast.error(t('branches.fetchFailed', { name }), String(e));
+    } finally {
+      setRemoteBusy(null);
+    }
+  };
+
+  // Task 29 (Remotes tool → Branches): the Remotes page's "Fetch All"
+  // (git fetch --all --prune) action lives here now — the Branches page is
+  // the single home for everything remote.
+  const handleFetchAllRemotes = async () => {
+    setRemoteBusy('fetch-all');
+    try {
+      await api.git.fetchAll(repo.path, true);
+      toast.success(t('branches.fetchedAllRemotes'));
+      await load();
+      await refreshStatus(repo.path);
+    } catch (e) {
+      if (offerSslBypass(e, { repoPath: repo.path, retry: () => handleFetchAllRemotes() })) return;
+      if (offerAuthBypass(e, { repoPath: repo.path, retry: () => handleFetchAllRemotes() })) return;
+      toast.error(t('branches.fetchAllRemotesFailed'), String(e));
+    } finally {
+      setRemoteBusy(null);
+    }
+  };
+
+  // Task 29: the native menu's Remote → Add… entry navigates here and pops
+  // the Add-Remote dialog directly (App.tsx dispatches after navigating).
+  useEffect(() => {
+    const onAddRemote = () => setConfigRemote({ mode: 'add' });
+    window.addEventListener('prismgit:branches-add-remote', onAddRemote);
+    return () => window.removeEventListener('prismgit:branches-add-remote', onAddRemote);
+  }, []);
 
   const handleRemoveRemote = async (name: string) => {
     if (!(await confirmDialog({
@@ -468,7 +641,46 @@ export function BranchesPage() {
       else toast.success(t.title, t.detail);
       await load();
       await refreshStatus(repo.path);
-    } catch (e) { toast.error(t('branches.pushFailed'), String(e)); }
+    } catch (e) {
+      if (offerSslBypass(e, { repoPath: repo.path, retry: () => handlePushBranch(branch) })) return;
+      if (offerAuthBypass(e, { repoPath: repo.path, remoteName: (branch.tracking ? branch.tracking.split('/')[0] : '') || undefined, retry: () => handlePushBranch(branch) })) return;
+      toast.error(t('branches.pushFailed'), String(e));
+    }
+  };
+
+  /**
+   * Force Push (--force) from the branch context menu — the same flow as
+   * handlePushBranch but with force=true, forceMode='force'. Protected
+   * branches are still rejected by the service-level force-push policy.
+   */
+  const handleForcePushBranch = async (branch: BranchInfo) => {
+    const remote = (branch.tracking ? branch.tracking.split('/')[0] : '')
+      || (await resolveDefaultRemote(repo.path))
+      || 'origin';
+    const ok = await confirmDialog({
+      title: t('branches.forcePushConfirmTitle', { name: branch.name }),
+      message: t('branches.forcePushConfirmMessage', { name: branch.name, remote }),
+      confirmLabel: t('branches.forcePushMenu'),
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      const res = await useOperationLogStore.getState().logOperation(
+        `Force Push ${branch.name} → ${remote}`, repo.path,
+        `git push --force ${remote} ${branch.name}`,
+        () => api.git.push(repo.path, remote, branch.name, !branch.tracking, true, false, undefined, 'force')
+      );
+      const t2 = describePushResult(res, remote, branch.name);
+      if (t2.kind === 'error') toast.error(t2.title, t2.detail);
+      else if (t2.kind === 'info') toast.info(t2.title, t2.detail);
+      else toast.success(t2.title, t2.detail);
+      await load();
+      await refreshStatus(repo.path);
+    } catch (e) {
+      if (offerSslBypass(e, { repoPath: repo.path, retry: () => handleForcePushBranch(branch) })) return;
+      if (offerAuthBypass(e, { repoPath: repo.path, remoteName: (branch.tracking ? branch.tracking.split('/')[0] : '') || undefined, retry: () => handleForcePushBranch(branch) })) return;
+      toast.error(t('branches.pushFailed'), String(e));
+    }
   };
 
   const handleOpenInBrowser = async (branch: BranchInfo) => {
@@ -586,6 +798,10 @@ export function BranchesPage() {
       setResetTarget(null);
       await load();
       await refreshStatus(repo.path);
+      // The History graph shows this branch's commits + decorations — a
+      // reset moved the ref, so the graph (labels, incoming markers, lanes)
+      // is now stale. Reload it too.
+      window.dispatchEvent(new CustomEvent('smartgit:history-refresh'));
     } catch (e) {
       toast.error(t('branches.resetFailed'), String(e));
     } finally {
@@ -594,16 +810,17 @@ export function BranchesPage() {
   };
 
   // ===== Push To... executor (choose remote + target branch) =====
-  const executePushTo = async (opts: { remote: string; targetBranch: string; setUpstream: boolean; force: boolean }) => {
+  const executePushTo = async (opts: { remote: string; targetBranch: string; setUpstream: boolean; force: boolean; forceMode: 'lease' | 'force' }) => {
     if (!pushToTarget) return;
     setPushToBusy(true);
     const src = pushToTarget.branch;
     const refspec = opts.targetBranch === src ? src : `${src}:${opts.targetBranch}`;
+    const forceFlag = opts.force ? (opts.forceMode === 'lease' ? '--force-with-lease' : '--force') : '';
     try {
       const res = await useOperationLogStore.getState().logOperation(
         `Push ${src} → ${opts.remote}/${opts.targetBranch}`, repo.path,
-        `git push ${opts.setUpstream ? '-u ' : ''}${opts.force ? '--force-with-lease ' : ''}${opts.remote} ${refspec}`,
-        () => api.git.push(repo.path, opts.remote, src, opts.setUpstream, opts.force, false, opts.targetBranch)
+        `git push ${opts.setUpstream ? '-u ' : ''}${forceFlag ? forceFlag + ' ' : ''}${opts.remote} ${refspec}`,
+        () => api.git.push(repo.path, opts.remote, src, opts.setUpstream, opts.force, false, opts.targetBranch, opts.forceMode)
       );
       const t = describePushResult(res, opts.remote, opts.targetBranch);
       if (t.kind === 'error') toast.error(t.title, t.detail);
@@ -613,6 +830,8 @@ export function BranchesPage() {
       await load();
       await refreshStatus(repo.path);
     } catch (e) {
+      if (offerSslBypass(e, { repoPath: repo.path, retry: () => executePushTo(opts) })) return;
+      if (offerAuthBypass(e, { repoPath: repo.path, remoteName: opts.remote, retry: () => executePushTo(opts) })) return;
       toast.error(t('branches.pushFailed'), String(e));
     } finally {
       setPushToBusy(false);
@@ -643,7 +862,11 @@ export function BranchesPage() {
   const executeAddTag = async (data: { name: string; message: string; ref: string; force: boolean }) => {
     setTagBusy(true);
     try {
-      await api.git.createTag(repo.path, data.name, data.message || undefined, data.ref, data.force);
+      // Message present → annotated; empty message → lightweight (the toast
+      // distinguishes the two). annotated flag passed EXPLICITLY — since the
+      // backend fix, createTag honors annotated=true even with an empty
+      // message, so the old implicit behavior would change here too.
+      await api.git.createTag(repo.path, data.name, data.message || undefined, data.ref, data.force, !!data.message);
       toast.success(data.message ? t('branches.tagCreatedAnnotated', { name: data.name }) : t('branches.tagCreated', { name: data.name }));
       setShowAddTag(false);
       setCollapsedGroups((prev) => { const n = new Set(prev); n.delete('tags'); return n; });
@@ -683,21 +906,36 @@ export function BranchesPage() {
         () => api.git.pushTag(repo.path, tag.name, remoteName.trim())
       );
       toast.success(t('branches.tagPushed', { name: tag.name, remote: remoteName }));
-    } catch (e) { toast.error(t('branches.tagPushFailed'), String(e)); }
+    } catch (e) {
+      if (offerSslBypass(e, { repoPath: repo.path, retry: () => handlePushTag(tag) })) return;
+      if (offerAuthBypass(e, { repoPath: repo.path, retry: () => handlePushTag(tag) })) return;
+      toast.error(t('branches.tagPushFailed'), String(e));
+    }
   };
 
   const showTagContextMenu = (e: React.MouseEvent, tag: TagInfo) => {
     e.preventDefault();
     e.stopPropagation();
+    // MENU STRUCTURE (v3.4): grouped by domain — tag deletion under
+    // “Управление тегами ▸”, clipboard under “Копировать ▸”, push/log top-level.
     showContextMenu([
       { label: t('branches.pushTo'), accelerator: 'CmdOrCtrl+Up', clickId: 'push-tag' },
       { type: 'separator' },
+      {
+        label: t('ctx.group.tags'),
+        submenu: [
+          { label: t('branches.deleteMenu'), clickId: 'tag-delete' },
+        ],
+      },
+      {
+        label: t('ctx.group.copy'),
+        submenu: [
+          { label: t('tags.copyName'), accelerator: 'CmdOrCtrl+C', clickId: 'tag-copy' },
+          { label: t('tags.copyHash'), clickId: 'tag-copy-hash' },
+        ],
+      },
+      { type: 'separator' },
       { label: t('branches.showInLog'), accelerator: 'CmdOrCtrl+L', clickId: 'tag-log' },
-      { type: 'separator' },
-      { label: t('tags.copyName'), accelerator: 'CmdOrCtrl+C', clickId: 'tag-copy' },
-      { label: t('tags.copyHash'), clickId: 'tag-copy-hash' },
-      { type: 'separator' },
-      { label: t('branches.deleteMenu'), clickId: 'tag-delete' },
     ], (action) => {
       if (action === 'push-tag') handlePushTag(tag);
       else if (action === 'tag-log') {
@@ -730,7 +968,17 @@ export function BranchesPage() {
       await load();
       await refreshStatus(repo.path);
     } catch (e) {
-      toast.error(t('branches.pullFailed', { name: pullRemote }), String(e));
+      // TLS certificate rejection (expired / self-signed corporate remote) —
+      // offer the per-repo bypass + retry BEFORE the conflict probing: a
+      // rejected cert never leaves a conflicted state behind, so the extra
+      // repo-state read is wasted work in exactly this case.
+      if (offerSslBypass(e, { repoPath: repo.path, retry: () => executePull(opts) })) return;
+      if (offerAuthBypass(e, { repoPath: repo.path, remoteName: pullRemote || undefined, retry: () => executePull(opts) })) return;
+      // A conflicted pull leaves the repo mid-merge — surface the Conflicts
+      // UI (state-based detection, see gitStore.surfaceConflictedState)
+      // instead of only a transient error toast.
+      const conflicted = await surfaceConflictedState(repo.path);
+      if (!conflicted) toast.error(t('branches.pullFailed', { name: pullRemote }), String(e));
     } finally {
       setPullBusy(false);
     }
@@ -749,6 +997,8 @@ export function BranchesPage() {
       setMoreRemote(null);
       await load();
     } catch (e) {
+      if (offerSslBypass(e, { repoPath: repo.path, retry: () => executeFetchMore(commits) })) return;
+      if (offerAuthBypass(e, { repoPath: repo.path, remoteName: moreRemote || undefined, retry: () => executeFetchMore(commits) })) return;
       toast.error(t('branches.fetchMoreFailed', { name: moreRemote }), String(e));
     } finally {
       setMoreBusy(false);
@@ -768,6 +1018,8 @@ export function BranchesPage() {
       setDepthRemote(null);
       await load();
     } catch (e) {
+      if (offerSslBypass(e, { repoPath: repo.path, retry: () => executeSetDepth(depth) })) return;
+      if (offerAuthBypass(e, { repoPath: repo.path, remoteName: depthRemote || undefined, retry: () => executeSetDepth(depth) })) return;
       toast.error(t('branches.setDepthFailed', { name: depthRemote }), String(e));
     } finally {
       setDepthBusy(false);
@@ -873,16 +1125,23 @@ export function BranchesPage() {
   const showStashContextMenu = (e: React.MouseEvent, s: StashEntry) => {
     e.preventDefault();
     e.stopPropagation();
+    // MENU STRUCTURE (v3.4): grouped by domain — apply/pop (most-used) stay
+    // top-level, stash management (rename/drop) in one group, clipboard in
+    // “Копировать ▸”.
     showContextMenu([
       { label: t('stashes.applyMenu'), accelerator: 'Shift+CmdOrCtrl+S', clickId: 'stash-apply' },
       { label: t('stashes.popMenu'), clickId: 'stash-pop' },
       { type: 'separator' },
-      { label: t('stashes.showInLog'), accelerator: 'CmdOrCtrl+L', clickId: 'stash-log' },
-      { type: 'separator' },
-      { label: t('stashes.renameMenu'), accelerator: 'F2', clickId: 'stash-rename' },
-      { label: t('stashes.dropMenu'), clickId: 'stash-drop' },
-      { type: 'separator' },
-      { label: t('stashes.copyMessage'), clickId: 'stash-copy' },
+      { label: t('ctx.group.delete'), submenu: [
+        { label: t('stashes.renameMenu'), accelerator: 'F2', clickId: 'stash-rename' },
+        { label: t('stashes.dropMenu'), clickId: 'stash-drop' },
+      ] },
+      { label: t('ctx.group.view'), submenu: [
+        { label: t('stashes.showInLog'), accelerator: 'CmdOrCtrl+L', clickId: 'stash-log' },
+      ] },
+      { label: t('ctx.group.copy'), submenu: [
+        { label: t('stashes.copyMessage'), clickId: 'stash-copy' },
+      ] },
     ], (action) => {
       if (action === 'stash-apply') handleApplyStash(s);
       else if (action === 'stash-pop') {
@@ -1002,76 +1261,111 @@ export function BranchesPage() {
     const items: ContextMenuItem[] = [];
 
     if (b.remote) {
-      // === REMOTE BRANCH CONTEXT MENU (matches Fork: Check Out / Merge / Rebase /
-      //     Push (disabled) / Push To / Log / Reset / Reset Advanced / Delete / Copy) ===
+      // === REMOTE BRANCH CONTEXT MENU — v3.4: logically GROUPED by domain
+      //     (branch management / push / reset / view / copy) instead of a
+      //     flat 12-item list. Checkout stays top-level (most-used). ===
       items.push({ label: t('branches.checkoutMenu'), accelerator: 'CmdOrCtrl+G', clickId: 'checkout-remote', enabled: !isInProgress });
       items.push({ type: 'separator' });
-      items.push({ label: t('branches.merge'), clickId: 'merge' });
-      items.push({ label: t('branches.rebase'), accelerator: 'CmdOrCtrl+D', clickId: 'rebase' });
-      items.push({ type: 'separator' });
-      // Push is meaningless for a remote-only branch — shown disabled like Fork does.
-      items.push({ label: t('branches.push'), accelerator: 'CmdOrCtrl+Up', enabled: false, clickId: '_noop' });
-      items.push({ label: t('branches.pushTo'), accelerator: 'Shift+CmdOrCtrl+Up', clickId: 'push-to-remote', enabled: !isInProgress });
-      items.push({ type: 'separator' });
-      items.push({ label: t('branches.log'), accelerator: 'CmdOrCtrl+L', clickId: 'log' });
-      items.push({ type: 'separator' });
-      items.push({ label: t('branches.resetMenu'), accelerator: 'CmdOrCtrl+R', clickId: 'reset-remote' });
-      items.push({ label: t('branches.resetAdvancedMenu'), accelerator: 'Shift+CmdOrCtrl+R', clickId: 'reset-advanced-remote' });
-      items.push({ type: 'separator' });
-      items.push({ label: t('branches.deleteMenu'), clickId: 'delete-remote' });
-      items.push({ type: 'separator' });
+      items.push({
+        label: t('ctx.group.branches'),
+        submenu: [
+          { label: t('branches.merge'), clickId: 'merge' },
+          { label: t('branches.rebase'), accelerator: 'CmdOrCtrl+D', clickId: 'rebase' },
+          { type: 'separator' },
+          { label: t('branches.deleteMenu'), clickId: 'delete-remote' },
+        ],
+      });
+      items.push({
+        label: t('toolbar.push'),
+        submenu: [
+          // Push is meaningless for a remote-only branch — shown disabled like Fork does.
+          { label: t('branches.push'), accelerator: 'CmdOrCtrl+Up', enabled: false, clickId: '_noop' },
+          { label: t('branches.pushTo'), accelerator: 'Shift+CmdOrCtrl+Up', clickId: 'push-to-remote', enabled: !isInProgress },
+        ],
+      });
+      items.push({
+        label: t('ctx.group.reset'),
+        submenu: [
+          { label: t('branches.resetMenu'), accelerator: 'CmdOrCtrl+R', clickId: 'reset-remote' },
+          { label: t('branches.resetAdvancedMenu'), accelerator: 'Shift+CmdOrCtrl+R', clickId: 'reset-advanced-remote' },
+        ],
+      });
+      items.push({
+        label: t('ctx.group.view'),
+        submenu: [
+          { label: t('branches.log'), accelerator: 'CmdOrCtrl+L', clickId: 'log' },
+          { label: t('branches.openInBrowser'), clickId: 'browser' },
+        ],
+      });
       items.push({ label: t('common.copy'), accelerator: 'CmdOrCtrl+C', clickId: 'copy' });
-      items.push({ label: t('branches.openInBrowser'), clickId: 'browser' });
     } else {
-      // === LOCAL BRANCH CONTEXT MENU (matches Fork) ===
-
-      // Group 1: Checkout / Merge / Rebase
+      // === LOCAL BRANCH CONTEXT MENU — v3.4: logically GROUPED by domain.
+      //     Checkout stays top-level (most-used); merge/rebase/rename/delete
+      //     under “Управление ветками ▸”, the 4 push variants under
+      //     “Push ▸”, resets under “Сбросить ▸”, tracking in its own group. ===
       if (!b.current) {
         items.push({ label: t('branches.checkoutMenu'), accelerator: 'CmdOrCtrl+G', clickId: 'checkout', enabled: !isInProgress });
         items.push({ type: 'separator' });
-        items.push({ label: t('branches.merge'), clickId: 'merge' });
-        items.push({ label: t('branches.rebase'), accelerator: 'CmdOrCtrl+D', clickId: 'rebase' });
-        items.push({ label: t('branches.ffMerge'), clickId: 'ff-merge' });
-        items.push({ type: 'separator' });
       }
 
-      // Group 2: Push
-      items.push({ label: t('branches.push'), accelerator: 'CmdOrCtrl+Up', clickId: 'push', enabled: !isInProgress });
-      items.push({ label: t('branches.pushTo'), accelerator: 'Shift+CmdOrCtrl+Up', clickId: 'push-to', enabled: !isInProgress });
-      // SmartGit Manual: Push to Gerrit — refs/for/<branch>
-      items.push({ label: t('branches.pushToGerrit'), clickId: 'push-gerrit' });
-      items.push({ type: 'separator' });
+      // Branch management: integrate / rename / delete
+      const manageItems: ContextMenuItem[] = [
+        { label: t('branches.merge'), clickId: 'merge' },
+        { label: t('branches.rebase'), accelerator: 'CmdOrCtrl+D', clickId: 'rebase' },
+        { label: t('branches.ffMerge'), clickId: 'ff-merge' },
+        { type: 'separator' },
+        { label: t('branches.renameMenu'), accelerator: 'F2', clickId: 'rename' },
+      ];
+      if (!b.current) {
+        manageItems.push({ label: t('branches.deleteMenu'), clickId: 'delete' });
+      }
+      items.push({ label: t('ctx.group.branches'), submenu: manageItems });
+
+      // Push: all four variants in one place
+      items.push({
+        label: t('toolbar.push'),
+        submenu: [
+          { label: t('branches.push'), accelerator: 'CmdOrCtrl+Up', clickId: 'push', enabled: !isInProgress },
+          { label: t('branches.forcePushMenu'), clickId: 'force-push', enabled: !isInProgress },
+          { label: t('branches.pushTo'), accelerator: 'Shift+CmdOrCtrl+Up', clickId: 'push-to', enabled: !isInProgress },
+          // SmartGit Manual: Push to Gerrit — refs/for/<branch>
+          { label: t('branches.pushToGerrit'), clickId: 'push-gerrit' },
+        ],
+      });
 
       // Task 14 — Worktree actions (moved from the deleted Worktrees page).
       items.push({ label: t('branches.createWorktree'), clickId: 'create-worktree', enabled: !isInProgress });
+
+      // Reset
+      items.push({
+        label: t('ctx.group.reset'),
+        submenu: [
+          { label: t('branches.resetMenu'), accelerator: 'CmdOrCtrl+R', clickId: 'reset' },
+          { label: t('branches.resetAdvancedMenu'), accelerator: 'Shift+CmdOrCtrl+R', clickId: 'reset-advanced' },
+        ],
+      });
+
       items.push({ type: 'separator' });
 
-      // Group 3: Log / Reset
-      items.push({ label: t('branches.log'), accelerator: 'CmdOrCtrl+L', clickId: 'log' });
-      items.push({ type: 'separator' });
-      items.push({ label: t('branches.resetMenu'), accelerator: 'CmdOrCtrl+R', clickId: 'reset' });
-      items.push({ label: t('branches.resetAdvancedMenu'), accelerator: 'Shift+CmdOrCtrl+R', clickId: 'reset-advanced' });
-      items.push({ type: 'separator' });
-
-      // Group 4: Rename / Delete
-      items.push({ label: t('branches.renameMenu'), accelerator: 'F2', clickId: 'rename' });
-      if (!b.current) {
-        items.push({ label: t('branches.deleteMenu'), clickId: 'delete' });
-      }
-      items.push({ type: 'separator' });
-
-      // Group 5: Tracking
+      // Tracking
+      const trackingItems: ContextMenuItem[] = [];
       if (b.tracking) {
-        items.push({ label: t('branches.trackingLabel', { name: b.tracking }), clickId: '_noop', enabled: false });
-        items.push({ label: t('branches.setTracked'), clickId: 'set-tracking' });
-        items.push({ label: t('branches.stopTrackingMenu'), clickId: 'stop-tracking' });
+        trackingItems.push({ label: t('branches.trackingLabel', { name: b.tracking }), clickId: '_noop', enabled: false });
+        trackingItems.push({ label: t('branches.setTracked'), clickId: 'set-tracking' });
+        trackingItems.push({ label: t('branches.stopTrackingMenu'), clickId: 'stop-tracking' });
       } else {
-        items.push({ label: t('branches.setTracked'), clickId: 'set-tracking' });
-        items.push({ label: t('branches.stopTrackingMenu'), enabled: false, clickId: '_noop' });
+        trackingItems.push({ label: t('branches.setTracked'), clickId: 'set-tracking' });
+        trackingItems.push({ label: t('branches.stopTrackingMenu'), enabled: false, clickId: '_noop' });
       }
-      items.push({ type: 'separator' });
+      items.push({ label: t('ctx.group.view'), submenu: [
+        { label: t('branches.log'), accelerator: 'CmdOrCtrl+L', clickId: 'log' },
+      ] });
+      items.push({
+        label: t('branches.upstreamGroup', { defaultValue: 'Upstream' }),
+        submenu: trackingItems,
+      });
 
-      // Group 6: Copy
+      // Copy
       items.push({ label: t('common.copy'), accelerator: 'CmdOrCtrl+C', clickId: 'copy' });
     }
 
@@ -1101,16 +1395,7 @@ export function BranchesPage() {
 
         // === Checkout remote (create local tracking branch) ===
         else if (action === 'checkout-remote') {
-          const localName = b.name.replace(/^[^/]+\//, '');
-          if (!(await confirmDialog({
-            title: t('branches.checkoutRemoteTitle', { name: b.name }),
-            message: t('branches.checkoutRemoteMessage', { local: localName, remote: b.name }),
-            confirmLabel: t('branches.checkout'),
-          }))) return;
-          api.git.checkout(repo.path, b.name, { track: true }).then(() => {
-            toast.success(t('branches.checkedOutTracking', { local: localName, remote: b.name }));
-            load(); refreshStatus(repo.path);
-          }).catch((e) => toast.error(t('branches.checkoutFailed'), String(e)));
+          await handleCheckoutRemote(b);
         }
 
         // === Merge ===
@@ -1141,6 +1426,9 @@ export function BranchesPage() {
         // === Push ===
         else if (action === 'push') handlePushBranch(b);
 
+        // === Force Push (--force) — protected branches still policy-gated ===
+        else if (action === 'force-push') handleForcePushBranch(b);
+
         // === Push To... (choose remote + target branch) ===
         else if (action === 'push-to') {
           const remoteName = b.tracking ? b.tracking.split('/')[0]
@@ -1159,7 +1447,27 @@ export function BranchesPage() {
             });
             toast.success(t('branches.pushedToGerrit', { branch: branchName }), output.split('\n')[0] || '');
             await refreshStatus(repo.path);
-          } catch (e) { toast.error(t('branches.pushGerritFailed'), String(e)); }
+          } catch (e) {
+            // Gerrit review push — same TLS/auth reaction as any other push.
+            if (offerSslBypass(e, {
+              repoPath: repo.path,
+              retry: async () => {
+                const output = await api.git.pushToGerrit(repo.path, branchName, remoteName, {
+                  topic: topic || undefined,
+                });
+                toast.success(t('branches.pushedToGerrit', { branch: branchName }), output.split('\n')[0] || '');
+                await refreshStatus(repo.path);
+              },
+            })) return;
+            if (offerAuthBypass(e, { repoPath: repo.path, remoteName, retry: async () => {
+              const output = await api.git.pushToGerrit(repo.path, branchName, remoteName, {
+                topic: topic || undefined,
+              });
+              toast.success(t('branches.pushedToGerrit', { branch: branchName }), output.split('\n')[0] || '');
+              await refreshStatus(repo.path);
+            } })) return;
+            toast.error(t('branches.pushGerritFailed'), String(e));
+          }
         }
 
         // === Log (show this branch's history in History page) ===
@@ -1252,14 +1560,23 @@ export function BranchesPage() {
   // the one the user originally clicked on.
   useEffect(() => {
     lastClickedIndex.current = null;
+    // Filtering re-partitions groups — collapse any "Show all" expansion
+    // so the filtered view starts from its first page again.
+    setExpandedGroups(new Set());
   }, [search]);
   const filteredTags = tags.filter(t => t.name.toLowerCase().includes(search.toLowerCase()));
   const filteredStashes = stashes.filter(s => s.message.toLowerCase().includes(search.toLowerCase()));
 
   // Group branches: Local, then by remote
-  const localBranches = filtered.filter(b => !b.remote);
+  // Defense-in-depth: also filter out symbolic refs like "origin/HEAD"
+  // and "github/HEAD" on the UI side. The backend branches() already
+  // strips them, but if a cached list (or a different code path that
+  // builds the branch list from `git for-each-ref` directly) slips
+  // through, the user would see "origin/HEAD" rows that look like
+  // real branches but cannot be pushed, merged, or checked out.
+  const localBranches = filterSymbolicHeads(filtered.filter(b => !b.remote));
   const remoteGroups: Record<string, BranchInfo[]> = {};
-  for (const b of filtered.filter(b => b.remote)) {
+  for (const b of filterSymbolicHeads(filtered.filter(b => b.remote))) {
     const remoteName = b.name.split('/')[0];
     if (!remoteGroups[remoteName]) remoteGroups[remoteName] = [];
     remoteGroups[remoteName].push(b);
@@ -1274,7 +1591,7 @@ export function BranchesPage() {
       <div
         key={b.name}
         className={cn(
-          'group flex items-center gap-2 px-3 py-1 cursor-pointer text-xs border-b border-border-subtle hover:bg-bg-hover',
+          'group flex items-center gap-2 px-3 py-1.5 cursor-pointer text-xs border-b border-border-subtle hover:bg-bg-hover',
           b.current && 'bg-bg-active font-medium',
           isSingleSelected && 'bg-bg-selected',
           isMultiSelected && !b.current && 'bg-bg-selected',
@@ -1341,18 +1658,9 @@ export function BranchesPage() {
           // Double-click is the explicit "checkout this branch" gesture.
           // (Mirrors IDE file trees where single-click selects, double-click opens.)
           if (b.remote) {
-            // For remote branches: confirm + create tracking local branch.
-            const localName = b.name.replace(/^[^/]+\//, '');
-            confirmDialog({
-              title: `Checkout remote branch '${b.name}'`,
-              message: `This creates a local branch '${localName}' tracking '${b.name}' and switches to it.`,
-              confirmLabel: 'Checkout',
-            }).then((ok) => {
-              if (!ok) return;
-              api.git.checkout(repo.path, b.name, { track: true })
-                .then(() => { toast.success(t('toast.git.checkoutSuccess', { ref: localName })); load(); refreshStatus(repo.path); })
-                .catch((err) => toast.error(t('toast.git.checkoutFailed'), String(err)));
-            });
+            // For remote branches: local-exists → switch to the local branch;
+            // otherwise confirm + create a tracking local branch.
+            void handleCheckoutRemote(b);
             return;
           }
           if (!b.current) handleCheckout(b);
@@ -1364,7 +1672,7 @@ export function BranchesPage() {
             also trigger single-select and clear the multi-set). */}
         <input
           type="checkbox"
-          className="flex-shrink-0 cursor-pointer"
+          className="shrink-0 cursor-pointer"
           checked={isMultiSelected}
           onClick={(e) => e.stopPropagation()}
           onChange={() => toggleBranch(b.name)}
@@ -1375,7 +1683,7 @@ export function BranchesPage() {
             can always see at a glance which branch they are on. */}
         <span
           className={cn(
-            'flex-shrink-0 flex items-center justify-center font-bold rounded-sm',
+            'shrink-0 flex items-center justify-center font-bold rounded-sm',
             b.current
               ? 'w-5 h-5 bg-accent text-text-inverse text-xs'
               : 'w-5 h-5 text-text-tertiary/30 text-xs'
@@ -1384,11 +1692,25 @@ export function BranchesPage() {
         >
           {b.current ? '>' : ''}
         </span>
-        <GitBranch size={12} className={cn('flex-shrink-0', b.current ? 'text-accent' : 'text-text-tertiary')} />
+        <GitBranch size={12} className={cn('shrink-0', b.current ? 'text-accent' : 'text-text-tertiary')} />
         {/* Task 6 — visual fork/socket indicator for the local↔remote
             tracking relationship. Plug inserted into the socket when the
             branch has an upstream; hovering shows the upstream ref name. */}
-        <BranchTrackingIndicator tracking={!!b.tracking} upstreamName={b.tracking} size={12} />
+        {/* Task 6 — visual fork/socket indicator for the local↔remote
+            tracking relationship. Plug inserted into the socket when the
+            branch has an upstream; hovering shows the upstream ref name.
+            Replaced by BranchSyncIndicator — same SVG concept, but it
+            also reflects ahead/behind/gone state via PlugConnected vs
+            PlugDisconnected icons and color tone. */}
+        <BranchSyncIndicator
+          tracking={b.tracking}
+          upstream={b.upstream}
+          ahead={b.ahead}
+          behind={b.behind}
+          gone={b.gone}
+          remote={b.remote}
+          size={12}
+        />
         {/* Name */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
@@ -1399,31 +1721,60 @@ export function BranchesPage() {
               </span>
             )}
             {b.tracking && <span className="text-2xs text-text-tertiary">→ {b.tracking}</span>}
+            {/* For non-current branches, branches() sets `upstream` (not
+                `tracking`) via `for-each-ref`. Show the same "→ upstream"
+                arrow so the user can see which remote this branch tracks,
+                even when it's not the checked-out branch. */}
+            {!b.tracking && b.upstream && <span className="text-2xs text-text-tertiary">→ {b.upstream}</span>}
             {/* SmartGit: show the in-progress state explicitly on the branch —
                 the unfinished operation is not committed yet, so the branch is
                 effectively detached from its remote until it is finished. */}
             {b.current && repoState && (
               <span
                 data-testid="repo-state-badge"
-                className="text-2xs px-1 py-0.5 rounded bg-status-conflict/15 text-status-conflict border border-status-conflict/40 flex items-center gap-0.5 font-medium flex-shrink-0"
+                className="text-2xs px-1 py-0.5 rounded bg-status-conflict/15 text-status-conflict border border-status-conflict/40 flex items-center gap-0.5 font-medium shrink-0"
                 title={`${repoState.bannerText} Not yet committed, detached from remote. Pull and Checkout would lead to loss of commits. Finish it on the Changes page.`}
               >
                 ⚠ {repoState.badge}
               </span>
             )}
             {/* "gone" — upstream branch was deleted on the remote. Pull would
-                fail; Push is the recovery. Surface this so the user understands
-                why Pull is unavailable on this branch. */}
+                fail; Push is the recovery. Surface with a warning triangle icon
+                and orange/red coloring to indicate the problem severity. */}
             {b.gone && (
-              <span className="text-2xs px-1 py-0.5 rounded bg-status-deleted/15 text-status-deleted font-medium"
-                title="The upstream branch was deleted on the remote. Pull is unavailable — Push to recreate it, or set a new tracked branch.">
-                gone
+              <span className="text-2xs px-1 py-0.5 rounded bg-status-warning/20 text-status-warning flex items-center gap-0.5 font-medium"
+                title="⚠ Upstream branch was deleted on the remote. Pull will fail — Push to recreate it, or set a new tracked branch.">
+                ⚠ gone
               </span>
             )}
-            {b.ahead !== undefined && b.ahead > 0 && (
+            {/* No upstream at all — local-only branch, never pushed.
+                Shown as info (blue) — less severe than 'gone'.
+                Uses 'Not pushed' text to make it obvious to the user
+                that this branch has no remote tracking. */}
+            {!b.gone && !b.remote && !b.tracking && !b.upstream && (
+              <span className="text-2xs px-1 py-0.5 rounded bg-status-info/15 text-status-info flex items-center gap-0.5 font-medium"
+                title={t('branches.localOnlyHint', { defaultValue: 'Local-only branch — not pushed to any remote. Right-click → Push... to publish with -u.' })}>
+                {t('branches.notPushed', { defaultValue: 'Not pushed' })}
+              </span>
+            )}
+            {/* Upstream exists but local is ahead — unpushed commits.
+                Show a green ↑N badge so the user knows how many commits
+                need to be pushed. Works for both current (b.tracking) and
+                non-current (b.upstream) branches. */}
+            {(b.tracking || b.upstream) && b.ahead !== undefined && b.ahead > 0 && (
               <span className="text-2xs px-1 py-0.5 rounded bg-status-added/15 text-status-added flex items-center gap-0.5 font-medium"
-                title={b.current ? `${b.ahead} commit(s) ahead of upstream — Pull would attempt to merge or fail. Push to publish them.` : `${b.ahead} ahead of upstream`}>
-                <ArrowUp size={8} />{b.ahead}
+                title={t('branches.aheadHint', { defaultValue: '{n} commit(s) ahead of upstream — Push to publish them.', n: b.ahead })}>
+                <ArrowUp size={8} />{b.ahead} {t('branches.unpushed', { defaultValue: 'unpushed' })}
+              </span>
+            )}
+            {/* Up to date with upstream — synced. Show a subtle green
+                checkmark so the user can see at a glance that the
+                branch is in sync with its remote. Works for both
+                current (b.tracking) and non-current (b.upstream) branches. */}
+            {(b.tracking || b.upstream) && (b.ahead === undefined || b.ahead === 0) && (b.behind === undefined || b.behind === 0) && !b.gone && (
+              <span className="text-2xs px-1 py-0.5 rounded bg-status-added/10 text-status-added/70 flex items-center gap-0.5 font-medium"
+                title={t('branches.syncedHint', { defaultValue: 'Up to date with upstream' })}>
+                <Check size={8} />{t('branches.synced', { defaultValue: 'synced' })}
               </span>
             )}
             {b.behind !== undefined && b.behind > 0 && (
@@ -1435,16 +1786,16 @@ export function BranchesPage() {
         </div>
         {/* Last commit info */}
         {b.lastCommit && (
-          <div className="flex items-center gap-1 text-2xs text-text-tertiary/70 flex-shrink-0">
+          <div className="flex items-center gap-1 text-2xs text-text-tertiary/70 shrink-0">
             <code className="font-mono">{shortHash(b.lastCommit.hash)}</code>
             <span className="hidden lg:inline truncate" style={{ maxWidth: 150 }}>{b.lastCommit.message}</span>
-            <span>· {formatDate(b.lastCommit.date)}</span>
+            <span>· {fmtDate(b.lastCommit.date)}</span>
           </div>
         )}
         {/* Hover actions — always faintly visible, brighten on hover.
             Checkout is the primary action (leftmost, accent color) — it is
             NEVER auto-fired by clicking the row itself. */}
-        <div className="flex items-center gap-0.5 opacity-30 group-hover:opacity-100 transition-opacity flex-shrink-0">
+        <div className="flex items-center gap-0.5 opacity-30 group-hover:opacity-100 transition-opacity shrink-0">
           {!b.remote && (
             <>
               {!b.current && (
@@ -1492,17 +1843,7 @@ export function BranchesPage() {
                 onClick={(e) => {
                   e.stopPropagation();
                   if (isInProgress) return;
-                  const localName = b.name.replace(/^[^/]+\//, '');
-                  confirmDialog({
-                    title: t('branches.checkoutRemoteTitle', { name: b.name }),
-                    message: t('branches.checkoutRemoteMessage', { local: localName, remote: b.name }),
-                    confirmLabel: t('branches.checkout'),
-                  }).then((ok) => {
-                    if (!ok) return;
-                    api.git.checkout(repo.path, b.name, { track: true })
-                      .then(() => { toast.success(t('branches.checkedOut', { name: localName })); load(); refreshStatus(repo.path); })
-                      .catch((err) => toast.error(t('branches.checkoutFailed'), String(err)));
-                  });
+                  void handleCheckoutRemote(b);
                 }}
               >
                 <Check size={11} />
@@ -1540,24 +1881,28 @@ export function BranchesPage() {
   const showRemoteContextMenu = (e: React.MouseEvent, remoteName: string) => {
     e.preventDefault();
     e.stopPropagation();
+    // MENU STRUCTURE (v3.4): grouped by domain — sync actions stay top-level
+    // (most-used), URL copy under “Копировать ▸”, remote management under
+    // “Управление remote ▸” (rename/delete/depth/properties/configure).
     showContextMenu([
       { label: t('branches.pushTo'), accelerator: 'Shift+CmdOrCtrl+Up', clickId: 'remote-push-to' },
       { label: t('branches.pullMenu'), accelerator: 'CmdOrCtrl+Down', clickId: 'remote-pull' },
-      { type: 'separator' },
       { label: t('remotes.fetch'), accelerator: 'Shift+CmdOrCtrl+Down', clickId: 'fetch' },
       { label: t('branches.fetchMoreMenu'), clickId: 'fetch-more' },
       { type: 'separator' },
-      { label: t('branches.renameMenu'), accelerator: 'F2', clickId: 'rename-remote' },
-      { label: t('branches.deleteMenu'), clickId: 'remove-remote' },
-      { type: 'separator' },
-      { label: t('branches.copyUrl'), clickId: 'copy-url' },
-      { type: 'separator' },
-      { label: t('branches.setDepthMenu'), clickId: 'set-depth' },
-      { label: t('branches.propertiesMenu'), clickId: 'properties' },
-      { type: 'separator' },
-      { label: t('branches.configureRemote'), clickId: 'configure' },
-      { label: t('branches.addNewRemote'), clickId: 'add-remote' },
-      { label: t('branches.manageRemotes'), clickId: 'manage' },
+      { label: t('ctx.group.copy'), submenu: [
+        { label: t('branches.copyUrl'), clickId: 'copy-url' },
+      ] },
+      { label: t('ctx.group.remote.manage'), submenu: [
+        { label: t('branches.renameMenu'), accelerator: 'F2', clickId: 'rename-remote' },
+        { label: t('branches.deleteMenu'), clickId: 'remove-remote' },
+        { type: 'separator' },
+        { label: t('branches.setDepthMenu'), clickId: 'set-depth' },
+        { label: t('branches.propertiesMenu'), clickId: 'properties' },
+        { type: 'separator' },
+        { label: t('branches.configureRemote'), clickId: 'configure' },
+        { label: t('branches.addNewRemote'), clickId: 'add-remote' },
+      ] },
     ], (action) => {
       if (action === 'remote-push-to') {
         // Push the CURRENT branch to this remote (Fork behavior) — via the
@@ -1583,7 +1928,6 @@ export function BranchesPage() {
       else if (action === 'copy-url') handleCopyRemoteUrl(remoteName);
       else if (action === 'set-depth') setDepthRemote(remoteName);
       else if (action === 'properties') handleShowProperties(remoteName);
-      else if (action === 'manage') window.location.hash = '#/remotes';
     });
   };
 
@@ -1644,7 +1988,7 @@ export function BranchesPage() {
     return (
       <div key={groupKey}>
         <div
-          className="group flex items-center gap-1 px-2 py-1 text-2xs font-semibold uppercase tracking-wide text-text-secondary bg-bg-tertiary border-b border-border-default cursor-pointer hover:bg-bg-hover"
+          className="group flex items-center gap-1 px-2 py-1.5 text-2xs font-semibold uppercase tracking-wide text-text-secondary bg-bg-tertiary border-b border-border-default cursor-pointer hover:bg-bg-hover"
           onClick={() => toggleGroup(groupKey)}
           onContextMenu={onHeaderContextMenu}
         >
@@ -1653,14 +1997,22 @@ export function BranchesPage() {
           <span className="text-text-tertiary">({count})</span>
           {headerExtra}
         </div>
-        {/* Render only first 200 items to avoid perf issues on large repos.
-            Lazy loading: show first 200, "Load more" button reveals next 200. */}
-        {!collapsed && items.length > 200 && (
-          <div className="px-2 py-1 text-2xs text-text-tertiary border-b border-border-subtle">
-            {t('branches.showingFirst200', { count: items.length })}
-          </div>
+        {/* Perf guard for huge repos: render the first 200 rows, then a
+            real "Show all N" button (the OLD code silently dropped rows
+            past #200 — the hint claimed scrolling would reveal them, but
+            nothing did; branches existed but were unreachable in the UI). */}
+        {!collapsed && (
+          expandedGroups.has(groupKey) ? items.map(rowRenderer) : items.slice(0, 200).map(rowRenderer)
         )}
-        {!collapsed && items.slice(0, 200).map(rowRenderer)}
+        {!collapsed && items.length > 200 && !expandedGroups.has(groupKey) && (
+          <button
+            className="w-full flex items-center justify-center gap-1 px-2 py-1.5 text-2xs text-accent bg-bg-secondary border-b border-border-subtle hover:bg-bg-hover"
+            onClick={() => setExpandedGroups((prev) => new Set(prev).add(groupKey))}
+          >
+            <ChevronDown size={10} />
+            {t('branches.showAll', { count: items.length })}
+          </button>
+        )}
       </div>
     );
   };
@@ -1672,16 +2024,44 @@ export function BranchesPage() {
     // otherwise it looks like the remote is missing entirely. While a filter is
     // active, missing branches just mean "nothing matches", so no hint then.
     const EMPTY_HINT = '__empty-remote__';
-    const rows: BranchInfo[] = items.length > 0 ? items : (search.trim()
-      ? []
-      : [{ name: EMPTY_HINT, remote: true, current: false, tracking: null, hash: '', hashAbbrev: '', subject: '', author: { name: '', email: '', date: '', timestamp: 0 }, committer: { name: '', email: '', date: '', timestamp: 0 }, date: '' } as unknown as BranchInfo]);
+    // BUGFIX "не получаю все ветки хотя в Remotes они есть": when the remote's
+    // fetch refspec is single-branch (clone made with --depth / --single-branch),
+    // refs/remotes only ever holds that one branch no matter how often you
+    // fetch. Render a warning row with the one-click remediation.
+    const SINGLE_HINT = '__single-branch__';
+    const singleBranch = !search.trim() && isSingleBranchRefspec(remoteName, fetchSpecs[remoteName]);
+    const rows: BranchInfo[] = [];
+    if (singleBranch) {
+      rows.push({ name: SINGLE_HINT, remote: true, current: false } as unknown as BranchInfo);
+    }
+    if (items.length > 0) rows.push(...items);
+    else if (!search.trim() && !singleBranch) {
+      rows.push({ name: EMPTY_HINT, remote: true, current: false, tracking: null, hash: '', hashAbbrev: '', subject: '', author: { name: '', email: '', date: '', timestamp: 0 }, committer: { name: '', email: '', date: '', timestamp: 0 }, date: '' } as unknown as BranchInfo);
+    }
     const rowRenderer = (b: BranchInfo) =>
-      b.name === EMPTY_HINT ? (
+      b.name === SINGLE_HINT ? (
+        <div
+          key={`${groupKey}-single-branch-hint`}
+          className="flex items-center gap-2 px-3 py-1.5 border-b border-border-subtle bg-status-warning/10"
+        >
+          <AlertCircle size={12} className="text-status-warning shrink-0" />
+          <span className="flex-1 min-w-0 text-2xs text-text-secondary">
+            {t('branches.singleBranchClone', { name: remoteName })}
+          </span>
+          <button
+            className="shrink-0 text-2xs font-medium text-accent hover:underline disabled:opacity-50"
+            disabled={remoteBusy === remoteName}
+            onClick={(e) => { e.stopPropagation(); handleFetchAllBranches(remoteName); }}
+          >
+            {remoteBusy === remoteName ? t('common.loading') : t('branches.fetchAllBranches')}
+          </button>
+        </div>
+      ) : b.name === EMPTY_HINT ? (
         <div
           key={`${groupKey}-empty-hint`}
           className="flex items-center gap-2 px-3 py-1.5 text-2xs text-text-tertiary border-b border-border-subtle"
         >
-          <span className="w-3 flex-shrink-0" />
+          <span className="w-3 shrink-0" />
           {t('branches.noBranchesFetched')}
           <CloudDownload size={10} /> {t('remotes.fetch')}
         </div>
@@ -1732,7 +2112,7 @@ export function BranchesPage() {
     <div
       key={tag.name}
       className={cn(
-        'group flex items-center gap-2 px-3 py-1 cursor-pointer text-xs border-b border-border-subtle hover:bg-bg-hover',
+        'group flex items-center gap-2 px-3 py-1.5 cursor-pointer text-xs border-b border-border-subtle hover:bg-bg-hover',
         globalSelectedTag === tag.name && 'bg-bg-selected'
       )}
       onClick={(e) => {
@@ -1744,8 +2124,8 @@ export function BranchesPage() {
       }}
       onContextMenu={(e) => showTagContextMenu(e, tag)}
     >
-      <span className="w-3 flex-shrink-0" />
-      <TagIcon size={12} className="text-text-tertiary flex-shrink-0" />
+      <span className="w-3 shrink-0" />
+      <TagIcon size={12} className="text-text-tertiary shrink-0" />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className="truncate font-medium text-text-primary">{tag.name}</span>
@@ -1756,34 +2136,34 @@ export function BranchesPage() {
           )}
         </div>
       </div>
-      <div className="flex items-center gap-1 text-2xs text-text-tertiary/70 flex-shrink-0">
+      <div className="flex items-center gap-1 text-2xs text-text-tertiary/70 shrink-0">
         <code className="font-mono">{tag.hashAbbrev}</code>
-        {tag.date && <span>· {formatDate(tag.date)}</span>}
+        {tag.date && <span>· {fmtDate(tag.date)}</span>}
       </div>
     </div>
   );
 
   /** Fork-style stash row: "07/25/2025 02:55 PM: WIP on remove-sync: ..." */
   const renderStashRow = (s: StashEntry) => {
-    const dateLabel = s.date ? formatDate(s.date) : '';
+    const dateLabel = s.date ? fmtDate(s.date) : '';
     return (
       <div
         key={`stash-${s.index}`}
         className={cn(
-          'group flex items-center gap-2 px-3 py-1 cursor-pointer text-xs border-b border-border-subtle hover:bg-bg-hover',
+          'group flex items-center gap-2 px-3 py-1.5 cursor-pointer text-xs border-b border-border-subtle hover:bg-bg-hover',
           globalSelectedStashIndex === s.index && 'bg-bg-selected'
         )}
         onClick={(e) => { handleStashShowInLog(s); e.stopPropagation(); }}
         onContextMenu={(e) => showStashContextMenu(e, s)}
         title={t('stashes.branchesRowTooltip')}
       >
-        <span className="w-3 flex-shrink-0" />
-        <Package size={12} className="text-text-tertiary flex-shrink-0" />
+        <span className="w-3 shrink-0" />
+        <Package size={12} className="text-text-tertiary shrink-0" />
         <div className="flex-1 min-w-0 truncate">
           {dateLabel && <span className="text-text-secondary">{dateLabel}: </span>}
           <span className="text-text-primary">{s.message}</span>
         </div>
-        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 flex-shrink-0">
+        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 shrink-0">
           <button className="icon-btn !w-5 !h-5" title={t('stashes.applyTooltip')}
             onClick={(e) => { e.stopPropagation(); handleApplyStash(s); }}>
             <Check size={11} />
@@ -1809,10 +2189,13 @@ export function BranchesPage() {
           <span className="text-xs font-semibold">{t('branches.title')}</span>
           <span className="text-2xs text-text-tertiary">
             {t('branches.countSummary', {
+              // Repo-wide totals, NOT the search-filtered counts: the summary
+              // line is a repository overview — shrinking it when a search is
+              // active made it disagree with the Tags/Stashes tools.
               local: localBranches.length,
               remote: Object.values(remoteGroups).reduce((a, b) => a + b.length, 0),
-              tags: filteredTags.length,
-              stashes: filteredStashes.length,
+              tags: tags.length,
+              stashes: stashes.length,
             })}
           </span>
         </div>
@@ -1823,7 +2206,24 @@ export function BranchesPage() {
             placeholder={t('branches.filterPlaceholder')}
             ariaLabel={t('branches.filterPlaceholder')}
           />
-          <button className="icon-btn !w-6 !h-6" title={t('common.refresh')} onClick={load}>
+          {/* Task 29: Fetch All (prune) — inherited from the removed Remotes tool. */}
+          <button
+            className="icon-btn !w-6 !h-6"
+            title={t('branches.fetchAllRemotesTooltip')}
+            onClick={handleFetchAllRemotes}
+            disabled={Object.keys(remotesMap).length === 0 || remoteBusy === 'fetch-all'}
+          >
+            {remoteBusy === 'fetch-all' ? <Loader size={12} className="animate-spin" /> : <CloudDownload size={12} />}
+          </button>
+          {/* Task 29: Add Remote — inherited from the removed Remotes tool. */}
+          <button
+            className="icon-btn !w-6 !h-6"
+            title={t('branches.addRemoteTooltip')}
+            onClick={() => setConfigRemote({ mode: 'add' })}
+          >
+            <Cog size={12} />
+          </button>
+          <button className="icon-btn !w-6 !h-6" title={t('common.refresh')} onClick={() => load()}>
             <RefreshCw size={12} />
           </button>
           <button className="btn btn-primary text-2xs !py-1 !px-2.5" onClick={() => setShowNewDialog(true)}>
@@ -1850,7 +2250,7 @@ export function BranchesPage() {
             type="button"
             className="text-2xs px-2 py-0.5 rounded bg-status-deleted/15 text-status-deleted hover:bg-status-deleted/25 border border-status-deleted/30 flex items-center gap-1"
             onClick={handleDeleteSelected}
-            disabled={blockedByRepoState()}
+            disabled={isBlockedByRepoState()}
             title={t('branches.batchDeleteTooltip')}
           >
             <Trash size={10} />
@@ -1860,7 +2260,7 @@ export function BranchesPage() {
             type="button"
             className="text-2xs px-2 py-0.5 rounded bg-status-added/15 text-status-added hover:bg-status-added/25 border border-status-added/30 flex items-center gap-1"
             onClick={handlePushSelected}
-            disabled={blockedByRepoState()}
+            disabled={isBlockedByRepoState()}
             title={t('branches.batchPushTooltip')}
           >
             <Upload size={10} />
@@ -1880,7 +2280,7 @@ export function BranchesPage() {
           Covers ALL five states (incl. bisect) via repoState. */}
       {repoState && (
         <div className="px-3 py-1.5 border-b border-status-warning/40 bg-status-warning/10 flex items-center gap-2">
-          <AlertCircle size={12} className="text-status-warning flex-shrink-0" />
+          <AlertCircle size={12} className="text-status-warning shrink-0" />
           <span className="text-2xs text-status-warning font-medium">
             {repoState.bannerText}
           </span>
@@ -1896,7 +2296,7 @@ export function BranchesPage() {
           when HEAD moves. Surface this prominently. */}
       {status?.detached && !repoState && (
         <div className="px-3 py-1.5 border-b border-status-warning/40 bg-status-warning/10 flex items-center gap-2">
-          <AlertCircle size={12} className="text-status-warning flex-shrink-0" />
+          <AlertCircle size={12} className="text-status-warning shrink-0" />
           <span className="text-2xs text-status-warning font-medium">
             HEAD is detached.
           </span>
@@ -1915,7 +2315,7 @@ export function BranchesPage() {
             icon={GitBranch}
             title={search ? t('branches.nothingMatches') : t('branches.empty')}
             description={search ? undefined : t('branches.emptyHint')}
-            action={search ? undefined : { label: t('branches.newButton'), onClick: () => setShowNewDialog(true), disabled: blockedByRepoState() }}
+            action={search ? undefined : { label: t('branches.newButton'), onClick: () => setShowNewDialog(true), disabled: isBlockedByRepoState() }}
           />
         ) : (
           <>
@@ -1973,7 +2373,7 @@ export function BranchesPage() {
                     onKeyDown={(e) => e.key === 'Enter' && handleCreate()} />
                   <button
                     type="button"
-                    className="btn btn-secondary text-2xs !py-1 !px-2 flex-shrink-0"
+                    className="btn btn-secondary text-2xs !py-1 !px-2 shrink-0"
                     onClick={handleAISuggestBranches}
                     disabled={aiSuggesting}
                     title={t('branches.aiSuggestTooltip')}
@@ -2009,7 +2409,7 @@ export function BranchesPage() {
                 {t('branches.checkoutAfterCreate')}
               </label>
             </div>
-            <div className="flex justify-end gap-2 mt-4">
+            <div className="flex flex-wrap justify-end gap-2 mt-4">
               <button className="btn btn-secondary" onClick={() => setShowNewDialog(false)}>{t('common.cancel')}</button>
               <button className="btn btn-primary" onClick={handleCreate}>
                 <Check size={13} /> {t('common.create')}
@@ -2040,7 +2440,7 @@ export function BranchesPage() {
       {setTrackedTarget && (
         <SetTrackedDialog
           branchName={setTrackedTarget.branch}
-          remoteBranches={branches.filter((b) => b.remote).map((b) => b.name)}
+          remoteBranches={filterSymbolicHeadNames(branches.filter((b) => b.remote).map((b) => b.name))}
           current={setTrackedTarget.current}
           busy={setTrackedBusy}
           onSubmit={executeSetTracking}
@@ -2054,7 +2454,7 @@ export function BranchesPage() {
           branchName={pushToTarget.branch}
           remotes={Object.keys(remotesMap)}
           defaultRemote={pushToTarget.defaultRemote}
-          remoteBranches={branches.filter((b) => b.remote).map((b) => b.name)}
+          remoteBranches={filterSymbolicHeadNames(branches.filter((b) => b.remote).map((b) => b.name))}
           hasUpstream={pushToTarget.hasUpstream}
           busy={pushToBusy}
           onSubmit={executePushTo}
@@ -2132,7 +2532,7 @@ export function BranchesPage() {
                 {t('stashes.includeUntracked')}
               </label>
             </div>
-            <div className="flex justify-end gap-2 mt-4">
+            <div className="flex flex-wrap justify-end gap-2 mt-4">
               <button className="btn btn-secondary" onClick={() => setShowStashDialog(false)}>{t('common.cancel')}</button>
               <button className="btn btn-primary" onClick={handleStashChanges}>
                 <Download size={13} /> {t('toolbar.stash')}
@@ -2225,7 +2625,7 @@ export function BranchesPage() {
                         compareFiles.map((f, i) => (
                           <div key={`${f.path}-${i}`} className="flex items-center gap-2 px-3 py-1 text-xs border-b border-border-subtle last:border-b-0">
                             <span className={cn(
-                              'badge w-8 text-center flex-shrink-0',
+                              'badge w-8 text-center shrink-0',
                               f.status.startsWith('A') ? 'badge-added' : f.status.startsWith('D') ? 'badge-deleted' : 'badge-modified'
                             )}>{f.status}</span>
                             <span className="font-mono truncate">{f.path}</span>

@@ -1,5 +1,10 @@
 import { ipcMain } from 'electron';
 import * as storage from '../services/storage.js';
+import {
+  addInsecureSslHost,
+  getInsecureSslHosts,
+  removeInsecureSslHost,
+} from '../services/insecureHosts.js';
 
 export function registerSettingsIpc(): void {
   // Settings
@@ -8,6 +13,14 @@ export function registerSettingsIpc(): void {
     storage.setSetting(key, value)
   );
   ipcMain.handle('settings:getAll', () => storage.getAllSettings());
+
+  // Hosts whose TLS certificates are deliberately not verified (the
+  // SslBypassDialog confirm / Settings → Security → SSL/TLS management).
+  // Dedicated channels instead of raw settings:set so the main-process
+  // isInsecureSslHost() cache stays in sync with every mutation.
+  ipcMain.handle('settings:getInsecureSslHosts', () => getInsecureSslHosts());
+  ipcMain.handle('settings:addInsecureSslHost', (_e, host: string) => addInsecureSslHost(host));
+  ipcMain.handle('settings:removeInsecureSslHost', (_e, host: string) => removeInsecureSslHost(host));
 
   // Repository list
   ipcMain.handle('settings:getRepos', () => storage.getRepos());
@@ -35,6 +48,12 @@ export function registerSettingsIpc(): void {
   ipcMain.handle('settings:addTag', (_e, path: string, tag: string) => storage.addTag(path, tag));
   ipcMain.handle('settings:removeTag', (_e, path: string, tag: string) => storage.removeTag(path, tag));
   ipcMain.handle('settings:refreshRepoStats', (_e, path: string) => storage.refreshRepoStats(path));
+  // Refresh metadata (last commit, branch count, commit count, provider) for
+  // every configured repo. Used by the Sidebar's "refresh" button so the
+  // user can force-reload the whole list (previously the button only ran the
+  // remote check — incoming/outgoing — but never recomputed the cached stats,
+  // which made the rows look "stuck" after a push/pull).
+  ipcMain.handle('settings:refreshAllRepoStats', () => storage.refreshAllRepoStats());
 
   // Repository groups (tree in the sidebar)
   ipcMain.handle('settings:getRepoGroups', () => storage.getRepoGroups());
@@ -53,5 +72,20 @@ export function registerSettingsIpc(): void {
   );
   ipcMain.handle('settings:setRepoGroup', (_e, path: string, groupId: string | null) =>
     storage.setRepoGroup(path, groupId)
+  );
+
+  // Folder repository scan (v2.3) — «репозитории из папок должны
+  // добавляться рекурсивно, образуя группы по названию папок».
+  // scanFolderRepos = dry-run (preview list for the confirm dialog);
+  // addFolderRepositories = scan + group tree + repo list, idempotent.
+  ipcMain.handle(
+    'settings:scanFolderRepos',
+    (_e, root: string, opts?: { maxDepth?: number }) =>
+      storage.scanFolderForRepositories(root, opts ?? {})
+  );
+  ipcMain.handle(
+    'settings:addFolderRepositories',
+    (_e, root: string, opts?: { maxDepth?: number }) =>
+      storage.addFolderRepositories(root, opts ?? {})
   );
 }

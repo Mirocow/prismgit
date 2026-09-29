@@ -271,6 +271,9 @@ export function buildAppMenu(getMainWindow: () => BrowserWindow | null): Menu {
         // No accelerator: Ctrl+Shift+P belongs to Push (Repository menu) —
         // a duplicate here made one keystroke trigger both items.
         { label: m('menu.remote.pushTo'), click: () => send('menu:pushTo') },
+        // Real `git push --force` on the current branch (policy-gated in the
+        // service for protected branches).
+        { label: m('menu.remote.forcePush'), click: () => send('menu:forcePush') },
         { label: m('menu.remote.pullOptions'), accelerator: 'CmdOrCtrl+Down', click: () => send('menu:pullOptions') },
         { label: m('menu.remote.fetchAllRemotes'), click: () => send('menu:fetchAll') },
         { label: m('menu.remote.fetchMore'), click: () => send('menu:fetchMore') },
@@ -288,7 +291,9 @@ export function buildAppMenu(getMainWindow: () => BrowserWindow | null): Menu {
             { label: m('menu.remote.subtree.openPage'), click: () => send('menu:navigate', '/subtrees') },
           ],
         },
-        { label: m('menu.remote.managePage'), click: () => send('menu:navigate', '/remotes') },
+        // The standalone Remotes page was merged into Branches (Task 29):
+        // remote groups live on the Branches page, so "manage" opens it.
+        { label: m('menu.remote.managePage'), click: () => send('menu:navigate', '/branches') },
       ],
     },
     {

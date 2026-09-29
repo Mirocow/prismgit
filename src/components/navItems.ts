@@ -1,4 +1,5 @@
-import { GitBranch, GitCommit, GitPullRequest, History, Tag, Package, RotateCcw, FileText, Search, CloudDownload, Filter, Recycle, Sparkles } from './icons';
+import { GitBranch, GitCommit, GitPullRequest, History, Tag, Package, RotateCcw, FileText, Search, Filter, Recycle, Sparkles } from './icons';
+import { t } from '../lib/i18n';
 
 /**
  * Single source of truth for the app navigation.
@@ -21,6 +22,23 @@ import { GitBranch, GitCommit, GitPullRequest, History, Tag, Package, RotateCcw,
  *   - Notes → removed entirely (git notes are obscure; distributed
  *     reviews in /reviews already cover the 'metadata on a commit'
  *     use case with a richer UI).
+ *
+ * Task 29 — REMOVED:
+ *   - Remotes → merged into Branches. The Branches page already had the
+ *     per-remote groups with fetch/configure/rename/remove/properties
+ *     context menus; it now also owns "Fetch All (prune)" and the
+ *     Add-Remote entry point (header button + menu:remoteAdd event).
+ *     A separate Remotes tool duplicated that surface with a second
+ *     mental model — one ref view is enough.
+ *
+ * NOTE: labels and descriptions are translated via the standalone `t()`
+ * function from `../lib/i18n`. They are evaluated on EVERY navItems() call
+ * (per render), so the sidebar / command palette / help banner follow the
+ * active locale immediately — including the async initLocaleFromSettings()
+ * restore at startup. Before this, the labels were frozen at module-load
+ * time and a RU-profile first launch showed an ENGLISH sidebar until a
+ * manual refresh (caught by the counters E2E — aria-label="Changes" while
+ * every page header was already «Изменения»).
  */
 export interface NavItem {
   path: string;
@@ -31,69 +49,129 @@ export interface NavItem {
   description?: string;
 }
 
-export const NAV_ITEMS: NavItem[] = [
-  // === Working Tree ===
-  { path: '/changes', label: 'Changes', icon: GitCommit, group: 'Working Tree',
-    description: 'Staged and unstaged changes. Stage files, write a commit message, and commit. Right-click a file for more actions.' },
-  { path: '/history', label: 'History', icon: History, group: 'Working Tree',
-    description: 'Commit graph across all branches. Filter by author, date, path, or message. Select a commit to see its files and diff. Right-click for tag/branch/cherry-pick.' },
-  { path: '/diff', label: 'Diff', icon: FileText, group: 'Working Tree',
-    description: 'Compare any two refs (commits, branches, tags) or the working tree. Drag the splitter to resize the file list.' },
-  { path: '/search', label: 'Search', icon: Search, group: 'Working Tree',
-    description: 'Search file contents with git grep. Find TODOs, function definitions, or any text across tracked files.' },
-  { path: '/blame', icon: FileText, label: 'Blame', group: 'Working Tree',
-    description: 'Line-by-line attribution: who wrote each line of a file, and in which commit. Click a commit hash to jump to it in History.' },
-
-  // === Workflows ===
-  { path: '/gitflow', label: 'Git-Flow', icon: GitBranch, group: 'Workflows',
-    description: 'Manage the Git-Flow branching model: feature, release, and hotfix branches. Start and finish each flow type.' },
-  { path: '/bisect', label: 'Bisect', icon: Filter, group: 'Workflows',
-    description: 'Binary search to find the commit that introduced a bug. Mark a commit as good or bad, and Git narrows the range.' },
-  { path: '/pulls', label: 'Pull Requests', icon: GitPullRequest, group: 'Workflows',
-    description: 'GitHub pull request integration. Requires a GitHub PAT (Settings → GitHub Integration). View, create, and open PRs.' },
-  { path: '/reviews', label: 'Reviews', icon: GitPullRequest, group: 'Workflows',
-    description: 'Distributed code reviews stored in git notes. Add comments to commits, files, and lines. Push/fetch to sync with teammates.' },
-
-  // === AI ===
-  { path: '/ai-chat', label: 'AI Chat', icon: Sparkles, group: 'AI',
-    description: 'AI Assistant chat — ask about your repository, stage files, generate commit messages, and more. Conversation history is saved per-project.' },
-
-  // === Refs ===
-  { path: '/branches', label: 'Branches', icon: GitBranch, group: 'Refs',
-    description: 'Create, checkout, merge, rename, and delete branches. Drag a branch onto another to merge. Ctrl+click to filter History. Right-click for worktree actions.' },
-  { path: '/tags', label: 'Tags', icon: Tag, group: 'Refs',
-    description: 'Create lightweight or annotated tags. Click a tag to jump to its commit in History.' },
-  { path: '/remotes', label: 'Remotes', icon: CloudDownload, group: 'Refs',
-    description: 'Add, remove, and rename remotes. Edit fetch/push URLs. Fetch from all remotes or preview remote refs.' },
-  { path: '/reflog', label: 'Reflog', icon: RotateCcw, group: 'Refs',
-    description: 'Reference log for HEAD and other refs. Shows every checkout, commit, merge, reset. Cherry-pick or reset to any entry.' },
-  { path: '/recyclable', label: 'Recyclable', icon: Recycle, group: 'Refs',
-    description: 'Unreachable reflog commits eligible for GC (default retention: 90 days). Recover by cherry-pick or branch creation, or expire them.' },
-  { path: '/stashes', label: 'Stashes', icon: GitPullRequest, group: 'Refs',
-    description: 'Saved stashes. Click a stash to view its diff (compared to its parent, not HEAD). Apply, pop, or drop.' },
-  { path: '/submodules', label: 'Submodules', icon: Package, group: 'Refs',
-    description: 'Manage git submodules: init, update, sync. View submodule status and commit hashes.' },
-  { path: '/lfs', label: 'Git LFS', icon: Package, group: 'Refs',
-    description: 'Large File Storage management. Track patterns, pull/push LFS objects, manage file locks, view tracked files with sizes.' },
-];
+const GROUP_WORKING_TREE = () => t('nav.group.workingTree');
+const GROUP_WORKFLOWS = () => t('nav.group.workflows');
+const GROUP_AI = () => t('nav.group.ai');
+const GROUP_REFS = () => t('nav.group.refs');
 
 /**
- * Quick-navigation shortcuts (Ctrl+1..9). Pages not listed here are still
- * reachable via the sidebar or the Command Palette.
+ * Fresh nav model for the CURRENT locale — call inside render (consumers all
+ * subscribe via useI18n(), so a locale change re-renders and re-evaluates).
+ * Do NOT cache the result in a module-level variable: that re-freezes it.
  */
-export const NAV_SHORTCUTS: Record<string, string> = {
+export function navItems(): NavItem[] {
+  return [
+  // === Working Tree ===
+  { path: '/changes', label: t('nav.label.changes'), icon: GitCommit, group: GROUP_WORKING_TREE(),
+    description: t('nav.desc.changes') },
+  { path: '/history', label: t('nav.label.history'), icon: History, group: GROUP_WORKING_TREE(),
+    description: t('nav.desc.history') },
+  { path: '/diff', label: t('nav.label.diff'), icon: FileText, group: GROUP_WORKING_TREE(),
+    description: t('nav.desc.diff') },
+  { path: '/search', label: t('nav.label.search'), icon: Search, group: GROUP_WORKING_TREE(),
+    description: t('nav.desc.search') },
+  { path: '/blame', icon: FileText, label: t('nav.label.blame'), group: GROUP_WORKING_TREE(),
+    description: t('nav.desc.blame') },
+
+  // === Workflows ===
+  { path: '/gitflow', label: t('nav.label.gitflow'), icon: GitBranch, group: GROUP_WORKFLOWS(),
+    description: t('nav.desc.gitflow') },
+  { path: '/bisect', label: t('nav.label.bisect'), icon: Filter, group: GROUP_WORKFLOWS(),
+    description: t('nav.desc.bisect') },
+  { path: '/pulls', label: t('nav.label.pulls'), icon: GitPullRequest, group: GROUP_WORKFLOWS(),
+    description: t('nav.desc.pulls') },
+  { path: '/reviews', label: t('nav.label.reviews'), icon: GitPullRequest, group: GROUP_WORKFLOWS(),
+    description: t('nav.desc.reviews') },
+
+  // === AI ===
+  { path: '/ai-chat', label: t('nav.label.aiChat'), icon: Sparkles, group: GROUP_AI(),
+    description: t('nav.desc.aiChat') },
+
+  // === Refs ===
+  { path: '/branches', label: t('nav.label.branches'), icon: GitBranch, group: GROUP_REFS(),
+    description: t('nav.desc.branches') },
+  { path: '/tags', label: t('nav.label.tags'), icon: Tag, group: GROUP_REFS(),
+    description: t('nav.desc.tags') },
+  { path: '/reflog', label: t('nav.label.reflog'), icon: RotateCcw, group: GROUP_REFS(),
+    description: t('nav.desc.reflog') },
+  { path: '/recyclable', label: t('nav.label.recyclable'), icon: Recycle, group: GROUP_REFS(),
+    description: t('nav.desc.recyclable') },
+  { path: '/stashes', label: t('nav.label.stashes'), icon: GitPullRequest, group: GROUP_REFS(),
+    description: t('nav.desc.stashes') },
+  { path: '/submodules', label: t('nav.label.submodules'), icon: Package, group: GROUP_REFS(),
+    description: t('nav.desc.submodules') },
+  { path: '/lfs', label: t('nav.label.lfs'), icon: Package, group: GROUP_REFS(),
+    description: t('nav.desc.lfs') },
+  ];
+}
+
+/**
+ * Default hotkeys for EVERY tool (user request: «снабди весь левый сайдбар
+ * в списке инструментов горячими клавишами»). Ctrl+1..9 cover the 9 most-used
+ * tools; Alt+1..8 cover the rest. User overrides (settings.navHotkeys) are
+ * merged on top — see effectiveNavHotkeys().
+ */
+export const DEFAULT_NAV_HOTKEYS: Record<string, string> = {
+  // Ctrl+N — daily drivers
   '/changes': 'Ctrl+1',
   '/history': 'Ctrl+2',
   '/diff': 'Ctrl+3',
   '/branches': 'Ctrl+4',
   '/tags': 'Ctrl+5',
   '/stashes': 'Ctrl+6',
-  '/remotes': 'Ctrl+7',
-  '/reflog': 'Ctrl+8',
-  '/search': 'Ctrl+9',
+  '/search': 'Ctrl+7',
+  '/blame': 'Ctrl+8',
+  '/pulls': 'Ctrl+9',
+  // Alt+N — the rest (previously Alt+1..6 duplicated Ctrl+1..6 — wasted)
+  '/gitflow': 'Alt+1',
+  '/bisect': 'Alt+2',
+  '/reviews': 'Alt+3',
+  '/ai-chat': 'Alt+4',
+  '/reflog': 'Alt+5',
+  '/recyclable': 'Alt+6',
+  '/submodules': 'Alt+7',
+  '/lfs': 'Alt+8',
 };
 
-/** Map path → description for pages that have one. */
-export const NAV_DESCRIPTIONS: Record<string, string> = Object.fromEntries(
-  NAV_ITEMS.filter((item) => item.description).map((item) => [item.path, item.description!])
-);
+/** Back-compat alias for the old partial map (Command Palette hints). */
+export const NAV_SHORTCUTS: Record<string, string> = DEFAULT_NAV_HOTKEYS;
+
+/** All assignable combos for the Settings hotkey pickers. */
+export const NAV_HOTKEY_SLOTS: string[] = [
+  ...Array.from({ length: 9 }, (_, i) => `Ctrl+${i + 1}`),
+  ...Array.from({ length: 9 }, (_, i) => `Alt+${i + 1}`),
+];
+
+/** Merge user hotkey overrides (settings.navHotkeys) over the defaults.
+ *  'None' (empty string) unbinds a tool. */
+export function effectiveNavHotkeys(overrides?: Record<string, string>): Record<string, string> {
+  if (!overrides || Object.keys(overrides).length === 0) return DEFAULT_NAV_HOTKEYS;
+  const merged: Record<string, string> = { ...DEFAULT_NAV_HOTKEYS };
+  for (const [path, combo] of Object.entries(overrides)) {
+    if (combo === 'None' || combo === '') delete merged[path];
+    else if (NAV_HOTKEY_SLOTS.includes(combo)) merged[path] = combo;
+  }
+  return merged;
+}
+
+/** Sort nav items by the user's order (settings.navOrder). Paths missing
+ *  from the order keep their default relative order after the listed ones. */
+export function navItemsOrdered(order?: string[]): NavItem[] {
+  const items = navItems();
+  if (!order || order.length === 0) return items;
+  const rank = new Map(order.map((p, i) => [p, i]));
+  return [...items].sort((a, b) => {
+    const ra = rank.has(a.path) ? rank.get(a.path)! : order.length + items.length;
+    const rb = rank.has(b.path) ? rank.get(b.path)! : order.length + items.length;
+    // Preserve default order for unranked items (stable sort in V8).
+    return ra - rb;
+  });
+}
+
+/** Map path → description (current locale) for pages that have one. */
+export function navDescriptions(): Record<string, string> {
+  const items = navItems();
+  return Object.fromEntries(
+    items.filter((item) => item.description).map((item) => [item.path, item.description!])
+  );
+}

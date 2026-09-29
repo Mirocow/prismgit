@@ -1,8 +1,11 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Loader, Check, Settings as SettingsIcon, Search } from './icons';
 import { useEscapeKey } from '../hooks/useEscapeKey';
+import { api } from '../lib/api';
 import { cn } from '../lib/utils';
+import { filterSymbolicHeadNames } from '../lib/branchFilter';
 import { useI18n } from '../lib/i18n';
+import { useSettingsStore } from '../stores/settingsStore';
 import type { RemoteProperties } from '../../electron/types/git-api';
 
 export type ResetMode = 'soft' | 'mixed' | 'hard' | 'keep';
@@ -43,17 +46,17 @@ function DialogShell({ title, subtitle, children, buttons, onClose, width = 440 
         <h3 className="text-base font-medium">{title}</h3>
         {subtitle && <p className="text-xs text-text-tertiary mt-1 mb-3 whitespace-pre-line">{subtitle}</p>}
         <div className={subtitle ? '' : 'mt-3'}>{children}</div>
-        <div className="flex justify-end gap-2 mt-4">{buttons}</div>
+        <div className="flex flex-wrap justify-end gap-2 mt-4">{buttons}</div>
       </div>
     </div>
   );
 }
 
-const RESET_MODES: { mode: ResetMode; label: string; descKey: string }[] = [
-  { mode: 'soft', label: 'Soft', descKey: 'branches.resetSoftDesc' },
-  { mode: 'mixed', label: 'Mixed', descKey: 'branches.resetMixedDesc' },
-  { mode: 'hard', label: 'Hard', descKey: 'branches.resetHardDesc' },
-  { mode: 'keep', label: 'Keep', descKey: 'branches.resetKeepDesc' },
+const RESET_MODES: { mode: ResetMode; labelKey: string; descKey: string }[] = [
+  { mode: 'soft', labelKey: 'branches.resetModeSoft', descKey: 'branches.resetSoftDesc' },
+  { mode: 'mixed', labelKey: 'branches.resetModeMixed', descKey: 'branches.resetMixedDesc' },
+  { mode: 'hard', labelKey: 'branches.resetModeHard', descKey: 'branches.resetHardDesc' },
+  { mode: 'keep', labelKey: 'branches.resetModeKeep', descKey: 'branches.resetKeepDesc' },
 ];
 
 export function ResetDialog({
@@ -103,7 +106,7 @@ export function ResetDialog({
     >
       {advanced && (
         <div className="flex items-center gap-2 mb-3">
-          <label className="text-xs text-text-tertiary flex-shrink-0">{t('branches.resetToLabel')}</label>
+          <label className="text-xs text-text-tertiary shrink-0">{t('branches.resetToLabel')}</label>
           <input
             type="text"
             className="flex-1 text-sm font-mono"
@@ -165,7 +168,10 @@ export function SetTrackedDialog({
   useEscapeKey(true, onClose);
 
   const filtered = useMemo(
-    () => remoteBranches.filter((b) => b.toLowerCase().includes(filter.toLowerCase())),
+    // Filter out symbolic HEAD refs like "origin/HEAD" — they point to
+    // the remote's default branch and are not real branches.
+    () => filterSymbolicHeadNames(remoteBranches)
+      .filter((b) => b.toLowerCase().includes(filter.toLowerCase())),
     [remoteBranches, filter]
   );
 
@@ -243,7 +249,7 @@ const BRANCH_NAME_INVALID = /[~^:?*[\]\\@\s]|\.\.|^-$|^--/;
  * and gets to decide WHERE (remote) and UNDER WHICH NAME (target branch) the
  * branch lands. Pushing `feature` to `main`-named target, publishing a local
  * branch to a second remote, or renaming on the remote side are all the same
- * refspec: `git push [-u] [--force-with-lease] <remote> <local>:<target>`.
+ * refspec: `git push [-u] [--force | --force-with-lease] <remote> <local>:<target>`.
  */
 export function PushToDialog({
   branchName,
@@ -266,15 +272,41 @@ export function PushToDialog({
   /** Whether the branch already has an upstream (→ -u unchecked by default). */
   hasUpstream?: boolean;
   busy?: boolean;
-  onSubmit: (opts: { remote: string; targetBranch: string; setUpstream: boolean; force: boolean }) => void;
+  onSubmit: (opts: { remote: string; targetBranch: string; setUpstream: boolean; force: boolean; forceMode: 'lease' | 'force' }) => void;
   onClose: () => void;
 }) {
   const [remote, setRemote] = useState(defaultRemote || remotes[0] || 'origin');
   const [target, setTarget] = useState(branchName);
   const [setUpstream, setSetUpstream] = useState(!hasUpstream);
   const [force, setForce] = useState(false);
+  // Force flag: real --force by default; lease one click away. Mirrors the
+  // global forcePushMode setting so all push surfaces agree.
+  const [forceMode, setForceMode] = useState<'lease' | 'force'>('force');
   const { t } = useI18n();
   useEscapeKey(true, onClose);
+  // 0.1 — Force-push policy gate: disable the force checkbox when the policy
+  // denies force-push for this branch (activates the dead isForcePushAllowed IPC).
+  const forcePushPolicy = useSettingsStore((s) => s.settings.forcePushPolicy);
+  const protectedBranches = useSettingsStore((s) => s.settings.protectedBranches);
+  const forceModeSetting = useSettingsStore((s) => s.settings.forcePushMode);
+  useEffect(() => {
+    setForceMode(forceModeSetting === 'lease' ? 'lease' : 'force');
+  }, [forceModeSetting]);
+  const [forceVerdict, setForceVerdict] = useState<{ allowed: boolean; reason: string } | null>(null);
+  useEffect(() => {
+    if (typeof api.git?.isForcePushAllowed !== 'function') { setForceVerdict(null); return; }
+    let cancelled = false;
+    api.git
+      .isForcePushAllowed(branchName, forcePushPolicy ?? 'feature-only', protectedBranches)
+      .then((v) => { if (!cancelled) setForceVerdict(v); })
+      .catch(() => { if (!cancelled) setForceVerdict(null); });
+    return () => { cancelled = true; };
+  }, [branchName, forcePushPolicy, protectedBranches]);
+  const forceDenied = forceVerdict != null && !forceVerdict.allowed;
+  // Policy flipped to "denied" while the checkbox was already checked → uncheck.
+  useEffect(() => {
+    if (forceDenied && force) setForce(false);
+  }, [forceDenied, force]);
 
   const trimmed = target.trim();
   const targetError = !trimmed
@@ -285,8 +317,10 @@ export function PushToDialog({
 
   // Suggest existing branches that live on the SELECTED remote
   // ("origin/main" → "main") so the user can pick instead of typing.
+  // Exclude symbolic HEAD refs like "origin/HEAD" — they are pointers
+  // to the default branch, not real branches.
   const suggestions = useMemo(
-    () => remoteBranches
+    () => filterSymbolicHeadNames(remoteBranches)
       .filter((b) => b.startsWith(`${remote}/`))
       .map((b) => b.slice(remote.length + 1)),
     [remoteBranches, remote]
@@ -298,7 +332,7 @@ export function PushToDialog({
 
   const submit = () => {
     if (!canSubmit) return;
-    onSubmit({ remote: remote.trim(), targetBranch: trimmed, setUpstream, force });
+    onSubmit({ remote: remote.trim(), targetBranch: trimmed, setUpstream, force, forceMode });
   };
 
   return (
@@ -317,7 +351,7 @@ export function PushToDialog({
         </>
       }
     >
-      <div className="space-y-3">
+      <div className="space-y-4">
         <div>
           <label htmlFor="push-to-remote" className="text-xs text-text-tertiary block mb-1">{t('branches.remoteRepoLabel')}</label>
           {remotes.length > 0 ? (
@@ -374,13 +408,41 @@ export function PushToDialog({
             <input type="checkbox" checked={setUpstream} onChange={(e) => setSetUpstream(e.target.checked)} />
             {t('branches.setUpstreamCheckbox')}
           </label>
-          <label className="flex items-center gap-2 text-sm cursor-pointer">
-            <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
+          <label
+            className={cn('flex items-center gap-2 text-sm', forceDenied ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer')}
+            title={forceDenied ? forceVerdict!.reason : undefined}
+          >
+            <input
+              type="checkbox"
+              checked={force}
+              disabled={forceDenied}
+              onChange={(e) => setForce(e.target.checked)}
+            />
             {t('branches.forcePushCheckbox')}
+            {forceDenied && <span className="text-2xs text-text-tertiary">— {forceVerdict!.reason}</span>}
           </label>
+          {force && (
+            <div className="pl-6">
+              <label className="text-2xs text-text-tertiary block mb-1">{t('shell.forceMode')}</label>
+              <select
+                data-testid="push-to-force-mode"
+                className="w-full text-sm font-mono"
+                value={forceMode}
+                onChange={(e) => {
+                  const v = e.target.value as 'lease' | 'force';
+                  setForceMode(v);
+                  // Persist globally — every push surface follows this choice.
+                  useSettingsStore.getState().setSetting('forcePushMode', v).catch(() => {});
+                }}
+              >
+                <option value="force">--force</option>
+                <option value="lease">--force-with-lease</option>
+              </select>
+            </div>
+          )}
         </div>
         <div data-testid="push-to-cmd" className="text-2xs text-text-tertiary font-mono bg-bg-hover/60 rounded px-2 py-1.5 break-all">
-          git push {setUpstream ? '-u ' : ''}{force ? '--force-with-lease ' : ''}{remote} {refspec}
+          git push {setUpstream ? '-u ' : ''}{force ? (forceMode === 'lease' ? '--force-with-lease ' : '--force ') : ''}{remote} {refspec}
         </div>
       </div>
     </DialogShell>
@@ -436,7 +498,7 @@ export function AddTagDialog({
         </>
       }
     >
-      <div className="space-y-3">
+      <div className="space-y-4">
         <div>
           <label className="text-xs text-text-tertiary block mb-1">{t('tags.nameLabel')}</label>
           <input
@@ -584,7 +646,7 @@ export function SetDepthDialog({
       }
     >
       <div className="flex items-center gap-2">
-        <label className="text-xs text-text-tertiary flex-shrink-0">{t('remotes.depthLabel')}</label>
+        <label className="text-xs text-text-tertiary shrink-0">{t('remotes.depthLabel')}</label>
         <input
           type="number"
           min={0}
@@ -637,7 +699,7 @@ export function FetchMoreDialog({
       }
     >
       <div className="flex items-center gap-2">
-        <label className="text-xs text-text-tertiary flex-shrink-0">{t('remotes.commitsLabel')}</label>
+        <label className="text-xs text-text-tertiary shrink-0">{t('remotes.commitsLabel')}</label>
         <input
           type="number"
           min={1}

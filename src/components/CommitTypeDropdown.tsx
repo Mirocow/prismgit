@@ -82,7 +82,7 @@ export function CommitTypeDropdown({ onPickType, disabled }: CommitTypeDropdownP
         <ul
           role="listbox"
           aria-label={t('changes.commitType')}
-          className="absolute bottom-full left-0 mb-1 bg-bg-elevated border border-border-default rounded shadow-lg z-50 min-w-56 max-h-72 overflow-y-auto py-1"
+          className="absolute bottom-full left-0 mb-1 bg-zone-popover border border-border-default rounded shadow-lg z-50 min-w-56 max-h-72 overflow-y-auto py-1"
         >
           {COMMIT_TYPES.map((type) => {
             const labelKey = `changes.commitType${

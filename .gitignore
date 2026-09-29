@@ -18,6 +18,13 @@ coverage/
 *.swp
 *.swo
 *~
+# VS Code "Bookmarks" extension artifact (per-developer code bookmarks —
+# not project state, never share it).
+bookmarks.json
+
+# Local-only dev screenshots / download artifacts (per-developer session
+# output — should never be committed).
+download/
 
 # OS
 .DS_Store
@@ -54,3 +61,10 @@ tests/e2e/screenshots/
 # Tauri build artifacts
 src-tauri/target/
 src-tauri/gen/
+# Generated perf-profiling artifacts (repo-switch freeze triage)
+scripts/repo-switch-results.json
+scripts/perf-results.json
+# Perf-suite run artifacts (baseline IS tracked — the ratchet):
+scripts/perf-cdp-results.json
+scripts/perf-readiness-report.json
+scripts/perf-repos-manifest.json

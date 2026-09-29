@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react';
 import { ChevronUp, ChevronDown, ChevronsUpDown } from './icons';
 import { cn } from '../lib/utils';
+import { t as i18nT } from '../lib/i18n';
 
 /**
  * Resizable + sortable DataGrid.
@@ -191,6 +192,39 @@ export function DataGrid<R>({
     return copy;
   }, [rows, sort, columns]);
 
+  // --- Progressive row rendering (A8 virtualization) ---
+  // Renders the first ROW_BATCH rows and appends batches as a sentinel row
+  // scrolls into view (same pattern as LazyFileList). Rows may have
+  // variable heights (renderRow wrappers, wrapped cell text), so exact
+  // pixel windowing is fragile here — chunked rendering is height-agnostic
+  // and keeps every row reachable via plain scrolling. RecyclablePage can
+  // easily hold thousands of unreachable-object rows; rendering them all
+  // up-front froze the UI for seconds.
+  const ROW_BATCH = 100;
+  const [visibleCount, setVisibleCount] = useState(() => Math.min(ROW_BATCH, sortedRows.length));
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
+  // Reset the window when the data or the sort order changes — the user
+  // is looking at a NEW list, so go back to the top batch. `rows` is the
+  // parent's prop (memoized by page stores); `sort` reorders.
+  useEffect(() => {
+    setVisibleCount(Math.min(ROW_BATCH, rows.length));
+  }, [rows, sort]);
+
+  const loadMore = useCallback(() => {
+    setVisibleCount(prev => Math.min(prev + ROW_BATCH, sortedRows.length));
+  }, [sortedRows.length]);
+
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries[0]?.isIntersecting) loadMore();
+    }, { rootMargin: '300px' });
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [loadMore]);
+
   // --- Render ---
   return (
     <div className={cn('flex flex-col flex-1 overflow-hidden', className)}>
@@ -222,7 +256,7 @@ export function DataGrid<R>({
             >
               <span className="truncate">{col.header}</span>
               {isSortable && (
-                <span className="ml-1 flex-shrink-0 opacity-60">
+                <span className="ml-1 shrink-0 opacity-60">
                   {!isSorted ? <ChevronsUpDown size={10} />
                     : sort?.direction === 'asc' ? <ChevronUp size={10} />
                     : <ChevronDown size={10} />}
@@ -242,9 +276,10 @@ export function DataGrid<R>({
       {/* Body */}
       <div className="flex-1 overflow-y-auto">
         {sortedRows.length === 0 ? (
-          emptyState ?? <div className="p-4 text-center text-text-tertiary text-xs">No rows</div>
+          emptyState ?? <div className="p-4 text-center text-text-tertiary text-xs">{i18nT('common.noRows')}</div>
         ) : (
-          sortedRows.map((row, idx) => {
+          <>
+            {sortedRows.slice(0, visibleCount).map((row, idx) => {
             const cells = (
               <>
                 {columns.map(col => (
@@ -279,7 +314,17 @@ export function DataGrid<R>({
                 {cells}
               </div>
             );
-          })
+          })}
+            {visibleCount < sortedRows.length && (
+              <div
+                ref={sentinelRef}
+                className="px-2 py-1 text-2xs text-text-tertiary border-b border-border-subtle"
+                aria-hidden={true}
+              >
+                {visibleCount} / {sortedRows.length}
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

@@ -1,18 +1,17 @@
-import { useRepositoryStore } from '../stores/repositoryStore';
+import { memo, useCallback, useEffect, useState } from 'react';
+import { api } from '../lib/api';
+import { buildHashMenu, runHashMenuAction } from '../lib/commitMenu';
+import { useI18n } from '../lib/i18n';
+import { useContextMenu } from '../lib/useContextMenu';
+import { cn } from '../lib/utils';
 import { useGitStore } from '../stores/gitStore';
+import { useOperationLogStore } from '../stores/operationLogStore';
+import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useSettingsStore } from '../stores/settingsStore';
-import { useToastStore, useToastActions } from '../stores/toastStore';
-import { useOperationLogStore } from '../stores/operationLogStore';
-import { api } from '../lib/api';
-import { cn } from '../lib/utils';
-import { memo, useEffect, useState, useCallback } from 'react';
-import { ArrowUp, ArrowDown, Loader, ChevronUp, ChevronDown } from './icons';
+import { useToastActions } from '../stores/toastStore';
 import { FooterCounters } from './FooterCounters';
-import { useContextMenu } from '../lib/useContextMenu';
-import { buildHashMenu, runHashMenuAction } from '../lib/commitMenu';
-import { describePushResult } from '../lib/pushResult';
-import { useI18n } from '../lib/i18n';
+import { ArrowDown, ArrowUp, Loader, PanelBottomClose, PanelBottomOpen, Pause, Play } from './icons';
 
 /**
  * Clickable commit hash — clicking jumps to History and focuses that commit.
@@ -85,6 +84,8 @@ export function StatusBar({
   onToggleCommandLog?: () => void;
 }) {
   const currentRepo = useRepositoryStore((s) => s.currentRepo);
+  // v3.9 — background remote-poll pause state (the Pause/Play toggle).
+  const pollingPaused = useRepositoryStore((s) => s.remotePollingPaused);
   const status = useGitStore((s) => s.status);
   const lastRefresh = useGitStore((s) => s.lastRefresh);
   // Global selected commit — visible from anywhere in the app
@@ -116,7 +117,7 @@ export function StatusBar({
 
   if (!currentRepo) {
     return (
-      <footer className="h-7 bg-bg-tertiary border-t border-border-default flex items-center justify-between px-3 text-2xs text-text-tertiary flex-shrink-0">
+      <footer className="h-7 bg-zone-statusbar border-t border-border-default flex items-center justify-between px-3 text-2xs text-text-tertiary shrink-0">
         <span className="flex items-center gap-1.5">
           <span className="w-1.5 h-1.5 rounded-full bg-status-success inline-block" />
           {t('shell.ready')}
@@ -135,7 +136,7 @@ export function StatusBar({
   const staged = status?.staged.length ?? 0;
 
   return (
-    <footer className="h-7 bg-bg-tertiary border-t border-border-default flex items-center justify-between px-3 text-2xs text-text-tertiary flex-shrink-0">
+    <footer className="h-7 bg-zone-statusbar border-t border-border-default flex items-center justify-between px-3 text-2xs text-text-tertiary shrink-0">
       <div className="flex items-center gap-3">
         {/* HEAD indicator — always visible, shows where you are.
             Bright accent background + ">" makes the current branch
@@ -156,19 +157,19 @@ export function StatusBar({
           const m = status?.isMerging, r = status?.isRebasing, c = status?.isCherryPicking, v = status?.isReverting, b = status?.isBisecting;
           if (!m && !r && !c && !v && !b) return null;
           let label = '';
-          if (m) label = 'Merging';
-          else if (r) label = 'Rebasing';
-          else if (c) label = 'Cherry-picking';
-          else if (v) label = 'Reverting';
-          else if (b) label = 'Bisecting';
+          if (m) label = t('banner.mergingLabel');
+          else if (r) label = t('banner.rebasingLabel');
+          else if (c) label = t('banner.cherryPickingLabel');
+          else if (v) label = t('banner.revertingStatusBarLabel');
+          else if (b) label = t('banner.bisectingLabel');
           return (
             <a
               href="#/changes"
               className="flex items-center gap-1.5 px-1.5 py-0.5 rounded bg-status-warning/15 border border-status-warning/50 text-status-warning font-medium hover:bg-status-warning/25 transition-colors"
-              title={`Working tree is in ${label.toLowerCase()} state. Click to open Changes and Continue / Skip / Abort.`}
+              title={t('banner.stateTooltip').replace('{label}', label.toLowerCase())}
             >
               <span className="w-1.5 h-1.5 rounded-full bg-status-warning inline-block animate-pulse" />
-              {label} in progress
+              {t('banner.stateInProgress').replace('{label}', label)}
             </a>
           );
         })()}
@@ -227,7 +228,7 @@ export function StatusBar({
         {vis('aheadBehind') && status?.ahead ? (
           <button
             className="text-status-added flex items-center gap-0.5 font-medium hover:bg-bg-hover rounded px-1 py-0.5 transition-colors cursor-pointer"
-            onClick={() => {
+            /*onClick={() => {
               if (!currentRepo) return;
               useGitStore.getState().push(currentRepo.path)
                 .then((res) => {
@@ -237,7 +238,7 @@ export function StatusBar({
                   else toast.success(result.title, result.detail);
                 })
                 .catch((e) => toast.error(t('shell.pushFailed'), String(e)));
-            }}
+            }}*/
             title={t('shell.aheadTooltip', { count: status.ahead })}
           >
             <ArrowUp size={9} />{status.ahead}
@@ -246,12 +247,12 @@ export function StatusBar({
         {vis('aheadBehind') && status?.behind ? (
           <button
             className="text-status-modified flex items-center gap-0.5 font-medium hover:bg-bg-hover rounded px-1 py-0.5 transition-colors cursor-pointer"
-            onClick={() => {
+            /*onClick={() => {
               if (!currentRepo) return;
               useGitStore.getState().pull(currentRepo.path)
                 .then(() => toast.success(t('status.pulledSuccessfully')))
                 .catch((e) => toast.error(t('shell.pullFailed'), String(e)));
-            }}
+            }}*/
             title={t('shell.behindTooltip', { count: status.behind })}
           >
             <ArrowDown size={9} />{status.behind}
@@ -260,11 +261,26 @@ export function StatusBar({
         {vis('updatedAt') && lastRefresh > 0 && (
           <button
             className="text-text-tertiary hover:text-text-primary transition-colors cursor-pointer"
-            onClick={() => currentRepo && useGitStore.getState().refreshStatus(currentRepo.path)}
+            /*onClick={() => currentRepo && useGitStore.getState().refreshStatus(currentRepo.path)}*/
             title={t('shell.refreshStatusTooltip')}
           >
             {t('shell.updatedAt', { time: new Date(lastRefresh).toLocaleTimeString() })}
           </button>
+        )}
+        {/* v3.9 — background-fetch pause toggle («нет возможности остановить
+            постоянный фетч»). One click stops the periodic remote poll until
+            resumed — the sidebar spinner turns into a Play button too. */}
+        {vis('outputToggle') && (
+        <button
+          className={cn('flex items-center gap-1 transition-colors cursor-pointer px-1',
+            pollingPaused ? 'text-accent' : 'text-text-tertiary hover:text-text-primary')}
+          onClick={() => useRepositoryStore.getState().setRemotePollingPaused(!pollingPaused)}
+          title={pollingPaused ? t('shell.resumeRemotePolling') : t('shell.pauseRemotePolling')}
+          data-testid="polling-pause-toggle"
+        >
+          {pollingPaused ? <Play size={10} /> : <Pause size={10} />}
+          <span className="text-2xs">{t('shell.remotePollingLabel')}</span>
+        </button>
         )}
         {/* Command Log toggle button */}
         {vis('outputToggle') && (
@@ -273,7 +289,7 @@ export function StatusBar({
           onClick={() => onToggleCommandLog && onToggleCommandLog()}
           title={t('shell.toggleOutputTooltip')}
         >
-          {showCommandLog ? <ChevronDown size={10} /> : <ChevronUp size={10} />}
+          {showCommandLog ? <PanelBottomClose size={10} /> : <PanelBottomOpen size={10} />}
           <span className="text-2xs">{t('shell.outputPanel')}</span>
         </button>
         )}

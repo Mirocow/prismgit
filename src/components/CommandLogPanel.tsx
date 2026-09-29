@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useRef, memo } from 'react';
 import { useCommandLogStore } from '../stores/commandLogStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { api, type CommandLogEntry } from '../lib/api';
-import { Check, X, ChevronDown, ChevronRight, Trash, Loader, Copy, Terminal, Search } from './icons';
+import { Check, X, ChevronDown, ChevronRight, Trash, Loader, Copy, Terminal, Search, PanelBottomClose } from './icons';
 import { cn } from '../lib/utils';
 import { useLazyList } from '../lib/useLazyList';
 import { useI18n } from '../lib/i18n';
@@ -19,53 +19,218 @@ function formatDuration(ms: number): string {
   return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
 }
 
+/**
+ * User-facing commands — operations that mutate the repository or perform
+ * a user-visible action (push, pull, commit, checkout, etc.).
+ *
+ * NOTE: Commands with subcommands (stash, reflog, lfs, notes, submodule,
+ * worktree, remote, bisect) are NOT in this set — they're handled explicitly
+ * in isUserCommand() below because their subcommands split between user and
+ * system (e.g. 'git stash push' is user, 'git stash list' is system).
+ */
 const USER_COMMANDS = new Set([
   'add', 'commit', 'push', 'pull', 'fetch', 'merge', 'rebase', 'checkout',
   'cherry-pick', 'revert', 'reset', 'restore', 'stash', 'tag', 'clone', 'init',
-  'rm', 'mv', 'clean', 'reflog', 'bisect', 'filter-branch', 'submodule',
-  'worktree', 'rebase--interactive', 'notes', 'subtree', 'lfs',
+  'rm', 'mv', 'clean', 'filter-branch',
   'apply', 'am', 'format-patch', 'send-pack',
-  // 'branch' is listed because 'git branch <name>' / 'git branch -d' are
-  // user-initiated. But 'git branch' (no args) / 'git branch -a' are
-  // automatic (background listing) — filtered by the 'branch' entry
-  // having no positional arg after the flags.
+  'branch',  // 'git branch' (no args) is filtered below — but 'git branch <name>' / '-d' / '-m' are user
+  'subtree',  // rare — treated as user
+  'rebase--interactive',  // alias for interactive rebase — user
 ]);
-// Commands that are ALWAYS automatic (background polling, never user-initiated)
+
+/**
+ * Multi-word subcommands that look like user commands but are actually
+ * automatic (background data-collection reads).
+ *
+ * Format: 'cmd sub' where cmd is positional[0] and sub is positional[1].
+ * These override the USER_COMMANDS set so e.g. 'git stash list' is hidden
+ * even though 'stash' alone is in USER_COMMANDS.
+ */
+const ALWAYS_SYSTEM_MULTI = new Set<string>([
+  'stash list',
+  'stash show',          // 'git stash show' = read-only peek
+  'reflog show',         // 'git reflog show' = background reflog polling
+  'lfs ls-files',        // 'git lfs ls-files' = read-only listing
+  'lfs status',          // 'git lfs status' = read-only status
+  'notes list',          // 'git notes list' = read-only
+  'submodule status',    // 'git submodule status' = read-only
+  'submodule summary',   // 'git submodule summary' = read-only
+  'worktree list',       // 'git worktree list' = read-only
+  'remote -v',           // 'git remote -v' = read-only (handled below via flag check)
+  'remote show',         // 'git remote show <name>' = read-only
+  'branch --show-current',  // synthetic — handled via the no-positional rule
+]);
+
+/**
+ * Single-word commands that are ALWAYS automatic (background polling, never user-initiated).
+ *
+ * 'config' is listed here because the vast majority of config commands are
+ * reads (git config --get). The rare user-initiated write (git config --global
+ * user.name "Foo") is acceptable to hide — the user can toggle "System" on
+ * if they want to see it.
+ */
 const ALWAYS_SYSTEM = new Set([
   'status', 'log', 'for-each-ref', 'rev-parse', 'rev-list', 'ls-files',
   'diff-tree', 'diff', 'show', 'ls-remote', 'symbolic-ref',
-  'stash list', 'describe', 'shortlog', 'name-rev', 'merge-base',
-  'cat-file', 'fsck', 'count-objects', 'reflog show',
-  // 'config' is system when it's a read (git config --get), but user
-  // when it's a write (git config --add). We can't tell the difference
-  // here, so we treat ALL config commands as system — the user rarely
-  // needs to see "git config --get user.name" in the output panel.
+  'stash',  // 'git stash' alone is rare — usually followed by push/pop/etc.
+  'describe', 'shortlog', 'name-rev', 'merge-base',
+  'cat-file', 'fsck', 'count-objects',
+  'reflog',  // 'git reflog' alone (no subcommand) = 'git reflog show' = automatic
+  'remote',  // 'git remote' / 'git remote -v' = read-only listing
   'config',
+  'lfs',     // 'git lfs' alone is unusual; most subcommands are read-only
+  'notes',   // 'git notes' alone is unusual
+  'submodule',  // 'git submodule' alone = read-only listing
+  'worktree',   // 'git worktree' alone = read-only listing
+  'help', '-help', '--help', '--version',
 ]);
 
-function isUserCommand(args: string[]): boolean {
-  // Skip flags and -C <path> prefixes to find the actual subcommand
-  const positional = args.filter(a => !a.startsWith('-') && !a.startsWith('core.') && a !== '-C');
-  // Skip the repo path that follows -C
+/**
+ * Decide whether a captured git command line was user-initiated (mutating /
+ * explicit action) or automatic (background polling, listing, read-only query).
+ *
+ * The Output panel uses this to filter: by default only user commands are
+ * shown; the user can toggle "System" to see all.
+ *
+ * Examples:
+ *   ['push', 'origin', 'main']              → true   (user)
+ *   ['status']                              → false  (system — ALWAYS_SYSTEM)
+ *   ['stash', 'list']                       → false  (system — ALWAYS_SYSTEM_MULTI 'stash list')
+ *   ['stash', 'push', '-u']                 → true   (user)
+ *   ['branch']                              → false  (system — listing)
+ *   ['branch', 'new-branch']                → true   (user — creating a branch)
+ *   ['branch', '-d', 'old']                 → true   (user — deleting a branch)
+ *   ['branch', '-a']                        → false  (system — listing all)
+ *   ['config', '--global', 'user.name', X] → false  (system — config writes are rare, hidden)
+ *   ['reflog', 'show']                      → false  (system — ALWAYS_SYSTEM_MULTI)
+ *   ['lfs', 'pull']                         → true   (user)
+ *   ['lfs', 'ls-files']                     → false  (system — ALWAYS_SYSTEM_MULTI)
+ */
+export function isUserCommand(args: string[]): boolean {
+  if (!args || args.length === 0) return false;
+  // Skip flags and "core."-prefixed keys (config values like 'core.editor').
+  // NOTE: We DON'T filter the path after -C because simple-git / spawnGitCapture
+  // never pass -C <path> — they set `cwd` on the spawn() options instead.
+  // But just to be safe, if a -C IS present we skip the following token too.
+  const positional: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '-C' || a.startsWith('--git-dir') || a.startsWith('--work-tree')) {
+      i++;  // skip the path argument that follows
+      continue;
+    }
+    if (a.startsWith('-')) continue;            // flag
+    if (a.startsWith('core.')) continue;        // config key (rare, but defensive)
+    positional.push(a);
+  }
   const cmd = positional[0];
   if (!cmd) return false;
-  // 'git branch' with no name argument = automatic listing, not user action
+
+  // Synthetic 'api' entries — logged by github.ts / gitlab.ts for HTTP
+  // API calls (getMergeRequest, listMRChanges, etc.). These are ALWAYS
+  // user-initiated (the user opened a MR, clicked approve, etc.) — they
+  // should appear in the Output panel even when the 'System' filter is off.
+  // args shape: ['api', 'github'|'gitlab', 'GET'|'POST'|..., '/path']
+  if (cmd === 'api') return true;
+
+  // Multi-word subcommand check (e.g. 'stash list', 'reflog show', 'lfs ls-files').
+  // Two-word commands in ALWAYS_SYSTEM_MULTI override USER_COMMANDS.
+  const sub = positional[1];
+  if (sub) {
+    const twoWord = `${cmd} ${sub}`;
+    if (ALWAYS_SYSTEM_MULTI.has(twoWord)) return false;
+  }
+
+  // 'git branch' (no positional arg) = automatic listing — but
+  // 'git branch <name>' or 'git branch -d <name>' (with a positional after 'branch')
+  // is user-initiated. The -d flag is filtered out, so positional[1] is the
+  // branch name being deleted/created/renamed.
   if (cmd === 'branch' && positional.length === 1) return false;
-  // 'git stash list' = automatic, but 'git stash push' / 'git stash pop' = user
-  if (cmd === 'stash' && positional[1] === 'list') return false;
-  // Always-system commands (read-only queries triggered by background polling)
+
+  // 'git stash' alone (no subcommand) — usually 'git stash push' (default) is
+  // user-initiated, but in our codebase we always pass an explicit subcommand.
+  // Treat 'git stash' alone as system (defensive).
+  if (cmd === 'stash' && positional.length === 1) return false;
+
+  // 'git stash push' / 'pop' / 'apply' / 'drop' / 'branch' / 'clear' / 'create' / 'store' = user.
+  // 'git stash list' / 'git stash show' = system (handled by ALWAYS_SYSTEM_MULTI above).
+  if (cmd === 'stash') {
+    // After ALWAYS_SYSTEM_MULTI check above, 'stash list' and 'stash show' are
+    // already filtered. The remaining subcommands are all user-initiated.
+    return true;
+  }
+
+  // 'git remote' alone or 'git remote -v' = read-only listing (system).
+  // 'git remote add' / 'git remote remove' / 'git remote set-url' = user (mutating).
+  if (cmd === 'remote') {
+    if (!sub) return false;          // 'git remote' = list
+    if (sub === 'show' || sub === 'get-url') return false;
+    // 'add' / 'remove' / 'rename' / 'set-url' / 'set-head' / 'prune' are user
+    return true;
+  }
+
+  // 'git lfs' alone = read-only; subcommands like 'pull'/'push'/'fetch'/'install' are user
+  if (cmd === 'lfs') {
+    if (!sub) return false;
+    // Read-only LFS subcommands
+    if (sub === 'ls-files' || sub === 'status' || sub === 'log' || sub === 'pointer') return false;
+    return true;  // 'pull', 'push', 'fetch', 'install', 'track', 'untrack', 'prune' — user
+  }
+
+  // 'git submodule' alone = read-only listing (system).
+  // 'git submodule add' / 'git submodule update' / 'init' / 'deinit' / 'sync' = user.
+  if (cmd === 'submodule') {
+    if (!sub) return false;
+    if (sub === 'status' || sub === 'summary') return false;
+    return true;
+  }
+
+  // 'git worktree' alone = read-only listing (system).
+  // 'git worktree add' / 'remove' / 'move' / 'prune' = user.
+  if (cmd === 'worktree') {
+    if (!sub) return false;
+    if (sub === 'list') return false;
+    return true;
+  }
+
+  // 'git notes' alone = read-only (system).
+  // 'git notes add' / 'git notes remove' / 'git notes copy' = user.
+  if (cmd === 'notes') {
+    if (!sub) return false;
+    if (sub === 'list' || sub === 'show') return false;
+    return true;
+  }
+
+  // 'git reflog' alone (no subcommand) = 'git reflog show' = read-only (system).
+  // 'git reflog delete' / 'git reflog expire' = user (mutating).
+  if (cmd === 'reflog') {
+    if (!sub) return false;
+    if (sub === 'show' || sub === 'list') return false;
+    return true;  // 'delete', 'expire' — user
+  }
+
+  // 'git bisect' alone is invalid; subcommands:
+  //   'start' / 'bad' / 'good' / 'skip' / 'reset' / 'log' = user
+  //   'visualize' / 'view' / 'run' = user
+  // No always-system bisect subcommands → all bisect = user.
+  if (cmd === 'bisect') {
+    return positional.length > 1;  // 'git bisect' alone is invalid anyway
+  }
+
+  // Always-system commands (read-only queries triggered by background polling).
   if (ALWAYS_SYSTEM.has(cmd)) return false;
+
   return USER_COMMANDS.has(cmd);
 }
 
 function CommandStatusDot({ entry }: { entry: CommandLogEntry }) {
   const failed = entry.exitCode !== 0;
   return failed ? (
-    <span className="flex-shrink-0 w-3 h-3 rounded-full bg-status-deleted/25 flex items-center justify-center">
+    <span className="shrink-0 w-3 h-3 rounded-full bg-status-deleted/25 flex items-center justify-center">
       <X size={8} className="text-status-deleted" />
     </span>
   ) : (
-    <span className="flex-shrink-0 w-3 h-3 rounded-full bg-status-added/20 flex items-center justify-center">
+    <span className="shrink-0 w-3 h-3 rounded-full bg-status-added/20 flex items-center justify-center">
       <Check size={8} className="text-status-added" />
     </span>
   );
@@ -74,7 +239,14 @@ function CommandStatusDot({ entry }: { entry: CommandLogEntry }) {
 const CommandEntry = memo(function CommandEntry({ entry }: { entry: CommandLogEntry }) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
-  const cmdline = `git ${entry.args.join(' ')}`;
+  // Format the command line for display. Synthetic 'api' entries
+  // (GitHub/GitLab HTTP calls) get a special format:
+  //   api gitlab GET /projects/12/merge_requests/5
+  // instead of the misleading 'git api gitlab GET ...'.
+  const isApiCall = entry.args[0] === 'api';
+  const cmdline = isApiCall
+    ? entry.args.join(' ')  // 'api gitlab GET /path'
+    : `git ${entry.args.join(' ')}`;
   const failed = entry.exitCode !== 0;
   const hasDetails = Boolean(entry.stdout.trim() || entry.stderr.trim() || entry.repo);
   const isUser = isUserCommand(entry.args);
@@ -86,17 +258,17 @@ const CommandEntry = memo(function CommandEntry({ entry }: { entry: CommandLogEn
         onClick={() => setExpanded(!expanded)}
         title={cmdline}
       >
-        <span className="w-3 flex-shrink-0 text-text-tertiary">
+        <span className="w-3 shrink-0 text-text-tertiary">
           {hasDetails ? (
             expanded ? <ChevronDown size={10} /> : <ChevronRight size={10} />
           ) : null}
         </span>
         <CommandStatusDot entry={entry} />
-        <span className="text-2xs text-text-tertiary font-mono flex-shrink-0">
+        <span className="text-2xs text-text-tertiary font-mono shrink-0">
           [{formatTime(entry.timestamp)}]
         </span>
         {!isUser && (
-          <span className="text-2xs px-1 rounded bg-bg-tertiary text-text-tertiary flex-shrink-0">
+          <span className="text-2xs px-1 rounded bg-bg-tertiary text-text-tertiary shrink-0">
             {t('pages.sysBadge')}
           </span>
         )}
@@ -109,9 +281,9 @@ const CommandEntry = memo(function CommandEntry({ entry }: { entry: CommandLogEn
           {cmdline}
         </span>
         {entry.exitCode !== 0 && entry.exitCode !== null && (
-          <span className="text-2xs text-status-deleted flex-shrink-0">exit {entry.exitCode}</span>
+          <span className="text-2xs text-status-deleted shrink-0">exit {entry.exitCode}</span>
         )}
-        <span className="text-2xs text-text-tertiary ml-auto flex-shrink-0">
+        <span className="text-2xs text-text-tertiary ml-auto shrink-0">
           {formatDuration(entry.durationMs)}
         </span>
       </button>
@@ -179,14 +351,20 @@ export function CommandLogPanel({
 
   const entries = useCommandLogStore((s) => s.entries);
   const load = useCommandLogStore((s) => s.load);
-  const append = useCommandLogStore((s) => s.append);
+  const appendBatch = useCommandLogStore((s) => s.appendBatch);
   const clearCommands = useCommandLogStore((s) => s.clear);
 
   useEffect(() => {
     load();
-    const unsubscribe = api.commandLog.onEntry(append);
+    // PERF (v3.4): batch feed — ONE store set() per 100 ms main-process
+    // batch instead of one per entry (see commandLogStore.appendBatch).
+    // Falls back to the per-entry API when the batch channel is missing
+    // (older main process in tests).
+    const unsubscribe = api.commandLog.onBatch
+      ? api.commandLog.onBatch(appendBatch)
+      : api.commandLog.onEntry(useCommandLogStore.getState().append);
     return unsubscribe;
-  }, [load, append]);
+  }, [load, appendBatch]);
 
   const failedCount = useMemo(
     () => entries.filter((e) => e.exitCode !== 0).length,
@@ -236,7 +414,8 @@ export function CommandLogPanel({
       .map((e) => {
         const lines = [
           `[${formatTime(e.timestamp)}] exit=${e.exitCode ?? 'signal'} ${formatDuration(e.durationMs)}`,
-          `$ git ${e.args.join(' ')}`,
+          // For 'api' entries, omit the misleading '$ git ' prefix.
+          (e.args[0] === 'api' ? e.args.join(' ') : `$ git ${e.args.join(' ')}`),
           `directory: ${e.repo}`,
         ];
         if (e.stdout.trim()) lines.push(e.stdout.trimEnd());
@@ -248,11 +427,13 @@ export function CommandLogPanel({
   };
 
   return (
-    <div className="flex flex-col bg-bg-secondary border-t border-border-default flex-shrink-0"
+    <div
+      className="flex flex-col bg-zone-panel border-t border-border-default shrink-0"
       style={{ height: '100%' }}
+      data-testid="command-log-panel"
     >
       {/* Panel header */}
-      <div className="flex items-center justify-between px-3 py-1.5 bg-bg-tertiary border-b border-border-default flex-shrink-0">
+      <div className="flex items-center justify-between px-3 py-1.5 bg-zone-panel-header border-b border-border-default shrink-0">
         <div className="flex items-center gap-1">
           <button
             className="flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-semibold uppercase tracking-wider transition-colors bg-bg-hover text-text-primary"
@@ -320,7 +501,9 @@ export function CommandLogPanel({
             title={t('pages.closePanelTitle')}
             onClick={onClose}
           >
-            <X size={12} />
+            {/* v3.9 — VS Code-style collapse chevron (the console folds
+                DOWN, like VS Code's panel collapse in its header). */}
+            <PanelBottomClose size={12} />
           </button>
         </div>
       </div>

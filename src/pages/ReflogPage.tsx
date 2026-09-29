@@ -5,6 +5,7 @@ import { ArrowRight, ChevronDown, ChevronRight, History, RefreshCw } from '../co
 import { CommitHashLink } from '../components/StatusBar';
 import { api, type CommitFile, type ReflogEntry } from '../lib/api';
 import { useI18n } from '../lib/i18n';
+import { useDateFormatter } from '../lib/formatDate';
 import { useContextMenu } from '../lib/useContextMenu';
 import { cn, copyToClipboard, formatDate, shortHash } from '../lib/utils';
 import { useGitStore } from '../stores/gitStore';
@@ -18,7 +19,7 @@ const REFS = ['HEAD', 'ORIG_HEAD', 'refs/heads', 'refs/remotes'];
  * Reflog — master-detail redesign (user-requested based on screenshot).
  *
  * Left panel (~40% width): chronological list of reflog entries.
- * Each row: [checkbox] [hashAbbrev] [operation/message] [relative time].
+ * Each row: [hashAbbrev] [operation/message] [relative time].
  * Selected row has accent background.
  *
  * Right panel (~60% width): commit detail for the selected entry.
@@ -28,12 +29,15 @@ const REFS = ['HEAD', 'ORIG_HEAD', 'refs/heads', 'refs/remotes'];
  *     <hash>` after confirmation)
  *   - File changes section: list of files with +N/-M additions/deletions
  *
- * The checkbox column lets the user multi-select reflog entries for
- * bulk operations (cherry-pick multiple, diff range, etc.) — left for
- * follow-up.
+ * Task 29: the per-row CHECKBOX column was removed — it was a dead
+ * "future multi-select" placeholder (onChange did nothing) that only
+ * confused users («не понятно зачем нужны чекбоксы»). Bulk operations
+ * can return together with a real batch action bar when needed.
  */
 export function ReflogPage() {
   const { t } = useI18n();
+  // 0.7 — honors settings.dateFormat (relative / absolute / both)
+  const fmtDate = useDateFormatter();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const status = useGitStore((s) => s.status);
   const toast = useToastActions();
@@ -113,6 +117,9 @@ export function ReflogPage() {
       toast.success(t('pages.reflogResetDone', { hash: shortHash(selectedEntry.hash) }));
       await refreshStatus();
       await load();
+      // History graph is stale after the reset (HEAD moved, upstream is now
+      // ahead) — ask it to reload so incoming commits render correctly.
+      window.dispatchEvent(new CustomEvent('smartgit:history-refresh'));
     } catch (e) {
       toast.error(t('pages.reflogResetFailed'), String(e));
     }
@@ -216,16 +223,23 @@ export function ReflogPage() {
                   }}
                   onContextMenu={(e) => {
                     e.preventDefault();
+                    // MENU STRUCTURE (v3.4): grouped by domain — navigation
+                    // top-level, clipboard under “Копировать ▸”, destructive
+                    // actions at the bottom.
                     showContextMenu([
                       { label: t('pages.menuViewCommitInHistory'), clickId: 'view-commit' },
                       { type: 'separator' },
-                      { label: t('history.copyShortHash'), clickId: 'copy-short' },
-                      { label: t('history.copyFullHash'), clickId: 'copy-full' },
-                      { label: t('pages.menuCopyMessage'), clickId: 'copy-msg' },
+                      { label: t('ctx.group.copy'), submenu: [
+                        { label: t('history.copyShortHash'), clickId: 'copy-short' },
+                        { label: t('history.copyFullHash'), clickId: 'copy-full' },
+                        { label: t('pages.menuCopyMessage'), clickId: 'copy-msg' },
+                      ] },
                       { type: 'separator' },
                       { label: t('pages.reflogGoToPoint'), clickId: 'go-to-point' },
                       { type: 'separator' },
-                      { label: t('pages.menuDeleteEntry'), clickId: 'delete' },
+                      { label: t('ctx.group.delete'), submenu: [
+                        { label: t('pages.menuDeleteEntry'), clickId: 'delete' },
+                      ] },
                     ], (action) => {
                       switch (action) {
                         case 'view-commit':
@@ -244,15 +258,8 @@ export function ReflogPage() {
                     });
                   }}
                 >
-                  {/* Checkbox (for future multi-select / batch operations) */}
-                  <input
-                    type="checkbox"
-                    className="flex-shrink-0 cursor-pointer"
-                    onClick={(e) => e.stopPropagation()}
-                    onChange={() => { /* future: add to multi-set */ }}
-                  />
                   {/* Hash */}
-                  <code className="font-mono text-text-tertiary flex-shrink-0 w-16 text-xs">
+                  <code className="font-mono text-text-tertiary shrink-0 w-16 text-xs">
                     {entry.hashAbbrev || shortHash(entry.hash)}
                   </code>
                   {/* Operation / message (truncated) */}
@@ -260,8 +267,8 @@ export function ReflogPage() {
                     {entry.message}
                   </span>
                   {/* Relative time */}
-                  <span className="text-text-tertiary text-2xs flex-shrink-0">
-                    {formatDate(entry.date)}
+                  <span className="text-text-tertiary text-2xs shrink-0">
+                    {fmtDate(entry.date)}
                   </span>
                 </div>
               );
@@ -320,7 +327,7 @@ export function ReflogPage() {
                         className="flex items-center gap-3 px-3 py-1 border-b border-border-subtle last:border-b-0 text-xs hover:bg-bg-hover"
                       >
                         <span
-                          className="font-mono font-bold w-4 text-center flex-shrink-0"
+                          className="font-mono font-bold w-4 text-center shrink-0"
                           style={{
                             color: f.status === 'A' ? 'var(--status-added)'
                               : f.status === 'D' ? 'var(--status-deleted)'
@@ -335,13 +342,13 @@ export function ReflogPage() {
                           {f.oldPath && <span className="text-text-tertiary"> ← {f.oldPath}</span>}
                         </span>
                         {!f.binary && (
-                          <span className="flex items-center gap-2 flex-shrink-0 text-2xs">
+                          <span className="flex items-center gap-2 shrink-0 text-2xs">
                             <span className="text-status-added">+{f.additions}</span>
                             <span className="text-status-deleted">-{f.deletions}</span>
                           </span>
                         )}
                         {f.binary && (
-                          <span className="text-text-tertiary text-2xs flex-shrink-0">binary</span>
+                          <span className="text-text-tertiary text-2xs shrink-0">binary</span>
                         )}
                       </div>
                     ))}

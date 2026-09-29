@@ -35,7 +35,15 @@ describe('useRemotePolling — Auto refresh gate', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
-    useRepositoryStore.setState({ repos: [{ path: '/repo/a', name: 'a', lastOpened: 1 }], currentRepo: null, loading: false, error: null });
+    useRepositoryStore.setState({
+      repos: [{ path: '/repo/a', name: 'a', lastOpened: 1 }],
+      currentRepo: null,
+      // Favorites-scope (default): /repo/a is starred so the initial check
+      // covers it. Without any favorite the periodic check polls NOTHING.
+      metadata: { '/repo/a': { path: '/repo/a', name: 'a', favorite: true } as never },
+      loading: false,
+      error: null,
+    });
     useSettingsStore.setState({ settings: {}, theme: 'dark', loading: false });
   });
 
@@ -69,6 +77,10 @@ describe('useRemotePolling — Auto refresh gate', () => {
           { path: '/repo/b', name: 'b', lastOpened: 2 },
         ],
         currentRepo: null,
+        metadata: {
+          '/repo/a': { path: '/repo/a', name: 'a', favorite: true } as never,
+          '/repo/b': { path: '/repo/b', name: 'b', favorite: true } as never,
+        },
         loading: false,
         error: null,
       });

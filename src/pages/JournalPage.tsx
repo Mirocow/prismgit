@@ -1,18 +1,21 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { RotateCcw, RefreshCw, CornerDownRight, Copy, GitCommit } from '../components/icons';
 import { useRepositoryStore } from '../stores/repositoryStore';
-import { useGitStore } from '../stores/gitStore';
+import { useGitStore, surfaceConflictedState } from '../stores/gitStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { CommitHashLink } from '../components/StatusBar';
 import { api, type ReflogEntry } from '../lib/api';
 import { cn, formatDate, shortHash, copyToClipboard } from '../lib/utils';
 import { useI18n } from '../lib/i18n';
+import { useDateFormatter } from '../lib/formatDate';
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
 import { useContextMenu } from '../lib/useContextMenu';
 
 export function JournalPage() {
   const { t } = useI18n();
+  // 0.7 — honors settings.dateFormat (relative / absolute / both)
+  const fmtDate = useDateFormatter();
   const repo = useRepositoryStore((s) => s.currentRepo)!;
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const toast = useToastActions();
@@ -63,7 +66,12 @@ export function JournalPage() {
     try {
       const result = await api.git.cherryPick(repo.path, [entry.hash]);
       if (result.conflicts.length > 0) {
-        toast.warning(t('pages.conflictsCount', { count: result.conflicts.length }), result.conflicts.join('\n'));
+        // Conflict-reaction audit (v3.6): navigate to the resolver (Changes
+        // tool + banner) instead of a transient count-only toast.
+        await surfaceConflictedState(repo.path, {
+          title: t('toast.git.cherryPickConflicts'),
+          detail: t('toast.git.cherryPickConflictsHint'),
+        });
       } else {
         toast.success(t('pages.cherryPicked'));
       }
@@ -85,6 +93,9 @@ export function JournalPage() {
       toast.success(t('pages.resetToHash', { hash: shortHash(entry.hash) }));
       await refreshStatus(repo.path);
       await load();
+      // History graph is stale after the reset — reload it so the moved HEAD,
+      // ref labels and incoming markers render correctly.
+      window.dispatchEvent(new CustomEvent('smartgit:history-refresh'));
     } catch (e) {
       toast.error(t('pages.resetFailed'), String(e));
     }
@@ -150,15 +161,21 @@ export function JournalPage() {
               onClick={() => useSelectionStore.getState().selectCommit(entry.hash)}
               onContextMenu={(e) => {
                 e.preventDefault();
+                // MENU STRUCTURE (v3.4): grouped by domain — navigation
+                // top-level, clipboard under “Копировать ▸”, git operations
+                // (cherry-pick/reset) in one group.
                 showContextMenu([
                   { label: t('pages.menuViewCommitInHistory'), clickId: 'view-commit' },
                   { type: 'separator' },
-                  { label: t('history.copyShortHash'), clickId: 'copy-short' },
-                  { label: t('history.copyFullHash'), clickId: 'copy-full' },
-                  { label: t('pages.menuCopyMessage'), clickId: 'copy-msg' },
-                  { type: 'separator' },
-                  { label: t('pages.menuCherryPick'), clickId: 'cherry-pick' },
-                  { label: t('pages.menuResetHard'), clickId: 'reset-hard' },
+                  { label: t('ctx.group.copy'), submenu: [
+                    { label: t('history.copyShortHash'), clickId: 'copy-short' },
+                    { label: t('history.copyFullHash'), clickId: 'copy-full' },
+                    { label: t('pages.menuCopyMessage'), clickId: 'copy-msg' },
+                  ] },
+                  { label: t('ctx.group.editCommit'), submenu: [
+                    { label: t('pages.menuCherryPick'), clickId: 'cherry-pick' },
+                    { label: t('pages.menuResetHard'), clickId: 'reset-hard' },
+                  ] },
                 ], (action) => {
                   switch (action) {
                     case 'view-commit':
@@ -174,7 +191,7 @@ export function JournalPage() {
                 });
               }}
             >
-              <code className="text-2xs font-mono text-text-tertiary flex-shrink-0 mt-0.5 w-20">
+              <code className="text-2xs font-mono text-text-tertiary shrink-0 mt-0.5 w-20">
                 {entry.selector}
               </code>
               <div className="flex-1 min-w-0">
@@ -185,7 +202,7 @@ export function JournalPage() {
                   <span>·</span>
                   <span>{entry.author.name}</span>
                   <span>·</span>
-                  <span>{formatDate(entry.date)}</span>
+                  <span>{fmtDate(entry.date)}</span>
                 </div>
               </div>
               <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">

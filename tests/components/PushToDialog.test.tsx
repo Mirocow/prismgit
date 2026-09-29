@@ -58,6 +58,7 @@ describe('PushToDialog — "Push To..." remote + target branch choice', () => {
       targetBranch: 'feature/auth',
       setUpstream: false,
       force: false,
+      forceMode: 'force',
     });
   });
 
@@ -73,16 +74,34 @@ describe('PushToDialog — "Push To..." remote + target branch choice', () => {
       targetBranch: 'main',
       setUpstream: false,
       force: false,
+      forceMode: 'force',
     });
   });
 
-  it('passes the force flag through to onSubmit', () => {
+  it('passes the force flag through to onSubmit — DEFAULT is real --force', () => {
+    open({ hasUpstream: true });
+    // No force → no flag in the preview, no mode selector rendered
+    expect(screen.queryByTestId('push-to-force-mode')).toBeNull();
+    fireEvent.click(screen.getAllByRole('checkbox')[1]);
+    // Checking Force reveals the flag selector, default --force
+    const modeSelect = screen.getByTestId('push-to-force-mode') as HTMLSelectElement;
+    expect(modeSelect.value).toBe('force');
+    expect(screen.getByTestId('push-to-cmd')).toHaveTextContent('--force');
+    expect(screen.getByTestId('push-to-cmd')).not.toHaveTextContent('--force-with-lease');
+    fireEvent.click(screen.getByRole('button', { name: 'Push' }));
+    expect(submit).toHaveBeenCalledWith(
+      expect.objectContaining({ force: true, forceMode: 'force' })
+    );
+  });
+
+  it('switching the force flag to --force-with-lease updates the preview and the submit payload', () => {
     open({ hasUpstream: true });
     fireEvent.click(screen.getAllByRole('checkbox')[1]);
+    fireEvent.change(screen.getByTestId('push-to-force-mode'), { target: { value: 'lease' } });
     expect(screen.getByTestId('push-to-cmd')).toHaveTextContent('--force-with-lease');
     fireEvent.click(screen.getByRole('button', { name: 'Push' }));
     expect(submit).toHaveBeenCalledWith(
-      expect.objectContaining({ force: true })
+      expect.objectContaining({ force: true, forceMode: 'lease' })
     );
   });
 

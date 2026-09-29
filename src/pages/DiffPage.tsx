@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ConflictMergeView } from '../components/ConflictMergeView';
 import { DiffViewer } from '../components/DiffViewer';
-import { FileText, RefreshCw, Search } from '../components/icons';
+import { FileText, RefreshCw, Search, ChevronDown } from '../components/icons';
 import { RepoStateBanner } from '../components/RepoStateBanner';
 import { ResizableSplitter, useResizableWidth } from '../components/ResizableSplitter';
 import { api, type BranchInfo, type CommitFile, type DiffResult, type LogEntry } from '../lib/api';
 import { buildFileMenu, runFileAction } from '../lib/fileContextMenu';
+import { filterSymbolicHeads } from '../lib/branchFilter';
 import { useI18n } from '../lib/i18n';
 import { loadProjectPrefs, saveProjectPrefs } from '../lib/projectPrefs';
 import { buildRepoStateHandlers } from '../lib/repoState';
@@ -70,6 +71,9 @@ export function DiffPage() {
   const [recentCommits, setRecentCommits] = useState<LogEntry[]>([]);
   // File list for multi-file diff (when filePath === '.')
   const [changedFiles, setChangedFiles] = useState<CommitFile[]>([]);
+  // "Show all" past the initial 200-row page — the OLD code silently
+  // hid every file after #200 (same class of bug as the branch list).
+  const [fileListShowAll, setFileListShowAll] = useState(false);
   // Filter box above the file list — with 200+ changed files, scrolling to
   // find one path is not something a human should do.
   const [fileListFilter, setFileListFilter] = useState('');
@@ -130,6 +134,104 @@ export function DiffPage() {
     api.git.log(repo.path, { maxCount: 30 }).then(setRecentCommits).catch(() => {});
   }, [repo]);
 
+  // Ref mirror of selectedFileInList so computeDiff can read the latest
+  // value WITHOUT being in its dependency array. This prevents the
+  // auto-compute effect (which depends on computeDiff) from re-running
+  // every time the user clicks a file in the file list — the click
+  // handler already calls loadFileDiff() directly, so the auto-compute
+  // effect should ONLY run when repo / baseRef / compareMode change.
+  const selectedFileInListRef = useRef<string | null>(selectedFileInList);
+  selectedFileInListRef.current = selectedFileInList;
+
+  // ─── LRU diff cache ────────────────────────────────────────────────────
+  // The user complaint: switching between files in the file list was slow
+  // because each click re-ran `git diff` (a subprocess spawn + parse).
+  // On a repo with 50 changed files, clicking through them took ~200ms
+  // each = 10s of cumulative waiting.
+  //
+  // This cache stores the last N (default 20) computed diffs keyed by
+  // `${baseRef}|${compareMode}|${compareRef}|${file}`. A hit returns the
+  // cached DiffResult instantly — no IPC, no subprocess, no parse.
+  //
+  // The cache is invalidated when:
+  //   - The repo changes (different repo.path)
+  //   - A git mutation happens (commit/stage/checkout) — detected via
+  //     the `status` object's `lastRefresh` bump from gitStore.
+  //
+  // We use a Map (insertion-ordered) + a size cap — the oldest entry is
+  // evicted when the cap is exceeded. This is a simple LRU without the
+  // move-to-front overhead (we don't need strict LRU; FIFO-with-cap is
+  // good enough for the file-list-click pattern).
+  const DIFF_CACHE_SIZE = 20;
+  const diffCacheRef = useRef<Map<string, DiffResult>>(new Map());
+  const diffCacheRepoRef = useRef<string>(repo.path);
+
+  /** Build the cache key for a given file + comparison context. */
+  const diffCacheKey = (file: string): string => {
+    return `${baseRef}|${compareMode}|${compareRef}|${stashHash || ''}|${file}`;
+  };
+
+  /** Read from cache, or undefined if miss. */
+  const readDiffCache = (file: string): DiffResult | undefined => {
+    // Invalidate the whole cache if the repo changed.
+    if (diffCacheRepoRef.current !== repo.path) {
+      diffCacheRef.current.clear();
+      diffCacheRepoRef.current = repo.path;
+      return undefined;
+    }
+    return diffCacheRef.current.get(diffCacheKey(file));
+  };
+
+  /** Write to cache, evicting the oldest entry if the cap is exceeded. */
+  const writeDiffCache = (file: string, result: DiffResult): void => {
+    const cache = diffCacheRef.current;
+    const key = diffCacheKey(file);
+    // If the cache is full AND this is a new key, evict the oldest entry
+    // (the first key in insertion order — Map maintains insertion order).
+    if (cache.size >= DIFF_CACHE_SIZE && !cache.has(key)) {
+      const oldestKey = cache.keys().next().value;
+      if (oldestKey !== undefined) cache.delete(oldestKey);
+    }
+    cache.set(key, result);
+  };
+
+  /** Invalidate the entire diff cache — called when a git mutation happens
+   *  (commit/stage/checkout/etc.) so stale diffs don't show. */
+  const invalidateDiffCache = (): void => {
+    diffCacheRef.current.clear();
+  };
+
+  // Invalidate the cache whenever the git status changes (a mutation
+  // happened — the working tree / index is different now, so all cached
+  // diffs are stale).
+  // RACE FIX: the previous code cleared the ENTIRE cache on every lastRefresh
+  // bump (every 5s from the file watcher). This meant the user's diff cache
+  // was never useful — every time they clicked a file, it was a cache miss
+  // because the watcher had just fired. Now we only invalidate if the
+  // status's file list actually changed (different set of files or different
+  // file states), not just because the timer fired.
+  //
+  // RENDER-PERF: the two subscriptions (`s.lastRefresh`, `s.status` objects)
+  // re-rendered this entire page — DiffViewer included — on every refresh
+  // tick (~5s), even when the file signature was unchanged. The selector
+  // below computes the signature STRING inside the store subscription:
+  // a string has stable identity, so the component only re-renders (and the
+  // effect below only fires) when the file list REALLY changed. The
+  // prevFilesKeyRef bookkeeping is no longer needed — React's dependency
+  // comparison does exactly the same job.
+  const filesSignature = useGitStore((s) =>
+    (s.status?.files || [])
+      .map((f: { path: string; index: string; working_dir: string }) => `${f.path}:${f.index}${f.working_dir}`)
+      .sort()
+      .join('|'));
+  useEffect(() => {
+    // Signature '' = no status yet (or clean tree with no files) — nothing
+    // to invalidate. A non-empty signature that CHANGED means the working
+    // tree really changed → cached diffs are stale.
+    if (filesSignature) invalidateDiffCache();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filesSignature]);
+
   const computeDiff = useCallback(async () => {
     if (!repo) return;
     setLoading(true);
@@ -141,10 +243,11 @@ export function DiffPage() {
       if (stashHash && (filePath === '.' || filePath === '')) {
         const files = await api.git.stashFiles(repo.path, stashHash);
         setChangedFiles(files);
-        if (!selectedFileInList && files.length > 0) {
+        const curSel = selectedFileInListRef.current;
+        if (!curSel && files.length > 0) {
           setSelectedFileInList(files[0].path);
         }
-        const fileToDiff = selectedFileInList || files[0]?.path;
+        const fileToDiff = curSel || files[0]?.path;
         if (fileToDiff) {
           const rawDiff = await api.git.stashFileRawDiff(repo.path, stashHash, fileToDiff);
           setDiff(parseRawDiff(rawDiff, fileToDiff));
@@ -167,11 +270,12 @@ export function DiffPage() {
         });
         setChangedFiles(files);
         // If no specific file selected, auto-select the first one
-        if (!selectedFileInList && files.length > 0) {
+        const curSel = selectedFileInListRef.current;
+        if (!curSel && files.length > 0) {
           setSelectedFileInList(files[0].path);
         }
         // Load diff for the selected file (or first file)
-        const fileToDiff = selectedFileInList || files[0]?.path;
+        const fileToDiff = curSel || files[0]?.path;
         if (fileToDiff) {
           const result = await api.git.diff(repo.path, fileToDiff, { ref: baseRef });
           setDiff(result);
@@ -184,7 +288,10 @@ export function DiffPage() {
         // comparison. Triple-dot diff compares from merge-base, which gives
         // wrong results for stash commits (stash^...stash vs stash^..stash).
         // Stash commits have parent[0] = base, so direct diff is what we want.
-        const rawFiles = await api.git.raw(repo.path, ['diff', '--name-status', '--no-color', `${baseRef}..${compareRef}`]);
+        const diffArgs = await buildDiffArgs(repo.path, baseRef, compareRef);
+        const rawFiles = await api.git.raw(repo.path, [...diffArgs, '--name-status']);
+        // Remove '--no-color' from the args we built since --name-status doesn't need it
+        const rawFilesClean = rawFiles;
         const files: CommitFile[] = rawFiles.split('\n').filter(Boolean).map(line => {
           const parts = line.split('\t');
           const status = parts[0];
@@ -192,12 +299,14 @@ export function DiffPage() {
           return { path, status: status[0] || 'M', additions: 0, deletions: 0, binary: false, mode: '' };
         });
         setChangedFiles(files);
-        if (!selectedFileInList && files.length > 0) {
+        const curSel = selectedFileInListRef.current;
+        if (!curSel && files.length > 0) {
           setSelectedFileInList(files[0].path);
         }
-        const fileToDiff = selectedFileInList || files[0]?.path;
+        const fileToDiff = curSel || files[0]?.path;
         if (fileToDiff) {
-          const rawDiff = await api.git.raw(repo.path, ['diff', '--no-color', `${baseRef}..${compareRef}`, '--', fileToDiff]);
+          const diffArgsFile = await buildDiffArgs(repo.path, baseRef, compareRef);
+          const rawDiff = await api.git.raw(repo.path, [...diffArgsFile, '--', fileToDiff]);
           // Parse
           const result = parseRawDiff(rawDiff, fileToDiff);
           setDiff(result);
@@ -207,16 +316,27 @@ export function DiffPage() {
       } else {
         // Single file diff
         setChangedFiles([]);
+        const fileToDiff = filePath || '.';
+        // Check the cache BEFORE spawning a git subprocess — this is the
+        // hot path when the user is flipping between files in the list.
+        const cached = readDiffCache(fileToDiff);
+        if (cached) {
+          setDiff(cached);
+          return;
+        }
         let result: DiffResult;
         if (compareMode === 'working') {
-          result = await api.git.diff(repo.path, filePath || '.', { ref: baseRef });
+          result = await api.git.diff(repo.path, fileToDiff, { ref: baseRef });
         } else if (compareMode === 'staged') {
-          result = await api.git.diff(repo.path, filePath || '.', { staged: true, ref: baseRef });
+          result = await api.git.diff(repo.path, fileToDiff, { staged: true, ref: baseRef });
         } else {
           // Same `..` rationale here — direct ref comparison, not merge-base.
-          const rawDiff = await api.git.raw(repo.path, ['diff', '--no-color', `${baseRef}..${compareRef}`, '--', filePath || '.']);
-          result = parseRawDiff(rawDiff, filePath);
+          // buildDiffArgs handles the root-commit case (hash^..hash → --root hash).
+          const diffArgsSingle = await buildDiffArgs(repo.path, baseRef, compareRef);
+          const rawDiff = await api.git.raw(repo.path, [...diffArgsSingle, '--', fileToDiff]);
+          result = parseRawDiff(rawDiff, fileToDiff);
         }
+        writeDiffCache(fileToDiff, result);
         setDiff(result);
       }
     } catch (e) {
@@ -225,12 +345,16 @@ export function DiffPage() {
     } finally {
       setLoading(false);
     }
-  }, [repo, filePath, baseRef, compareMode, compareRef, stashHash, toast, selectedFileInList]);
+  }, [repo, filePath, baseRef, compareMode, compareRef, stashHash, toast]);
 
-  // Auto-compute when inputs change
+  // Auto-compute when inputs change.
+  // Reduced debounce from 300ms → 150ms for snappier UX on filter changes.
+  // The original 300ms debounce was set for safety against rapid filter
+  // input, but with the dedupe in computeDiff (selectedFileInListRef) the
+  // compute is now cheap enough that 150ms is plenty.
   useEffect(() => {
     if (repo && baseRef) {
-      const timer = setTimeout(computeDiff, 300); // debounce 300ms
+      const timer = setTimeout(computeDiff, 150);
       return () => clearTimeout(timer);
     }
   }, [computeDiff, repo, baseRef]);
@@ -242,6 +366,13 @@ export function DiffPage() {
     // Cross-tool write-back: the file shown in Diff is the app-wide selection,
     // so Blame/Changes/History follow the file the user is looking at.
     useSelectionStore.getState().selectFile(file);
+    // Check the cache FIRST — if the user already viewed this file, we skip
+    // the git subprocess entirely and show the cached diff instantly.
+    const cached = readDiffCache(file);
+    if (cached) {
+      setDiff(cached);
+      return;
+    }
     setLoading(true);
     try {
       let result: DiffResult;
@@ -249,11 +380,13 @@ export function DiffPage() {
         const rawDiff = await api.git.stashFileRawDiff(repo.path, stashHash, file);
         result = parseRawDiff(rawDiff, file);
       } else if (compareMode === 'ref' && compareRef) {
-        const rawDiff = await api.git.raw(repo.path, ['diff', '--no-color', `${baseRef}..${compareRef}`, '--', file]);
+        const diffArgsLoad = await buildDiffArgs(repo.path, baseRef, compareRef);
+        const rawDiff = await api.git.raw(repo.path, [...diffArgsLoad, '--', file]);
         result = parseRawDiff(rawDiff, file);
       } else {
         result = await api.git.diff(repo.path, file, { ref: baseRef, staged: compareMode === 'staged' });
       }
+      writeDiffCache(file, result);
       setDiff(result);
     } catch (e) {
       toast.error(t('diff.loadFileFailed'), String(e));
@@ -312,10 +445,10 @@ export function DiffPage() {
     <div className="flex flex-col flex-1 overflow-hidden">
       {/* Header with comparison controls */}
       <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border-default bg-bg-tertiary flex-wrap">
-        <span className="text-xs font-semibold flex-shrink-0">{t('nav.diff')}</span>
+        <span className="text-xs font-semibold shrink-0">{t('nav.diff')}</span>
 
         {/* File path input */}
-        <div className="flex items-center gap-1 flex-shrink-0">
+        <div className="flex items-center gap-1 shrink-0">
           <FileText size={11} className="text-text-tertiary" />
           <input
             type="text"
@@ -328,7 +461,7 @@ export function DiffPage() {
         </div>
 
         {/* Base ref selector */}
-        <div className="flex items-center gap-1 flex-shrink-0">
+        <div className="flex items-center gap-1 shrink-0">
           <span className="text-2xs text-text-tertiary">{t('diff.baseLabel')}</span>
           <select
             value={baseRef}
@@ -337,10 +470,10 @@ export function DiffPage() {
             title={t('diff.baseTooltip')}
           >
             <option value="HEAD">HEAD</option>
-            {branches.filter(b => !b.remote).map(b => (
+            {filterSymbolicHeads(branches.filter(b => !b.remote)).map(b => (
               <option key={b.name} value={b.name}>{b.name}</option>
             ))}
-            {branches.filter(b => b.remote).map(b => (
+            {filterSymbolicHeads(branches.filter(b => b.remote)).map(b => (
               <option key={b.name} value={b.name}>{b.name}</option>
             ))}
             {recentCommits.map(c => (
@@ -361,7 +494,7 @@ export function DiffPage() {
         </div>
 
         {/* Arrow */}
-        <span className="text-text-tertiary flex-shrink-0">→</span>
+        <span className="text-text-tertiary shrink-0">→</span>
 
         {/* Compare mode selector */}
         <div className="flex items-center gap-0">
@@ -400,7 +533,7 @@ export function DiffPage() {
             title={t('diff.compareTooltip')}
           >
             <option value="">{t('diff.selectRef')}</option>
-            {branches.filter(b => !b.remote).map(b => (
+            {filterSymbolicHeads(branches.filter(b => !b.remote)).map(b => (
               <option key={b.name} value={b.name}>{b.name}</option>
             ))}
             {recentCommits.map(c => (
@@ -440,7 +573,7 @@ export function DiffPage() {
         {changedFiles.length > 0 && (
           <>
             <div
-              className="flex-shrink-0 border-r border-border-default overflow-y-auto bg-bg-secondary"
+              className="shrink-0 border-r border-border-default overflow-y-auto bg-bg-secondary"
               style={{ width: fileListWidth }}
             >
               <div className="px-2 py-1.5 text-2xs font-bold uppercase tracking-wider text-text-tertiary border-b border-border-subtle sticky top-0 bg-bg-secondary">
@@ -462,9 +595,11 @@ export function DiffPage() {
               {visibleFiles.length === 0 && changedFiles.length > 0 && (
                 <div className="px-2 py-2 text-2xs text-text-tertiary">{t('diff.noFilesMatch', { filter: fileListFilter.trim() })}</div>
               )}
-              {visibleFiles.slice(0, 200).map((f, i) => (
+              {(fileListShowAll ? visibleFiles : visibleFiles.slice(0, 200)).map((f, i) => (
                 <div
                   key={i}
+                  data-testid="diff-file-row"
+                  data-path={f.path}
                   className={cn(
                     'flex items-center gap-1.5 px-2 py-1 text-2xs cursor-pointer hover:bg-bg-hover transition-colors',
                     selectedFileInList === f.path && 'bg-bg-selected'
@@ -487,17 +622,21 @@ export function DiffPage() {
                   }}
                   title={t('diff.fileRowTooltip')}
                 >
-                  <span className="font-mono font-bold w-3 text-center flex-shrink-0"
+                  <span className="font-mono font-bold w-3 text-center shrink-0"
                     style={{ color: f.status === 'A' ? 'var(--status-added)' : f.status === 'D' ? 'var(--status-deleted)' : f.status === 'R' ? 'var(--status-renamed)' : 'var(--status-modified)' }}>
                     {f.status}
                   </span>
                   <span className="flex-1 truncate font-mono text-text-secondary">{f.path}</span>
                 </div>
               ))}
-              {changedFiles.length > 200 && (
-                <div className="px-2 py-1 text-2xs text-text-tertiary border-t border-border-subtle">
-                  {t('diff.showingFirst200', { count: changedFiles.length })}
-                </div>
+              {visibleFiles.length > 200 && !fileListShowAll && (
+                <button
+                  className="w-full flex items-center justify-center gap-1 px-2 py-1.5 text-2xs text-accent bg-bg-secondary border-t border-border-subtle hover:bg-bg-hover"
+                  onClick={() => setFileListShowAll(true)}
+                >
+                  <ChevronDown size={10} />
+                  {t('branches.showAll', { count: visibleFiles.length })}
+                </button>
               )}
             </div>
             {/* Resizable splitter between file list and diff viewer — fixes the
@@ -530,6 +669,7 @@ export function DiffPage() {
           )}
           {showMergeView ? (
             <ConflictMergeView
+              key={activeFile}
               filePath={activeFile}
               onResolved={async (resolvedFile) => {
                 await refreshStatus(repo.path);
@@ -540,12 +680,14 @@ export function DiffPage() {
                   setSelectedFileInList(next);
                   setFilePath(next);
                 } else {
-                  toast.success('All conflicts resolved', 'You can now Continue/Commit to finish.');
+                  // Task 29: was a hardcoded ENGLISH string in a fully
+                  // localized RU/ZH/DE app — now a proper i18n key.
+                  toast.success(t('diff.conflictsAllResolved'), t('diff.conflictsAllResolvedHint'));
                 }
               }}
             />
           ) : diff ? (
-            <div className="flex-1 overflow-auto">
+            <div className="flex-1 overflow-hidden flex flex-col">
               <DiffViewer diff={diff} filePath={activeFile} />
             </div>
           ) : (
@@ -557,6 +699,64 @@ export function DiffPage() {
       </div>
     </div>
   );
+}
+
+// ─── Root-commit-safe diff args ─────────────────────────────────────────
+// When the user clicks a file in the root commit (init commit, no parents),
+// HistoryPage sets baseRef = `${hash}^` — but `hash^` doesn't exist for a
+// root commit. `git diff hash^..hash` throws:
+//   fatal: bad revision '<root>^..<root>'
+// This helper builds the correct git diff args: if baseRef ends with `^`
+// AND the commit is a root commit (no parents), use `git show` instead of
+// `git diff` — `git diff --root <hash>` returns EMPTY for root commits
+// (a known git quirk), but `git show <hash> --format=` returns the full
+// diff (all files as "new file" against the empty tree).
+//
+// PERF (v3.1): the parent probe (`rev-list --parents -n 1`) is IMMUTABLE for
+// a given (repo, hash) — a commit's parents never change. It used to run on
+// EVERY computeDiff (twice: file list + selected file) and on every
+// per-file cache miss in compare mode, adding a serial spawn round-trip
+// each time. Now memoized per (repo, baseRef, compareRef) for the session.
+const diffArgsMemo = new Map<string, string[]>();
+async function buildDiffArgs(
+  repoPath: string,
+  baseRef: string,
+  compareRef: string,
+): Promise<string[]> {
+  const memoKey = `${repoPath}\u0000${baseRef}\u0000${compareRef}`;
+  const cached = diffArgsMemo.get(memoKey);
+  if (cached) return cached;
+  const args = await buildDiffArgsUncached(repoPath, baseRef, compareRef);
+  if (diffArgsMemo.size > 128) diffArgsMemo.clear(); // trivial LRU-by-reset
+  diffArgsMemo.set(memoKey, args);
+  return args;
+}
+
+async function buildDiffArgsUncached(
+  repoPath: string,
+  baseRef: string,
+  compareRef: string,
+): Promise<string[]> {
+  // If baseRef ends with ^, check if the commit has a parent.
+  if (baseRef.endsWith('^')) {
+    const hash = baseRef.slice(0, -1);
+    try {
+      const out = await api.git.raw(repoPath, ['rev-list', '--parents', '-n', '1', hash]);
+      const parts = out.trim().split(/\s+/).filter(Boolean);
+      // parts[0] = hash, parts[1+] = parents. Root commit has no parents.
+      if (parts.length <= 1) {
+        // Root commit — use `git show` instead of `git diff --root`.
+        // `git diff --root <hash>` returns EMPTY for root commits (git
+        // quirk), but `git show <hash> --format=` returns the full
+        // diff showing all files as "new file" against the empty tree.
+        // --no-color keeps the output parseable.
+        // --format= strips the commit message so only the diff remains.
+        return ['show', '--no-color', '--format=', compareRef];
+      }
+    } catch { /* fall through to normal range */ }
+  }
+  // Normal case: baseRef..compareRef (double-dot, direct comparison).
+  return ['diff', '--no-color', `${baseRef}..${compareRef}`];
 }
 
 // Helper to parse raw git diff output into DiffResult

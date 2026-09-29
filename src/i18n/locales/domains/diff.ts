@@ -30,8 +30,9 @@ export const en: Record<string, string> = {
   'diff.filterFiles': 'Filter files...',
   'diff.noFilesMatch': "No files match '{filter}'",
   'diff.fileRowTooltip': 'Click to load diff · Right-click for more actions',
-  'diff.showingFirst200': 'Showing first 200 of {count}',
   'diff.selectRefs': 'Select base and compare refs to see diff',
+  'diff.conflictsAllResolved': 'All conflicts resolved',
+  'diff.conflictsAllResolvedHint': 'You can now Continue/Commit to finish.',
   // DiffViewer
   'diff.unstagedLine': 'Unstaged {count} line',
   'diff.unstagedLines': 'Unstaged {count} lines',
@@ -72,6 +73,17 @@ export const en: Record<string, string> = {
   'diff.selectionCount': 'Selection ({count})',
   'diff.noChanges': 'No changes',
   'diff.showMoreLines': 'Show {count} more lines',
+  'diff.editOpenFailed': 'Failed to open file for editing',
+  'diff.editOpened': 'File opened for editing',
+  'diff.editOpenedHint': 'Save your changes in the editor, then return here to stage them.',
+  'diff.stagedAfterEdit': 'Staged {file}',
+  'diff.stageFailed': 'Failed to stage file',
+  'diff.editFileTooltip': 'Edit this file in your editor. After saving, you\'ll be prompted to stage the changes.',
+  'diff.editFile': 'Edit',
+  'diff.stageAfterEditTitle': 'Stage edited changes?',
+  'diff.stageAfterEditBody': 'You edited {file} in your editor. Stage the changes now?',
+  'diff.stageAfterEditHint': 'Staging adds the file to the index so it can be committed. You can also stage later from the Changes page.',
+
 };
 
 export const ru: Record<string, string> = {
@@ -101,8 +113,9 @@ export const ru: Record<string, string> = {
   'diff.filterFiles': 'Фильтр файлов...',
   'diff.noFilesMatch': "Нет файлов по фильтру '{filter}'",
   'diff.fileRowTooltip': 'Клик — загрузить diff · Правый клик — другие действия',
-  'diff.showingFirst200': 'Показаны первые 200 из {count}',
   'diff.selectRefs': 'Выберите базу и ссылку сравнения, чтобы увидеть diff',
+  'diff.conflictsAllResolved': 'Все конфликты разрешены',
+  'diff.conflictsAllResolvedHint': 'Теперь можно продолжить или закоммитить, чтобы завершить операцию.',
   // DiffViewer
   'diff.unstagedLine': 'Убрано из индекса: {count} строка',
   'diff.unstagedLines': 'Убрано из индекса: {count} строк',
@@ -143,6 +156,17 @@ export const ru: Record<string, string> = {
   'diff.selectionCount': 'Выбрано: {count}',
   'diff.noChanges': 'Нет изменений',
   'diff.showMoreLines': 'Показать ещё {count} строк',
+  'diff.editOpenFailed': 'Не удалось открыть файл для редактирования',
+  'diff.editOpened': 'Файл открыт для редактирования',
+  'diff.editOpenedHint': 'Сохраните изменения в редакторе, затем вернитесь сюда, чтобы добавить их в индекс.',
+  'diff.stagedAfterEdit': '{file} добавлен в индекс',
+  'diff.stageFailed': 'Не удалось добавить файл в индекс',
+  'diff.editFileTooltip': 'Отредактируйте файл в вашем редакторе. После сохранения вам будет предложено добавить изменения в индекс.',
+  'diff.editFile': 'Изменить',
+  'diff.stageAfterEditTitle': 'Добавить изменённые файлы в индекс?',
+  'diff.stageAfterEditBody': 'Вы отредактировали {file} в редакторе. Добавить изменения в индекс сейчас?',
+  'diff.stageAfterEditHint': 'Добавление в индекс позволяет закоммитить файл. Вы также можете добавить позже на странице Changes.',
+
 };
 
 export const zh: Record<string, string> = {
@@ -172,8 +196,9 @@ export const zh: Record<string, string> = {
   'diff.filterFiles': '筛选文件...',
   'diff.noFilesMatch': "没有文件匹配“{filter}”",
   'diff.fileRowTooltip': '点击加载差异 · 右键查看更多操作',
-  'diff.showingFirst200': '显示前 200 个，共 {count} 个',
   'diff.selectRefs': '请选择基准与比较引用以查看差异',
+  'diff.conflictsAllResolved': '所有冲突已解决',
+  'diff.conflictsAllResolvedHint': '现在可以继续/提交以完成操作。',
   // DiffViewer
   'diff.unstagedLine': '已取消暂存 {count} 行',
   'diff.unstagedLines': '已取消暂存 {count} 行',
@@ -214,6 +239,17 @@ export const zh: Record<string, string> = {
   'diff.selectionCount': '已选 {count} 行',
   'diff.noChanges': '无更改',
   'diff.showMoreLines': '显示更多 {count} 行',
+  'diff.editOpenFailed': '打开文件进行编辑失败',
+  'diff.editOpened': '文件已打开进行编辑',
+  'diff.editOpenedHint': '在编辑器中保存更改，然后返回此处暂存它们。',
+  'diff.stagedAfterEdit': '已暂存 {file}',
+  'diff.stageFailed': '暂存文件失败',
+  'diff.editFileTooltip': '在编辑器中编辑此文件。保存后，系统会提示您暂存更改。',
+  'diff.editFile': '编辑',
+  'diff.stageAfterEditTitle': '暂存已编辑的更改？',
+  'diff.stageAfterEditBody': '您在编辑器中编辑了 {file}。现在暂存更改吗？',
+  'diff.stageAfterEditHint': '暂存将文件添加到索引以便提交。您也可以稍后从 Changes 页面暂存。',
+
 };
 
 export const de: Record<string, string> = {
@@ -243,8 +279,9 @@ export const de: Record<string, string> = {
   'diff.filterFiles': 'Dateien filtern...',
   'diff.noFilesMatch': "Keine Dateien passen zu '{filter}'",
   'diff.fileRowTooltip': 'Klick: Diff laden · Rechtsklick: weitere Aktionen',
-  'diff.showingFirst200': 'Erste 200 von {count}',
   'diff.selectRefs': 'Basis- und Vergleichsreferenz wählen, um den Diff zu sehen',
+  'diff.conflictsAllResolved': 'Alle Konflikte gelöst',
+  'diff.conflictsAllResolvedHint': 'Sie können jetzt Fortsetzen/Committen, um den Vorgang abzuschließen.',
   // DiffViewer
   'diff.unstagedLine': '{count} Zeile ungestaget',
   'diff.unstagedLines': '{count} Zeilen ungestaget',
@@ -285,4 +322,15 @@ export const de: Record<string, string> = {
   'diff.selectionCount': 'Auswahl ({count})',
   'diff.noChanges': 'Keine Änderungen',
   'diff.showMoreLines': '{count} weitere Zeilen anzeigen',
+  'diff.editOpenFailed': 'Datei konnte nicht zum Bearbeiten geöffnet werden',
+  'diff.editOpened': 'Datei zum Bearbeiten geöffnet',
+  'diff.editOpenedHint': 'Speichern Sie Ihre Änderungen im Editor und kehren Sie dann hierher zurück, um sie zu stagen.',
+  'diff.stagedAfterEdit': '{file} gestaged',
+  'diff.stageFailed': 'Datei konnte nicht gestaged werden',
+  'diff.editFileTooltip': 'Diese Datei in Ihrem Editor bearbeiten. Nach dem Speichern werden Sie aufgefordert, die Änderungen zu stagen.',
+  'diff.editFile': 'Bearbeiten',
+  'diff.stageAfterEditTitle': 'Bearbeitete Änderungen stagen?',
+  'diff.stageAfterEditBody': 'Sie haben {file} im Editor bearbeitet. Änderungen jetzt stagen?',
+  'diff.stageAfterEditHint': 'Staging fügt die Datei zum Index hinzu, damit sie committet werden kann. Sie können auch später auf der Changes-Seite stagen.',
+
 };

@@ -30,6 +30,7 @@ vi.mock('../../src/lib/api', () => ({
       raw: vi.fn().mockResolvedValue(''),
       pollRemoteSummaries: vi.fn().mockResolvedValue({}),
       invalidateCache: vi.fn().mockResolvedValue(undefined),
+      trimRepoCaches: vi.fn().mockResolvedValue(undefined),
     },
     fs: {
       openRepositoryPicker: vi.fn(),
@@ -45,6 +46,7 @@ vi.mock('../../src/lib/api', () => ({
 
 import { api } from '../../src/lib/api';
 import { useRepositoryStore } from '../../src/stores/repositoryStore';
+import { useToastStore } from '../../src/stores/toastStore';
 
 describe('repositoryStore', () => {
   beforeEach(() => {
@@ -58,20 +60,26 @@ describe('repositoryStore', () => {
   });
 
   describe('loadRepos', () => {
-    it('loads repositories sorted by pinned (stable order, NOT by lastOpened)', async () => {
+    it('loads repositories sorted by favorites (stable order, NOT by lastOpened)', async () => {
       const mockRepos = [
-        { path: '/a', name: 'a', lastOpened: 100, pinned: false },
-        { path: '/b', name: 'b', lastOpened: 200, pinned: true },
-        { path: '/c', name: 'c', lastOpened: 300, pinned: false },
+        { path: '/a', name: 'a', lastOpened: 100 },
+        { path: '/b', name: 'b', lastOpened: 200 },
+        { path: '/c', name: 'c', lastOpened: 300 },
       ];
       vi.mocked(api.settings.getRepos).mockResolvedValue(mockRepos);
+      // /b is a FAVORITE → must float to the top. (Task 29 + perf round: the
+      // separate "pinned" tier was removed with the pin button — favorites
+      // sort alone; «Закрепить» duplicated favorites and never worked.)
+      useRepositoryStore.setState({
+        metadata: { '/b': { path: '/b', name: 'b', favorite: true } as never },
+      });
 
       await useRepositoryStore.getState().loadRepos();
 
       const state = useRepositoryStore.getState();
       expect(state.repos).toHaveLength(3);
-      // Pinned first, then STABLE insertion order (not by lastOpened)
-      expect(state.repos[0].path).toBe('/b'); // pinned
+      // Favorite first, then STABLE insertion order (not by lastOpened)
+      expect(state.repos[0].path).toBe('/b'); // favorite
       expect(state.repos[1].path).toBe('/a'); // /a was first in array → stays before /c
       expect(state.repos[2].path).toBe('/c');
       expect(state.loading).toBe(false);
@@ -107,16 +115,157 @@ describe('repositoryStore', () => {
       });
     });
 
-    it('throws for non-repository directory', async () => {
+    it('does NOT open a non-repository directory (sets error, no throw)', async () => {
       vi.mocked(api.git.isRepo).mockResolvedValue(false);
-
-      await expect(
-        useRepositoryStore.getState().openRepository('/not/a/repo')
-      ).rejects.toThrow('not a Git repository');
+      // Show a friendly toast instead of throwing — this is intentional:
+      // throwing would propagate to callers that don't .catch() and trigger
+      // a second generic "unhandled" toast. The function resolves with
+      // undefined and leaves currentRepo null.
+      await useRepositoryStore.getState().openRepository('/not/a/repo');
 
       const state = useRepositoryStore.getState();
       expect(state.currentRepo).toBeNull();
-      expect(state.error).toBeTruthy();
+      expect(state.loading).toBe(false);
+      // The toast is shown via useToastStore — verified separately.
+      expect(useToastStore.getState().toasts.length).toBeGreaterThan(0);
+    });
+
+    // ── PERF (v3.1, repo-switch) behaviors ──────────────────────────
+
+    it('re-click on the CURRENT repo is a no-op (no addRepo, no state churn)', async () => {
+      useRepositoryStore.setState({
+        currentRepo: { path: '/repo', name: 'repo', lastOpened: 0 },
+      });
+      vi.mocked(api.settings.addRepo).mockClear();
+
+      await useRepositoryStore.getState().openRepository('/repo');
+
+      // No settings write, no loading flicker, currentRepo identity UNCHANGED
+      // (a new object identity would re-trigger the App's watcher effect —
+      // chokidar teardown + worktree re-walk).
+      expect(api.settings.addRepo).not.toHaveBeenCalled();
+      expect(api.git.trimRepoCaches).not.toHaveBeenCalled();
+      expect(useRepositoryStore.getState().loading).toBe(false);
+      const current = useRepositoryStore.getState().currentRepo;
+      expect(current?.path).toBe('/repo');
+      expect(current?.lastOpened).toBe(0); // unchanged — no re-set happened
+    });
+
+    it('switching away calls trimRepoCaches (soft) — NOT invalidateCache', async () => {
+      useRepositoryStore.setState({
+        currentRepo: { path: '/repo-a', name: 'a', lastOpened: 0 },
+      });
+      vi.mocked(api.git.isRepo).mockResolvedValue(true);
+      vi.mocked(api.fs.pathBasename).mockResolvedValue('b');
+      vi.mocked(api.settings.addRepo).mockResolvedValue(undefined);
+      vi.mocked(api.settings.getRepos).mockResolvedValue([]);
+
+      await useRepositoryStore.getState().openRepository('/repo-b');
+
+      expect(api.git.trimRepoCaches).toHaveBeenCalledTimes(1);
+      expect(api.git.invalidateCache).not.toHaveBeenCalled();
+      expect(api.watcher.stop).toHaveBeenCalledWith('/repo-a');
+      expect(useRepositoryStore.getState().currentRepo?.path).toBe('/repo-b');
+    });
+
+    it('defers refreshRepoStats (background stats no longer compete with the open burst)', async () => {
+      vi.useFakeTimers();
+      try {
+        useRepositoryStore.setState({ currentRepo: null, metadata: {} });
+        vi.mocked(api.git.isRepo).mockResolvedValue(true);
+        vi.mocked(api.fs.pathBasename).mockResolvedValue('r');
+        vi.mocked(api.settings.addRepo).mockResolvedValue(undefined);
+        // The repo must be in the list — loadMetadata → loadRepos auto-closes
+        // a currentRepo that vanished from the list (deleted-from-disk guard).
+        vi.mocked(api.settings.getRepos).mockResolvedValue([
+          { path: '/deferred', name: 'r', lastOpened: 0 },
+        ]);
+        vi.mocked(api.settings.refreshRepoStats).mockClear();
+
+        await useRepositoryStore.getState().openRepository('/deferred');
+        // NOT called synchronously — the old behavior fired 4 git spawns
+        // (log -1 / branchLocal / getRemotes / rev-list --count) immediately,
+        // competing with the foreground status/numstat/ls-files burst.
+        expect(api.settings.refreshRepoStats).not.toHaveBeenCalled();
+
+        await vi.advanceTimersByTimeAsync(1_300);
+        expect(api.settings.refreshRepoStats).toHaveBeenCalledWith('/deferred');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('skips refreshRepoStats entirely when metadata is fresh (<60s)', async () => {
+      vi.useFakeTimers();
+      const now = Date.now();
+      vi.setSystemTime(now);
+      try {
+        useRepositoryStore.setState({
+          currentRepo: null,
+          metadata: { '/fresh': { path: '/fresh', updatedAt: now - 5_000 } },
+        });
+        vi.mocked(api.git.isRepo).mockResolvedValue(true);
+        vi.mocked(api.fs.pathBasename).mockResolvedValue('fresh');
+        vi.mocked(api.settings.addRepo).mockResolvedValue(undefined);
+        vi.mocked(api.settings.refreshRepoStats).mockClear();
+
+        await useRepositoryStore.getState().openRepository('/fresh');
+        await vi.advanceTimersByTimeAsync(2_000);
+
+        // Rapid switch-back to a recently-refreshed repo: zero stat spawns.
+        expect(api.settings.refreshRepoStats).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('abandoned switch: no stats refresh for a repo the user already left', async () => {
+      vi.useFakeTimers();
+      const now = Date.now();
+      vi.setSystemTime(now);
+      try {
+        useRepositoryStore.setState({ currentRepo: null, metadata: {} });
+        vi.mocked(api.git.isRepo).mockResolvedValue(true);
+        vi.mocked(api.fs.pathBasename).mockResolvedValue('x');
+        vi.mocked(api.settings.addRepo).mockResolvedValue(undefined);
+        // '/other' stays in the list so the auto-close guard doesn't fire —
+        // this test isolates the ABANDONED-switch guard in openRepository.
+        vi.mocked(api.settings.getRepos).mockResolvedValue([
+          { path: '/other', name: 'other', lastOpened: 0 },
+        ]);
+        vi.mocked(api.settings.refreshRepoStats).mockClear();
+
+        await useRepositoryStore.getState().openRepository('/abandoned');
+        // Switch away before the deferred stats timer fires.
+        useRepositoryStore.setState({
+          currentRepo: { path: '/other', name: 'other', lastOpened: 0 },
+        });
+        await vi.advanceTimersByTimeAsync(1_300);
+
+        expect(api.settings.refreshRepoStats).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('dedupes concurrent opens of the SAME path (double-click guard)', async () => {
+      let resolveIsRepo: (v: boolean) => void = () => {};
+      vi.mocked(api.git.isRepo).mockImplementation(
+        () => new Promise<boolean>((res) => { resolveIsRepo = res; }),
+      );
+      vi.mocked(api.fs.pathBasename).mockResolvedValue('dbl');
+      vi.mocked(api.settings.addRepo).mockResolvedValue(undefined);
+      vi.mocked(api.settings.getRepos).mockResolvedValue([]);
+      useRepositoryStore.setState({ currentRepo: null, metadata: {} });
+
+      const p1 = useRepositoryStore.getState().openRepository('/dbl');
+      const p2 = useRepositoryStore.getState().openRepository('/dbl');
+      resolveIsRepo(true);
+      await Promise.all([p1, p2]);
+
+      // ONE open sequence — a second addRepo write would churn settings and
+      // re-set currentRepo (new identity → watcher effect re-runs).
+      expect(api.settings.addRepo).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -129,6 +278,17 @@ describe('repositoryStore', () => {
       useRepositoryStore.getState().closeRepository();
 
       expect(useRepositoryStore.getState().currentRepo).toBeNull();
+    });
+
+    it('soft-trims caches (trimRepoCaches), keeps hard invalidateCache for mutations', () => {
+      useRepositoryStore.setState({
+        currentRepo: { path: '/repo', name: 'repo', lastOpened: 0 },
+      });
+
+      useRepositoryStore.getState().closeRepository();
+
+      expect(api.git.trimRepoCaches).toHaveBeenCalledTimes(1);
+      expect(api.git.invalidateCache).not.toHaveBeenCalled();
     });
   });
 
@@ -150,7 +310,12 @@ describe('repositoryStore', () => {
 
     it('keeps currentRepo if different path', async () => {
       vi.mocked(api.settings.removeRepo).mockResolvedValue(undefined);
-      vi.mocked(api.settings.getRepos).mockResolvedValue([]);
+      // The currently-open repo ('/other') must be in the returned list —
+      // otherwise loadRepos() correctly calls closeRepository() (the v3
+      // feature that auto-closes a repo that was deleted from disk).
+      vi.mocked(api.settings.getRepos).mockResolvedValue([
+        { path: '/other', name: 'other', lastOpened: 0 },
+      ]);
       useRepositoryStore.setState({
         currentRepo: { path: '/other', name: 'other', lastOpened: 0 },
       });
@@ -289,6 +454,37 @@ describe('repositoryStore', () => {
       useRepositoryStore.setState({ checkingRemotes: false });
     });
 
+    it('queues a forced check while one is in flight (was silently DROPPED)', async () => {
+      // User report: "статистика в репозиториях не обновляется даже если
+      // принудительно её запустить" — a manual refresh landing during a
+      // background poll cycle used to be dropped. Now it is queued and
+      // runs as soon as the in-flight cycle finishes.
+      let release: () => void = () => {};
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      vi.mocked(api.git.pollRemoteSummaries)
+        .mockImplementationOnce(async () => { await gate; return {}; })
+        .mockResolvedValue({});
+      useRepositoryStore.setState({
+        repos: [{ path: '/a', name: 'a', lastOpened: 0 }],
+        remoteChecks: {},
+        checkingRemotes: false,
+      });
+
+      const first = useRepositoryStore.getState().checkRemotes();      // in flight (gated)
+      const second = useRepositoryStore.getState().checkRemotes(['/b']); // queued
+
+      // While the first is running, no second poll starts...
+      expect(api.git.pollRemoteSummaries).toHaveBeenCalledTimes(1);
+
+      release();
+      await first;
+      await second;
+      // ...and the queued request runs right after with its own paths.
+      expect(api.git.pollRemoteSummaries).toHaveBeenCalledTimes(2);
+      expect(api.git.pollRemoteSummaries).toHaveBeenLastCalledWith(['/b']);
+      expect(useRepositoryStore.getState().checkingRemotes).toBe(false);
+    });
+
     it('does not throw when the api call rejects', async () => {
       vi.mocked(api.git.pollRemoteSummaries).mockRejectedValue(new Error('offline'));
       useRepositoryStore.setState({ repos: [{ path: '/a', name: 'a', lastOpened: 0 }], checkingRemotes: false });
@@ -301,6 +497,27 @@ describe('repositoryStore', () => {
       useRepositoryStore.setState({ repos: [] });
       await useRepositoryStore.getState().checkRemotes();
       expect(api.git.pollRemoteSummaries).not.toHaveBeenCalled();
+    });
+
+    it('polls the CURRENT repo first so its badges update before slow remotes', async () => {
+      // v3.2: pollRemoteSummaries walks targets in input order through a
+      // 3-worker pool; without this reordering a slow remote at the head of
+      // the sidebar kept the freshly-opened repo's ↓/↑ badge waiting behind
+      // the whole list.
+      vi.mocked(api.git.pollRemoteSummaries).mockResolvedValue({});
+      useRepositoryStore.setState({
+        repos: [
+          { path: '/a', name: 'a', lastOpened: 1 },
+          { path: '/b', name: 'b', lastOpened: 2 },
+          { path: '/c', name: 'c', lastOpened: 3 },
+        ],
+        currentRepo: { path: '/c', name: 'c', lastOpened: 3 },
+        checkingRemotes: false,
+      });
+
+      await useRepositoryStore.getState().checkRemotes();
+
+      expect(api.git.pollRemoteSummaries).toHaveBeenCalledWith(['/c', '/a', '/b']);
     });
   });
 });

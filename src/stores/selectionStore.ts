@@ -120,6 +120,11 @@ export interface GlobalSelectionState {
    * NOT against HEAD (which was the original bug — see StashesPage.handleViewStash).
    */
   diffRequest: { baseRef: string; compareRef: string; filePath?: string; /** Stash viewer mode — read files via git stash anatomy (see stashFiles). */ stashHash?: string } | null;
+  /** One-shot Blame focus line — set by cross-tool navigation (Search →
+   *  Blame «открыть строку, где найден текст»), consumed by BlamePage after
+   *  the blame loads: scrolls the row into view and highlights it, then
+   *  clears itself so a manual re-blame does not re-jump. */
+  blameFocusLine: number | null;
 
   // Actions
   selectCommit: (hash: string | null) => void;
@@ -144,6 +149,7 @@ export interface GlobalSelectionState {
   clearBranches: () => void;
   setPathFilter: (path: string | null) => void;
   setAuthorFilter: (author: string | null) => void;
+  setBlameFocusLine: (line: number | null) => void;
   setFileViewMode: (mode: 'tree' | 'flat') => void;
   setGroupByState: (group: boolean) => void;
   setCommitViewMode: (mode: 'tree' | 'flat') => void;
@@ -186,6 +192,7 @@ export const useSelectionStore = create<GlobalSelectionState>((set, get) => ({
   selectedBranches: new Set(),
   pathFilter: null,
   authorFilter: null,
+  blameFocusLine: null,
   fileViewMode: 'flat',
   groupByState: false,
   commitViewMode: 'tree',
@@ -232,6 +239,7 @@ export const useSelectionStore = create<GlobalSelectionState>((set, get) => ({
   clearBranches: () => set({ selectedBranches: new Set(), selectedBranch: null }),
   setPathFilter: (path) => set({ pathFilter: path }),
   setAuthorFilter: (author) => set({ authorFilter: author }),
+  setBlameFocusLine: (line) => set({ blameFocusLine: line }),
   setFileViewMode: (mode) => set({ fileViewMode: mode }),
   setGroupByState: (group) => set({ groupByState: group }),
   setCommitViewMode: (mode) => set({ commitViewMode: mode }),
@@ -271,6 +279,7 @@ export const useSelectionStore = create<GlobalSelectionState>((set, get) => ({
     selectedBranches: new Set(),
     pathFilter: null,
     authorFilter: null,
+    blameFocusLine: null,
     fileScopeDir: null,
     diffRequest: null,
   }),

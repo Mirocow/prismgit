@@ -12,7 +12,7 @@
  * settings, key backgroundFetchRemotes). Without the checkbox the check is
  * network-free: fetched=false and counters reflect the last fetch.
  */
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { execSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -91,6 +91,13 @@ describe('git service — remote check (fetch + incoming/outgoing)', () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
+  // Clear the poll cache between tests — otherwise a 60s TTL returns the
+  // result of the previous test (which saw an older git state) and the
+  // incoming/outgoing/dirty counts come back stale.
+  beforeEach(() => {
+    gitService.clearPollCache();
+  });
+
   it('reports hasRemote=false for a repo without remotes (never throws)', async () => {
     const summary = await gitService.pollRemoteSummary(noRemote);
     expect(summary.hasRemote).toBe(false);
@@ -162,5 +169,50 @@ describe('git service — remote check (fetch + incoming/outgoing)', () => {
 
   it('batch poll with an empty array resolves to an empty map', async () => {
     expect(await gitService.pollRemoteSummaries([])).toEqual({});
+  });
+
+  // ── v3.2 TTL policy ─────────────────────────────────────────────────────
+  // Successful results cache for ~60s; NETWORK ERRORS back off for 5 minutes.
+  // Before the back-off, an unreachable remote was re-fetched on every cycle
+  // (the poll cache expired after 60s) — a spawn storm while the network was
+  // down, and each fetch subprocess lingered long past its "timeout".
+
+  it('caches a successful result for ~60 seconds', async () => {
+    storage.setSetting('backgroundFetchRemotes', { [work1]: ['origin'] });
+    const summary = await gitService.pollRemoteSummary(work1);
+    expect(summary.error).toBeUndefined();
+    const entry = gitService.__pollCacheEntryForTests(work1);
+    expect(entry).toBeDefined();
+    const ttl = entry!.expiresAt - Date.now();
+    expect(ttl).toBeGreaterThan(45_000);
+    expect(ttl).toBeLessThanOrEqual(60_000 + 1_000);
+  });
+
+  it('backs off a FAILING remote for ~5 minutes (no re-fetch storm while offline)', async () => {
+    // Point origin at a path that does not exist → the fetch fails fast,
+    // offline, and deterministically.
+    const badRemote = path.join(root, 'does-not-exist.git');
+    shell(`git remote set-url origin "${badRemote}"`, work1);
+    storage.setSetting('backgroundFetchRemotes', { [work1]: ['origin'] });
+    // clearPollCache(work1) also drops the remotes cache → the new URL is seen.
+    gitService.clearPollCache(work1);
+
+    const failed = await gitService.pollRemoteSummary(work1);
+    expect(failed.error).toBeDefined();
+    expect(failed.fetched).toBe(false);
+
+    const entry = gitService.__pollCacheEntryForTests(work1);
+    expect(entry).toBeDefined();
+    const ttl = entry!.expiresAt - Date.now();
+    expect(ttl).toBeGreaterThan(4 * 60_000);
+    expect(ttl).toBeLessThanOrEqual(5 * 60_000 + 1_000);
+
+    // A re-poll within the back-off window returns the CACHED error —
+    // no second fetch attempt (identity proves the cache served it).
+    const again = await gitService.pollRemoteSummary(work1);
+    expect(again).toBe(failed);
+
+    // Restore the working remote for any test that follows.
+    shell(`git remote set-url origin "${origin}"`, work1);
   });
 });

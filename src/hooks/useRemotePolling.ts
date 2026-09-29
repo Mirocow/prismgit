@@ -1,24 +1,17 @@
 import { useEffect, useRef } from 'react';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSettingsStore } from '../stores/settingsStore';
-import { useGitStore } from '../stores/gitStore';
+import { isPollingBoosted } from '../lib/pollingBoost';
+
+// Re-exported for existing importers (useAutoPush) and for tests.
+export { bumpPolling, BOOST_DURATION_MS } from '../lib/pollingBoost';
 
 /** Default cadence for the repository-list remote check (SmartGit ~5min; we poll faster). */
 export const DEFAULT_REMOTE_CHECK_INTERVAL_SEC = 120;
 /** Lower bound so a typo in settings can't hammer every remote every second. */
 export const MIN_REMOTE_CHECK_INTERVAL_SEC = 30;
-/**
- * PERF-2 — how long the polling stays in "boost" mode after a git
- * mutation (commit/push/fetch/stage). During boost the interval is
- * BOOST_INTERVAL_MS instead of the baseline.
- */
-export const BOOST_DURATION_MS = 120_000; // 2 min
-export const BOOST_INTERVAL_MS = 15_000;   // 15s during boost
-/**
- * PERF-2 — pause-polling timestamp. While pauseUntil > Date.now(), the
- * scheduler skips ticks. Set when the window blurs (no point fetching
- * if the user isn't looking), cleared on focus + immediate checkNow.
- */
+/** Boost interval — used while a boost window is active (see lib/pollingBoost). */
+export const BOOST_INTERVAL_MS = 30_000;   // 30s during boost (was 15s — too aggressive on LFS repos)
 let pauseUntil = 0;
 export function pauseRemotePolling(untilMs = Date.now() + 5 * 60_000): void {
   pauseUntil = Math.max(pauseUntil, untilMs);
@@ -28,14 +21,33 @@ export function resumeRemotePolling(): void {
 }
 
 /**
- * PERF-2 — bump the polling into boost mode for BOOST_DURATION_MS.
- * Called by gitStore actions after commit/push/fetch/stage/etc so the
- * sidebar counter refreshes faster in the moments the user is most
- * likely to be watching it.
+ * Scope of the PERIODIC remote check (Settings → Git → background-check
+ * scope). User report: "Опять приложение PrismGit стало неимоверно тупить...
+ * Давай сделаем что фетч в фоне выполняется только у избранных
+ * репозиториев/проектов (так и нагрузку снизим)". Default: favorites only —
+ * the periodic poll (each cycle, per repo: `git remote -v` + a fetch of
+ * opted-in remotes + 2 rev-list walks + `status --porcelain`) runs for
+ * starred repos + the currently open repo. Non-favorite repos in the
+ * sidebar are never touched by the background loop; their badges update
+ * on manual refresh / repo open only. 'all' restores the legacy behavior.
+ *
+ * Exported for tests.
  */
-let boostUntil = 0;
-export function bumpPolling(_reason: string): void {
-  boostUntil = Math.max(boostUntil, Date.now() + BOOST_DURATION_MS);
+export function scopeRemoteCheckPaths(paths: string[]): string[] {
+  const scope = useSettingsStore.getState().settings.repoRemoteCheckScope ?? 'favorites';
+  if (scope !== 'favorites') return paths;
+  const store = useRepositoryStore.getState();
+  // The current repo is always checked — its ↓/↑/dirty badges are on screen.
+  const current = store.currentRepo?.path;
+  // If metadata hasn't loaded yet we can't know what's a favorite — check
+  // NOTHING rather than hammering EVERY repo (the exact load this setting
+  // exists to prevent). The next tick after metadata lands covers it, and
+  // window focus / manual refresh bypass this filter via explicit paths.
+  const metadata = store.metadata;
+  if (!current && Object.keys(metadata).length === 0) return [];
+  return paths.filter(
+    (p) => p === current || metadata[p]?.favorite === true,
+  );
 }
 
 /**
@@ -52,10 +64,10 @@ export function bumpPolling(_reason: string): void {
  *   without re-subscribing.
  * - Interval 0 (or negative) disables the periodic check; "Check now" in the
  *   sidebar still works.
- * - PERF-2: adaptive cadence. After a git mutation (commit/push/fetch/stage)
- *   the gitStore calls bumpPolling() which sets a 2-min boost window where
- *   the timer fires every 15s instead of the baseline 120s. Also pauses
- *   while the window is blurred (so background fetches don't drain battery).
+ * - PERF-2: adaptive cadence. After a REAL git mutation (commit/push/pull/
+ *   fetch — the gitStore actions call bumpPolling()) the timer fires every
+ *   30s for 2 min instead of the baseline 120s. Also pauses while the window
+ *   is blurred (so background fetches don't drain battery).
  * - Silent by design: network failures land in each summary's `error` field,
  *   never as toasts.
  */
@@ -71,15 +83,26 @@ export function useRemotePolling(): void {
   const repoListKeyRef = useRef(repoListKey);
   repoListKeyRef.current = repoListKey;
 
-  // PERF-2 — subscribe to gitStore's lastRefresh so that whenever a git
-  // mutation completes (commit/push/fetch/etc. all call refreshStatus),
-  // we bump the polling into boost mode. This re-renders the hook with
-  // the new lastRefresh, but the effect below is keyed on the same
-  // deps so it doesn't re-subscribe.
-  const lastRefresh = useGitStore((s) => s.lastRefresh);
-  useEffect(() => {
-    if (lastRefresh > 0) bumpPolling('git-mutation');
-  }, [lastRefresh]);
+  // Favorites-scope reactivity: when metadata lands (async, after the first
+  // render) or the user stars/unstars a repo, the effective poll scope
+  // changes — re-run the effect (and its initial-check gate) so badges for
+  // favorites appear without waiting a whole interval.
+  const favKey = useRepositoryStore((s) =>
+    Object.entries(s.metadata)
+      .filter(([, m]) => m?.favorite)
+      .map(([p]) => p)
+      .sort()
+      .join('\n'));
+  // The currently-open repo is always in scope — react to it too (opening
+  // a repo immediately refreshes its ↓/↑ badge).
+  const currentPath = useRepositoryStore((s) => s.currentRepo?.path ?? '');
+
+  // NOTE (v3.2): there is NO gitStore.lastRefresh subscription here anymore.
+  // It bumped the boost on EVERY status refresh — including the refreshes the
+  // poll's own background fetch caused via the .git/refs watcher — which made
+  // the 30s boost interval permanent and fed a self-sustaining fetch storm
+  // (see lib/pollingBoost.ts). Real mutations now bump the boost directly
+  // from the gitStore actions (commit/push/pull/fetch) and useAutoPush.
 
   // StrictMode double-invocation guard: in dev React runs mount → cleanup →
   // mount on the same component, which fired the initial checkNow() TWICE
@@ -110,14 +133,18 @@ export function useRemotePolling(): void {
     const getIntervalMs = (): number | null => {
       const baseline = getBaselineMs();
       if (baseline === null) return null;
-      if (Date.now() < boostUntil) return Math.max(MIN_REMOTE_CHECK_INTERVAL_SEC * 1000, BOOST_INTERVAL_MS);
+      if (isPollingBoosted()) return Math.max(MIN_REMOTE_CHECK_INTERVAL_SEC * 1000, BOOST_INTERVAL_MS);
       return baseline;
     };
 
     const checkNow = () => {
+      // v3.9 — the user-visible PAUSE: skip every cycle while paused. Covers
+      // the timer tick, the focus-resume AND the initial gate. The manual
+      // sidebar «Check now» button still works (explicit user action).
+      if (useRepositoryStore.getState().remotePollingPaused) return;
       const paths = repoListKeyRef.current.split('\n').filter(Boolean);
       if (paths.length > 0) {
-        void useRepositoryStore.getState().checkRemotes(paths).catch(() => {});
+        void useRepositoryStore.getState().checkRemotes(scopeRemoteCheckPaths(paths)).catch(() => {});
       }
     };
 
@@ -153,11 +180,13 @@ export function useRemotePolling(): void {
     window.addEventListener('focus', onWindowFocus);
 
     // Initial check as soon as there is something to check — only with
-    // Auto refresh enabled, and only once per (autoRefresh, repoList) state —
-    // the StrictMode remount replays the same state and must not re-check.
+    // Auto refresh enabled, and only once per (autoRefresh, repoList,
+    // favorites, currentRepo) state — the StrictMode remount replays the
+    // same state and must not re-check.
     // Re-run when the list grows so a freshly added repo is checked without
-    // waiting a tick.
-    const gateKey = `${autoRefreshRef.current ? 'on' : 'off'}|${repoListKeyRef.current}`;
+    // waiting a tick; when metadata lands (favorites become known); and when
+    // the current repo changes (it is always in the poll scope).
+    const gateKey = `${autoRefreshRef.current ? 'on' : 'off'}|${repoListKeyRef.current}|${favKey}|${currentPath}`;
     if (autoRefreshRef.current && lastInitialGateRef.current !== gateKey) {
       lastInitialGateRef.current = gateKey;
       checkNow();
@@ -170,5 +199,5 @@ export function useRemotePolling(): void {
       window.removeEventListener('blur', onWindowBlur);
       window.removeEventListener('focus', onWindowFocus);
     };
-  }, [repoListKey, autoRefresh]);
+  }, [repoListKey, autoRefresh, favKey, currentPath]);
 }

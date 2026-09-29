@@ -2,11 +2,27 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useToastActions } from '../stores/toastStore';
-import { useI18n } from '../lib/i18n';
-import { Sparkles, X, Send, Loader, Wrench, ArrowRight, User, Bot, Trash, Folder, Square, Copy, Check, Download, ChevronRight, ChevronDown, RefreshCw } from './icons';
+import { useI18n, useI18nStore } from '../lib/i18n';
+import { Sparkles, X, Send, Loader, Wrench, ArrowRight, User, Bot, Trash, Folder, Square, Copy, Check, Download, ChevronRight, ChevronDown, RefreshCw, Star } from './icons';
 import { cn } from '../lib/utils';
 import { runWithTools, type ChatMessage, type TokenUsage } from '../lib/aiChat';
-import { PROVIDER_PRESETS, getProviderPreset, type LLMProvider } from '../lib/aiCommitMessages';
+import type { LLMProvider } from '../lib/aiCommitMessages';
+import {
+  describeLLMError, llmErrorTitleKey, subscribeLLMFallback,
+} from '../lib/aiErrors';
+import { buildProviderFromSettings } from '../lib/aiUtils';
+import {
+  getEnabledAiProviders, getActiveAiProvider,
+  ensureAiProvidersMigrated, activateAiProvider,
+} from '../lib/aiProviders';
+import MarkdownRenderer from './MarkdownRenderer';
+import { AiFavoritesPanel } from './AiFavoritesPanel';
+import { useAiFavoritesStore } from '../stores/aiFavoritesStore';
+import type { AiFavoriteNote } from '../lib/aiFavorites';
+import {
+  useAiChatStore,
+  storageKeyFor, loadChatHistory, saveChatHistory, clearChatHistory,
+} from '../stores/aiChatStore';
 
 /**
  * LAR-3 — AI Assistant chat panel.
@@ -31,6 +47,13 @@ import { PROVIDER_PRESETS, getProviderPreset, type LLMProvider } from '../lib/ai
  *     based on the most common things users ask a git AI assistant to do
  *     (pull, push, status, recent commits, branch list, stash, etc.).
  *
+ * ── Shared state with AiChatPage ──────────────────────────────────────
+ * The popup and the full-page AiChatPage share the SAME store
+ * (useAiChatStore) so messages / busy / tokenUsage / input / sessionRepoPath
+ * stay in sync. Whatever the user types in the popup is visible in the page
+ * (and vice-versa) without any explicit synchronization code. This is the
+ * fix for the user's complaint that the two surfaces were out of sync.
+ *
  * ── Project switching ──────────────────────────────────────────────────
  * The AI Assistant FOLLOWS the app's currently-open repository. When
  * the user switches projects in the sidebar, the AI Assistant switches
@@ -50,47 +73,7 @@ import { PROVIDER_PRESETS, getProviderPreset, type LLMProvider } from '../lib/ai
  * with a configurable limit (default 100 messages, set via Settings →
  * AI → Chat History Limit).
  */
-const STORAGE_KEY_PREFIX = 'prismgit-ai-chat-';
-const NO_REPO_KEY = '__no_repo__';
 const DEFAULT_HISTORY_LIMIT = 100;
-
-/** Build the localStorage key for a given session (repo path or no-repo). */
-function storageKeyFor(sessionRepoPath: string | null | undefined): string {
-  return STORAGE_KEY_PREFIX + (sessionRepoPath ?? NO_REPO_KEY);
-}
-
-/** Load persisted chat messages for a given session. */
-function loadChatHistory(sessionRepoPath: string | null | undefined): ChatMessage[] {
-  try {
-    const raw = localStorage.getItem(storageKeyFor(sessionRepoPath));
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) return parsed;
-    return [];
-  } catch {
-    return [];
-  }
-}
-
-/** Save chat messages for a given session, capped to the limit. */
-function saveChatHistory(sessionRepoPath: string | null | undefined, messages: ChatMessage[], limit: number): void {
-  try {
-    // Keep only the last `limit` messages — oldest are dropped.
-    const trimmed = messages.length > limit ? messages.slice(-limit) : messages;
-    localStorage.setItem(storageKeyFor(sessionRepoPath), JSON.stringify(trimmed));
-  } catch {
-    // localStorage might be full — silently ignore
-  }
-}
-
-/** Clear chat history for a given session. */
-function clearChatHistory(sessionRepoPath: string | null | undefined): void {
-  try {
-    localStorage.removeItem(storageKeyFor(sessionRepoPath));
-  } catch {
-    // ignore
-  }
-}
 
 /**
  * Export the full chat conversation as a Markdown file — used to share
@@ -119,7 +102,7 @@ function clearChatHistory(sessionRepoPath: string | null | undefined): void {
  * calls, tool results, errors. Nothing is truncated, so the developer
  * sees exactly what the AI saw and did.
  */
-function exportChatLog(
+export function exportChatLog(
   messages: ChatMessage[],
   sessionRepoPath: string | null | undefined,
   sessionRepoName: string | undefined,
@@ -187,7 +170,7 @@ function exportChatLog(
 }
 
 /** Format milliseconds as a human-readable "Xm ago" string for the header badge. */
-function formatAgo(ms: number): string {
+export function formatAgo(ms: number): string {
   const sec = Math.floor(ms / 1000);
   if (sec < 60) return 'just now';
   const min = Math.floor(sec / 60);
@@ -239,32 +222,32 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
   const toast = useToastActions();
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // ── Session repo path ──────────────────────────────────────────────────
-  // FOLLOWS the app's currentRepo — when the user switches projects,
-  // the AI Assistant switches too (loads that project's chat history).
-  const [sessionRepoPath, setSessionRepoPath] = useState<string | undefined | null>(undefined);
-
-  useEffect(() => {
-    setSessionRepoPath(currentRepo?.path ?? null);
-  }, [currentRepo?.path]);
-
   const repos = useRepositoryStore(s => s.repos);
+
+  // ── Shared chat state — synced with AiChatPage via useAiChatStore ──────
+  // Both surfaces subscribe to the same store, so messages / busy / input
+  // / tokenUsage stay in sync without any explicit event handling.
+  const sessionRepoPath = useAiChatStore((s) => s.sessionRepoPath);
+  const messages = useAiChatStore((s) => s.messages);
+  const input = useAiChatStore((s) => s.input);
+  const busy = useAiChatStore((s) => s.busy);
+  const tokenUsage = useAiChatStore((s) => s.tokenUsage);
+  const setSessionRepoPath = useAiChatStore((s) => s.setSessionRepoPath);
+  const setInput = useAiChatStore((s) => s.setInput);
+  const setBusy = useAiChatStore((s) => s.setBusy);
+  const setTokenUsage = useAiChatStore((s) => s.setTokenUsage);
+  const storeAppendMessage = useAiChatStore((s) => s.appendMessage);
+  const storeSetMessages = useAiChatStore((s) => s.setMessages);
+  const storeClearMessages = useAiChatStore((s) => s.clearMessages);
+
   const sessionRepo = useMemo(() => {
     if (sessionRepoPath === null) return null;
     if (!sessionRepoPath) return undefined;
     const found = repos.find(r => r.path === sessionRepoPath);
     if (found) return found;
     const name = sessionRepoPath.split(/[/\\]/).pop() ?? sessionRepoPath;
-    return { name, path: sessionRepoPath, lastOpened: 0, pinned: false };
+    return { name, path: sessionRepoPath, lastOpened: 0 };
   }, [sessionRepoPath, repos]);
-
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [input, setInput] = useState('');
-  const [busy, setBusy] = useState(false);
-  // ── Token usage tracking ───────────────────────────────────────────────
-  // Shows the user how many tokens were consumed (input + output) and the
-  // total context size. Updated via onTokenUsage callback from runWithTools.
-  const [tokenUsage, setTokenUsage] = useState<{ input: number; output: number; contextSize: number }>({ input: 0, output:  0, contextSize: 0 });
 
   // ── Abort controller for the "Stop" button ─────────────────────────────
   // When the user clicks Stop, we abort the in-flight LLM call. The signal
@@ -273,36 +256,67 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
   // Promise.race in proxyFetch rejects early so the UI updates immediately.
   const abortRef = useRef<AbortController | null>(null);
 
-  // Load persisted chat history when the session changes.
+  // ── Favorites (saved parts of the dialogue, tree navigation) ───────────
+  const [showFavorites, setShowFavorites] = useState(false);
+  const [flashIdx, setFlashIdx] = useState<number | null>(null);
+
+  const saveFavorite = useCallback((msg: ChatMessage) => {
+    if (msg.role !== 'user' && msg.role !== 'assistant') return;
+    useAiFavoritesStore.getState().addNote(null, {
+      content: msg.content,
+      role: msg.role,
+      repoPath: sessionRepoPath ?? undefined,
+    });
+    toast.success(t('aiFav.saved'));
+  }, [sessionRepoPath, t, toast]);
+
+  // Scroll to + flash-highlight the original message of a favorite note.
+  const jumpToNote = useCallback((note: AiFavoriteNote): boolean => {
+    const idx = messages.findIndex((m) => m.content === note.content);
+    if (idx < 0) return false;
+    setShowFavorites(false);
+    requestAnimationFrame(() => {
+      const el = scrollRef.current?.querySelector(`[data-msg-idx="${idx}"]`);
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setFlashIdx(idx);
+      setTimeout(() => setFlashIdx(null), 1800);
+    });
+    return true;
+  }, [messages]);
+
+  // Follow the app's currentRepo — when the user switches projects in the
+  // sidebar, the AI Assistant follows (loads that project's chat history).
   useEffect(() => {
-    if (sessionRepoPath === undefined) return;
-    const saved = loadChatHistory(sessionRepoPath);
-    setMessages(saved);
-  }, [sessionRepoPath]);
+    setSessionRepoPath(currentRepo?.path ?? null);
+  }, [currentRepo?.path, setSessionRepoPath]);
 
   // Auto-scroll to bottom when messages change.
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages]);
 
-  // Persist messages to localStorage whenever they change (debounced).
-  const historyLimit = settings?.aiChatHistoryLimit ?? DEFAULT_HISTORY_LIMIT;
-  useEffect(() => {
-    if (sessionRepoPath === undefined) return;
-    if (messages.length === 0) return;
-    const timer = setTimeout(() => {
-      saveChatHistory(sessionRepoPath, messages, historyLimit);
-    }, 500);
-    return () => clearTimeout(timer);
-  }, [messages, sessionRepoPath, historyLimit]);
-
   // Cleanup: if the panel closes while a request is in flight, abort it
   // so we don't leave a dangling fetch holding a model in memory.
+  // F8 fix: also reset `busy` in the store — otherwise the next time
+  // the panel mounts it shows a permanent "busy" state (the user closed
+  // the panel mid-stream, the abort fired, but `setBusy(false)` never
+  // ran because the await chain was broken).
   useEffect(() => {
     return () => {
       abortRef.current?.abort();
+      useAiChatStore.getState().setBusy(false);
+      abortRef.current = null;
     };
   }, []);
+
+  // v2.3.12 — OpenRouter free-model fallback notice: when a :free model
+  // 429s and the request is retried via the openrouter/free meta-router,
+  // tell the user (info toast) — the switch must be visible, not silent.
+  useEffect(() => {
+    return subscribeLLMFallback((model) => {
+      toast.info(t('aiErr.fallbackToastTitle', { model }), t('aiErr.fallbackToastDetail'));
+    });
+  }, [toast, t]);
 
   // ── Session switcher dropdown ───────────────────────────────────────────
   const [showSessionMenu, setShowSessionMenu] = useState(false);
@@ -311,13 +325,7 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
   }, [repos]);
 
   const buildProvider = useCallback((): LLMProvider | null => {
-    if (!settings?.aiProvider) return null;
-    const type = settings.aiProvider as LLMProvider['type'];
-    const id = settings.aiProvider;
-    const url = settings.aiUrl || '';
-    const model = settings.aiModel || '';
-    if (!model) return null;
-    return { id, name: id, type, url, apiKey: settings.aiApiKey, model };
+    return buildProviderFromSettings(settings);
   }, [settings]);
 
   const handleSend = useCallback(async (overrideInput?: string, isRegenerate = false) => {
@@ -331,7 +339,7 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
     }
     if (!isRegenerate) {
       setInput('');
-      setMessages(prev => [...prev, { role: 'user', content: userMsg }]);
+      storeAppendMessage({ role: 'user', content: userMsg });
     }
     setBusy(true);
     const controller = new AbortController();
@@ -347,6 +355,7 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
         signal: controller.signal,
         priorHistory: historyForContext,
         contextMaxChars: settings?.aiContextMaxChars ?? 20_000,
+        userLocale: useI18nStore.getState().locale,
         onTokenUsage: (usage) => {
           setTokenUsage({
             input: usage.inputTokens,
@@ -355,17 +364,17 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
           });
         },
         onAssistantMessage: (msg) => {
-          setMessages(prev => [...prev, msg]);
+          storeAppendMessage(msg);
         },
         onToolCall: (name, args) => {
-          setMessages(prev => [...prev, {
+          storeAppendMessage({
             role: 'assistant',
             content: `Calling tool: ${name}${Object.keys(args).length ? ` (${JSON.stringify(args)})` : ''}`,
             toolCalls: [{ name, arguments: args }],
-          }]);
+          });
         },
         onToolResult: (name, result) => {
-          setMessages(prev => [...prev, { role: 'tool', content: result, toolName: name }]);
+          storeAppendMessage({ role: 'tool', content: result, toolName: name });
         },
       });
     } catch (e: unknown) {
@@ -374,19 +383,26 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
       // of a red error toast.
       const isAbort = e instanceof DOMException && e.name === 'AbortError';
       if (isAbort) {
-        setMessages(prev => [...prev, {
+        storeAppendMessage({
           role: 'assistant',
-          content: '⏹ Stopped by user. The conversation history is preserved — you can continue with a new message.',
-        }]);
+          content: t('aiAssistant.stoppedByUser'),
+        });
       } else {
-        toast.error(t('changes.aiGenerationFailed'), String(e));
-        setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${String(e)}` }]);
+        // v2.3.12 — structured, localized error instead of the old
+        // 'Error: ' + String(e) concatenation (which produced the double
+        // "Error: Error: OpenAI chat error 429: {raw JSON}" wall).
+        const info = describeLLMError(e);
+        const lines = [t(llmErrorTitleKey(info.kind)) + (info.status ? ` (HTTP ${info.status})` : '')];
+        if (info.providerMessage) lines.push(info.providerMessage.slice(0, 240));
+        if (info.remedy) lines.push(info.remedy.slice(0, 200));
+        toast.error(t('changes.aiGenerationFailed'), lines.join('\n'));
+        storeAppendMessage({ role: 'assistant', content: lines.join('\n') });
       }
     } finally {
       setBusy(false);
       abortRef.current = null;
     }
-  }, [input, sessionRepoPath, buildProvider, toast, t, messages, settings]);
+  }, [input, sessionRepoPath, buildProvider, toast, t, messages, settings, storeAppendMessage, setInput, setBusy, setTokenUsage]);
 
   /** Stop the in-flight LLM call. The user sees the "Stopped" message
    *  appear in the chat once the abort propagates through. */
@@ -402,8 +418,7 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
   };
 
   const handleClear = () => {
-    setMessages([]);
-    clearChatHistory(sessionRepoPath);
+    storeClearMessages();
   };
 
   // Switch the AI session to a different repo (or to "no repo" mode).
@@ -421,48 +436,92 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
   // Per-provider configs (URL + API key + model) are saved/restored from
   // aiProviderConfigs so the user doesn't re-enter credentials on each switch.
   const [showProviderMenu, setShowProviderMenu] = useState(false);
-  const switchProvider = useCallback(async (newProviderId: string) => {
-    const oldProviderId = settings?.aiProvider || '';
-    // ── 1. Save current provider's config to aiProviderConfigs ──
-    // Read the CURRENT flat values (aiUrl, aiApiKey, aiModel) and merge
-    // them into the configs store. We use functional updates to avoid
-    // stale-closure issues — settings in this closure may be outdated
-    // by the time the async setSetting calls complete.
-    const currentUrl = settings?.aiUrl || '';
-    const currentApiKey = settings?.aiApiKey || '';
-    const currentModel = settings?.aiModel || '';
+  const enabledProviders = useMemo(() => getEnabledAiProviders(settings), [settings]);
+  const activeProvider = useMemo(() => getActiveAiProvider(settings), [settings]);
 
-    // Build the updated configs map — merge old + new.
-    const existingConfigs = settings?.aiProviderConfigs || {};
-    const updatedConfigs = { ...existingConfigs };
-    if (oldProviderId) {
-      const existing = updatedConfigs[oldProviderId] || {};
-      updatedConfigs[oldProviderId] = {
-        url: currentUrl || existing.url,
-        apiKey: currentApiKey || existing.apiKey,
-        model: currentModel || existing.model,
-      };
-    }
+  // One-shot legacy → registry migration.
+  useEffect(() => {
+    void ensureAiProvidersMigrated(settings, setSetting);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-    // ── 2. Get the new provider's saved config or defaults ──
-    const preset = getProviderPreset(newProviderId);
-    const savedConfig = updatedConfigs[newProviderId];
-    const newUrl = savedConfig?.url || preset.defaultUrl;
-    const newModel = savedConfig?.model || preset.defaultModel;
-    const newApiKey = savedConfig?.apiKey || '';
+  // Listen for 'smartgit:ai-prompt' events from other components (e.g.
+  // PRReview's "AI Review" button). When received, set the input to
+  // the prompt — App.tsx opens the AI panel via its own listener.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { prompt?: string };
+      if (detail?.prompt) {
+        setInput(detail.prompt);
+      }
+    };
+    window.addEventListener('smartgit:ai-prompt', handler);
+    return () => window.removeEventListener('smartgit:ai-prompt', handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setInput]);
 
-    // ── 3. Apply ALL settings in one batch ──
-    // We set them all together so the UI updates atomically — no flicker
-    // of half-switched state (old URL with new model, etc.).
-    await Promise.all([
-      setSetting('aiProviderConfigs', updatedConfigs),
-      setSetting('aiProvider', newProviderId),
-      setSetting('aiUrl', newUrl),
-      setSetting('aiModel', newModel),
-      setSetting('aiApiKey', newApiKey),
-    ]);
+  const switchProvider = useCallback(async (entryId: string) => {
+    await activateAiProvider(settings, setSetting, entryId);
     setShowProviderMenu(false);
   }, [settings, setSetting]);
+
+  // Resizable panel — user can drag the edges to resize the chat.
+  // Default: 28rem (448px) wide × 80vh tall. Stored in localStorage.
+  const [panelWidth, setPanelWidth] = useState(() => {
+    try { return parseInt(localStorage.getItem('prismgit-ai-panel-width') || '448', 10); }
+    catch { return 448; }
+  });
+  const [panelHeight, setPanelHeight] = useState(() => {
+    try { return parseInt(localStorage.getItem('prismgit-ai-panel-height') || '600', 10); }
+    catch { return 600; }
+  });
+  const dragRef = useRef<{ startX: number; startY: number; startW: number; startH: number } | null>(null);
+
+  // Save to localStorage on change (debounced via requestAnimationFrame).
+  useEffect(() => {
+    const id = requestAnimationFrame(() => {
+      try {
+        localStorage.setItem('prismgit-ai-panel-width', String(panelWidth));
+        localStorage.setItem('prismgit-ai-panel-height', String(panelHeight));
+      } catch { /* ignore */ }
+    });
+    return () => cancelAnimationFrame(id);
+  }, [panelWidth, panelHeight]);
+
+  const handleResizeStart = useCallback((e: React.MouseEvent, edge: 'left' | 'top' | 'corner') => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragRef.current = { startX: e.clientX, startY: e.clientY, startW: panelWidth, startH: panelHeight };
+
+    const handleMouseMove = (ev: MouseEvent) => {
+      if (!dragRef.current) return;
+      const dx = ev.clientX - dragRef.current.startX;
+      const dy = ev.clientY - dragRef.current.startY;
+      if (edge === 'left' || edge === 'corner') {
+        // Dragging left edge → width increases as mouse moves left
+        const newW = Math.max(320, Math.min(800, dragRef.current.startW - dx));
+        setPanelWidth(newW);
+      }
+      if (edge === 'top' || edge === 'corner') {
+        // Dragging top edge → height increases as mouse moves up
+        const newH = Math.max(300, Math.min(window.innerHeight - 100, dragRef.current.startH - dy));
+        setPanelHeight(newH);
+      }
+    };
+
+    const handleMouseUp = () => {
+      dragRef.current = null;
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    document.body.style.cursor = edge === 'left' ? 'ew-resize' : edge === 'top' ? 'ns-resize' : 'nwse-resize';
+    document.body.style.userSelect = 'none';
+  }, [panelWidth, panelHeight]);
 
   // Starter prompts — different sets for repo vs no-repo mode.
   const starterPrompts = sessionRepoPath === null
@@ -470,12 +529,15 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
     : STARTER_PROMPTS_WITH_REPO;
 
   return (
-    <div className="fixed bottom-4 right-4 w-[28rem] max-h-[80vh] bg-bg-elevated border border-border-default rounded-lg shadow-2xl flex flex-col z-50">
+    <div
+      className="fixed bottom-4 right-4 bg-zone-popover border border-border-default rounded-lg shadow-2xl flex flex-col z-50"
+      style={{ width: `${panelWidth}px`, height: `${panelHeight}px` }}
+    >
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-border-default bg-bg-tertiary rounded-t-lg">
         <div className="flex items-center gap-2 min-w-0 flex-1">
-          <Sparkles size={14} className="text-accent flex-shrink-0" />
-          <span className="text-sm font-medium flex-shrink-0">{t('aiAssistant.title')}</span>
+          <Sparkles size={14} className="text-accent shrink-0" />
+          <span className="text-sm font-medium shrink-0">{t('aiAssistant.title')}</span>
           {/* Session switcher — clickable badge showing the current session's repo. */}
           <div className="relative ml-1 min-w-0">
             <button
@@ -483,7 +545,7 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
               onClick={() => setShowSessionMenu(v => !v)}
               title={sessionRepo?.path ?? (sessionRepoPath === null ? t('aiAssistant.noRepoMode') : t('aiAssistant.loading'))}
             >
-              <Folder size={10} className="flex-shrink-0 text-text-tertiary" />
+              <Folder size={10} className="shrink-0 text-text-tertiary" />
               <span className="truncate max-w-28">
                 {sessionRepo
                   ? sessionRepo.name
@@ -496,7 +558,7 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
             {showSessionMenu && (
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setShowSessionMenu(false)} />
-                <div className="absolute top-full left-0 mt-1 w-72 bg-bg-elevated border border-border-default rounded shadow-xl z-20 max-h-80 overflow-y-auto">
+                <div className="absolute top-full left-0 mt-1 w-72 bg-zone-popover border border-border-default rounded shadow-xl z-20 max-h-80 overflow-y-auto">
                   <button
                     className={cn(
                       'w-full text-left px-3 py-2 text-xs hover:bg-bg-hover transition-colors border-b border-border-subtle',
@@ -508,9 +570,9 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
                       <Folder size={11} className="text-text-tertiary" />
                       <span>{t('aiAssistant.noRepoMode') || 'No repository (app-level mode)'}</span>
                     </div>
-                    <div className="text-3xs text-text-tertiary mt-0.5 ml-[18px]">
-                      Use list_repos / clone_repo / init_repo tools.
-                    </div>
+                    <span className="text-3xs text-text-tertiary mt-0.5 ml-[18px]">
+                      {t('aiAssistant.noRepoToolsHint')}
+                    </span>
                   </button>
                   {currentRepo && currentRepo.path !== sessionRepoPath && (
                     <button
@@ -520,17 +582,17 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
                       <div className="flex items-center gap-2">
                         <Folder size={11} className="text-accent" />
                         <span className="font-medium">{currentRepo.name}</span>
-                        <span className="text-3xs text-accent ml-auto">current</span>
+                        <span className="text-3xs text-accent ml-auto">{t('aiAssistant.currentRepo')}</span>
                       </div>
                       <div className="text-3xs text-text-tertiary mt-0.5 ml-[18px] truncate">{currentRepo.path}</div>
                     </button>
                   )}
                   <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold px-3 pt-2 pb-1">
-                    Known repositories
+                    {t('aiAssistant.knownRepositories')}
                   </div>
                   {sortedRepos.length === 0 ? (
                     <div className="px-3 py-2 text-2xs text-text-tertiary italic">
-                      No repositories yet. Switch to "No repository" mode and use clone_repo or init_repo.
+                      {t('aiAssistant.noRepositoriesYet')}
                     </div>
                   ) : (
                     sortedRepos.map(r => (
@@ -543,9 +605,9 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
                         onClick={() => switchSession(r.path)}
                       >
                         <div className="flex items-center gap-2 min-w-0">
-                          <Folder size={11} className="text-text-tertiary flex-shrink-0" />
+                          <Folder size={11} className="text-text-tertiary shrink-0" />
                           <span className="truncate flex-1">{r.name}</span>
-                          <span className="text-3xs text-text-tertiary flex-shrink-0">{formatAgo(Date.now() - r.lastOpened)}</span>
+                          <span className="text-3xs text-text-tertiary shrink-0">{formatAgo(Date.now() - r.lastOpened)}</span>
                         </div>
                         <div className="text-3xs text-text-tertiary mt-0.5 ml-[18px] truncate">{r.path}</div>
                       </button>
@@ -555,57 +617,67 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
               </>
             )}
           </div>
-          {/* Provider switcher — compact dropdown to switch LLM provider
-              ON THE FLY. Saves the current provider's config (URL+key+model)
-              and restores the new provider's saved config. Conversation
-              history is preserved — the new provider continues the chat. */}
+          {/* Provider switcher — lists the unlimited provider registry
+              (Settings → AI grid). Switching mid-conversation preserves
+              history; each entry keeps its own URL/key/model. */}
           <div className="relative ml-1">
             <button
               className="flex items-center gap-1 px-1.5 py-0.5 rounded text-2xs bg-bg-secondary border border-border-subtle hover:border-accent transition-colors"
               onClick={() => setShowProviderMenu(v => !v)}
-              title={settings?.aiProvider ? `Provider: ${getProviderPreset(settings.aiProvider).label}` : 'No provider selected'}
+              title={activeProvider ? `${t('aiAssistant.providerTitle')}: ${activeProvider.name}` : t('aiAssistant.noProviderSelected')}
             >
               <span className="truncate max-w-20">
-                {settings?.aiProvider
-                  ? getProviderPreset(settings.aiProvider).label.split(' ')[0]
-                  : 'no provider'}
+                {activeProvider
+                  ? activeProvider.name
+                  : t('aiAssistant.noProviderSelected')}
               </span>
               <span className="text-text-tertiary text-3xs">▾</span>
             </button>
             {showProviderMenu && (
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setShowProviderMenu(false)} />
-                <div className="absolute top-full right-0 mt-1 w-64 bg-bg-elevated border border-border-default rounded shadow-xl z-20 max-h-80 overflow-y-auto">
+                <div className="absolute top-full right-0 mt-1 w-64 bg-zone-popover border border-border-default rounded shadow-xl z-20 max-h-80 overflow-y-auto">
                   <div className="text-2xs uppercase tracking-wide text-text-tertiary font-semibold px-3 pt-2 pb-1">
-                    Switch AI Provider
+                    {t('aiAssistant.switchProvider')}
                   </div>
-                  {PROVIDER_PRESETS.map(p => (
+                  {enabledProviders.length === 0 && (
+                    <div className="px-3 py-2 text-2xs text-text-tertiary italic">
+                      {t('aiAssistant.noProvidersHint') || 'Add providers in Settings → AI.'}
+                    </div>
+                  )}
+                  {enabledProviders.map(p => (
                     <button
                       key={p.id}
                       className={cn(
                         'w-full text-left px-3 py-1.5 text-xs hover:bg-bg-hover transition-colors flex items-center gap-2',
-                        settings?.aiProvider === p.id && 'bg-accent-muted text-accent',
+                        activeProvider?.id === p.id && 'bg-accent-muted text-accent',
                       )}
-                      onClick={() => switchProvider(p.id)}
+                      onClick={() => void switchProvider(p.id)}
                     >
-                      <span className="flex-1 truncate">{p.label}</span>
-                      {p.freeTier && (
-                        <span className="text-3xs px-1 rounded bg-status-added/15 text-status-added">FREE</span>
-                      )}
-                      {settings?.aiProviderConfigs?.[p.id]?.apiKey && (
-                        <span className="text-3xs text-status-added" title="API key saved">✓</span>
+                      <span className="flex-1 truncate">{p.name}</span>
+                      {p.apiKey && (
+                        <span className="text-3xs text-status-added" title={t('common.apiKeySaved')}>✓</span>
                       )}
                     </button>
                   ))}
                   <div className="text-3xs text-text-tertiary px-3 py-1.5 border-t border-border-subtle">
-                    Switching preserves the conversation — the new provider continues the chat.
+                    {t('aiAssistant.switchProviderHint')}
                   </div>
                 </div>
               </>
             )}
           </div>
         </div>
-        <div className="flex items-center gap-1 flex-shrink-0">
+        <div className="flex items-center gap-1 shrink-0">
+          {/* Favorites toggle — tree of saved parts of the dialogue */}
+          <button
+            className={cn('icon-btn !w-5 !h-5', showFavorites ? '!text-accent' : 'hover:!text-accent')}
+            onClick={() => setShowFavorites(v => !v)}
+            title={t('aiFav.title')}
+            aria-label={t('aiFav.title')}
+          >
+            <Star size={11} />
+          </button>
           {messages.length > 0 && (
             <>
               {/* Export chat log as Markdown — used to share the
@@ -615,8 +687,8 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
               <button
                 className="icon-btn !w-5 !h-5 hover:!text-accent"
                 onClick={() => exportChatLog(messages, sessionRepoPath, sessionRepo?.name)}
-                title="Export chat log as Markdown (for debugging / sharing)"
-                aria-label="Export chat log"
+                title={t('aiAssistant.exportChatLog')}
+                aria-label={t('aiAssistant.exportChatLabel')}
               >
                 <Download size={11} />
               </button>
@@ -635,7 +707,14 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
         </div>
       </div>
 
-      {/* Messages */}
+      {/* Messages — or the favorites tree when toggled */}
+      {showFavorites ? (
+        <AiFavoritesPanel
+          className="flex-1 min-h-[300px] max-h-[60vh]"
+          onInsertToInput={(text) => setInput((input ? input.replace(/\s+$/, '') + '\n\n' : '') + text)}
+          onJumpToNote={jumpToNote}
+        />
+      ) : (
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 space-y-3 min-h-[300px] max-h-[60vh]">
         {messages.length === 0 ? (
           <div className="space-y-3">
@@ -680,7 +759,23 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
                   if (lastUserMsg) retryHandler = () => void handleSend(lastUserMsg!, true);
                 }
               }
-              return <MessageBubble key={idx} msg={msg} onRegenerate={retryHandler} />;
+              return (
+                <div
+                  key={idx}
+                  data-msg-idx={idx}
+                  className={cn(
+                    'rounded transition-colors',
+                    flashIdx === idx && 'bg-accent-muted/40 outline outline-1 outline-accent/60 -mx-1 px-1',
+                  )}
+                >
+                  <MessageBubble
+                    msg={msg}
+                    onRegenerate={retryHandler}
+                    onSaveFavorite={() => saveFavorite(msg)}
+                    t={t}
+                  />
+                </div>
+              );
             })}
           </>
         )}
@@ -691,29 +786,49 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
           </div>
         )}
       </div>
+      )}
 
       {/* Token usage bar — shows input/output tokens and context size.
           Helps the user understand how much of their quota is being
           consumed and whether the context is getting too large. */}
       {(tokenUsage.input > 0 || tokenUsage.output > 0) && (
         <div className="flex items-center gap-3 px-3 py-1 border-t border-border-subtle bg-bg-tertiary text-3xs text-text-tertiary">
-          <span title="Input tokens (sent to the model)">
-            <span className="text-text-secondary font-medium">↓ {tokenUsage.input.toLocaleString()}</span> in
+          <span title={t('aiAssistant.tokensInput')}>
+            <span className="text-text-secondary font-medium">↓ {tokenUsage.input.toLocaleString()}</span> {t('aiAssistant.tokensIn')}
           </span>
-          <span title="Output tokens (generated by the model)">
-            <span className="text-text-secondary font-medium">↑ {tokenUsage.output.toLocaleString()}</span> out
+          <span title={t('aiAssistant.tokensOutput')}>
+            <span className="text-text-secondary font-medium">↑ {tokenUsage.output.toLocaleString()}</span> {t('aiAssistant.tokensOut')}
           </span>
-          <span title="Total context size (all messages + tools sent to the model)">
-            <span className="text-text-secondary font-medium">∑ {tokenUsage.contextSize.toLocaleString()}</span> ctx
+          <span title={t('aiAssistant.tokensContext')}>
+            <span className="text-text-secondary font-medium">∑ {tokenUsage.contextSize.toLocaleString()}</span> {t('aiAssistant.tokensCtx')}
           </span>
           {tokenUsage.contextSize > 50000 && (
-            <span className="text-status-warning" title="Context is getting large — consider starting a new conversation">
-              ⚠ large context
+            <span className="text-status-warning" title={t('aiAssistant.largeContextTitle')}>
+              ⚠ {t('aiAssistant.largeContextWarn')}
             </span>
           )}
         </div>
       )}
 
+      {/* v2.3.11 — visible, actionable no-provider state. Before, the only
+          signal was a transient toast AFTER typing a message; now the panel
+          says what's missing and jumps straight to Settings → AI. */}
+      {enabledProviders.length === 0 && (
+        <div className="border-t border-border-default bg-bg-tertiary px-3 py-2 flex items-center gap-2">
+          <Sparkles size={12} className="text-text-tertiary shrink-0" />
+          <div className="flex-1 min-w-0">
+            <div className="text-xs font-medium text-text-primary">{t('aiAssistant.noProviderBanner')}</div>
+            <div className="text-2xs text-text-tertiary">{t('aiAssistant.noProviderBannerHint')}</div>
+          </div>
+          <button
+            className="btn btn-primary text-2xs shrink-0"
+            onClick={() => { window.location.hash = '#/settings?tab=ai'; onClose(); }}
+            title={t('aiAssistant.openSettings')}
+          >
+            {t('aiAssistant.openSettings')}
+          </button>
+        </div>
+      )}
       {/* Input */}
       <div className="border-t border-border-default p-2 flex items-end gap-2">
         <textarea
@@ -732,16 +847,16 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
           // Stop button — replaces the Send button while a request is in flight.
           // Aborts the in-flight fetch via the AbortController stored in abortRef.
           <button
-            className="btn btn-danger !px-2 !py-1 flex-shrink-0"
+            className="btn btn-danger !px-2 !py-1 shrink-0"
             onClick={handleStop}
-            title="Stop generation"
-            aria-label="Stop generation"
+            title={t('aiAssistant.stopGeneration')}
+            aria-label={t('aiAssistant.stopGeneration')}
           >
             <Square size={12} className="fill-current" />
           </button>
         ) : (
           <button
-            className="btn btn-primary !px-2 !py-1 flex-shrink-0"
+            className="btn btn-primary !px-2 !py-1 shrink-0"
             onClick={() => void handleSend()}
             disabled={!input.trim()}
             title={t('aiAssistant.send')}
@@ -750,6 +865,21 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
           </button>
         )}
       </div>
+      {/* Resize handles — left edge (horizontal), top edge (vertical),
+          top-left corner (diagonal). The panel is anchored bottom-right,
+          so we resize from the LEFT and TOP edges only. */}
+      <div
+        className="absolute top-0 left-0 bottom-0 w-1.5 cursor-ew-resize hover:bg-accent/30 transition-colors z-10"
+        onMouseDown={(e) => handleResizeStart(e, 'left')}
+      />
+      <div
+        className="absolute top-0 left-0 right-0 h-1.5 cursor-ns-resize hover:bg-accent/30 transition-colors z-10"
+        onMouseDown={(e) => handleResizeStart(e, 'top')}
+      />
+      <div
+        className="absolute top-0 left-0 w-3 h-3 cursor-nwse-resize hover:bg-accent/40 transition-colors rounded-tl-lg z-10"
+        onMouseDown={(e) => handleResizeStart(e, 'corner')}
+      />
     </div>
   );
 }
@@ -761,7 +891,7 @@ export function AiAssistant({ onClose }: { onClose: () => void }) {
  *   - assistant with tool_calls: italic "Calling tool..." bubble
  *   - assistant final: markdown-rendered with copy button
  */
-function MessageBubble({ msg, onRegenerate }: { msg: ChatMessage; onRegenerate?: () => void }) {
+export function MessageBubble({ msg, onRegenerate, onSaveFavorite, t }: { msg: ChatMessage; onRegenerate?: () => void; onSaveFavorite?: () => void; t: (key: string) => string }) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = useCallback(() => {
@@ -773,30 +903,42 @@ function MessageBubble({ msg, onRegenerate }: { msg: ChatMessage; onRegenerate?:
 
   if (msg.role === 'user') {
     return (
-      <div className="flex items-start gap-2 justify-end group">
+      <div className="flex flex-wrap items-start gap-2 justify-end group">
         <div className="flex flex-col items-end gap-0.5">
-          <div className="bg-accent text-text-inverse rounded-lg px-3 py-1.5 text-xs max-w-[80%] whitespace-pre-wrap break-words">
+          <div className="bg-accent text-text-inverse rounded-lg px-3 py-1.5 text-xs max-w-[80%] whitespace-pre-wrap wrap-break-word">
             {msg.content}
           </div>
           {/* Retry button — ALWAYS visible (not hover-only). Re-sends
               this message to get a fresh AI response. */}
-          {onRegenerate && (
-            <button
-              className="flex items-center gap-0.5 text-3xs text-text-tertiary hover:text-accent transition-colors"
-              onClick={onRegenerate}
-              title="Resend this message"
-            >
-              <RefreshCw size={9} />
-              Retry
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {onRegenerate && (
+              <button
+                className="flex items-center gap-0.5 text-3xs text-text-tertiary hover:text-accent transition-colors"
+                onClick={onRegenerate}
+                title={t('aiAssistant.resendMessage')}
+              >
+                <RefreshCw size={9} />
+                {t('aiAssistant.retry')}
+              </button>
+            )}
+            {onSaveFavorite && (
+              <button
+                className="flex items-center gap-0.5 text-3xs text-text-tertiary hover:text-accent transition-colors"
+                onClick={onSaveFavorite}
+                title={t('aiFav.saveTooltip')}
+              >
+                <Star size={9} />
+                {t('aiFav.save')}
+              </button>
+            )}
+          </div>
         </div>
-        <User size={14} className="flex-shrink-0 mt-0.5 text-text-tertiary" />
+        <User size={14} className="shrink-0 mt-0.5 text-text-tertiary" />
       </div>
     );
   }
   if (msg.role === 'tool') {
-    return <ToolResultBubble msg={msg} />;
+    return <ToolResultBubble msg={msg} t={t} />;
   }
   if (msg.role === 'assistant' && msg.toolCalls?.length) {
     // "Calling tool: get_status" — kept VERY compact (single line, no bubble,
@@ -821,29 +963,39 @@ function MessageBubble({ msg, onRegenerate }: { msg: ChatMessage; onRegenerate?:
   // assistant final answer — render with lightweight markdown + copy + retry.
   return (
     <div className="flex items-start gap-2 group">
-      <Bot size={14} className="flex-shrink-0 mt-0.5 text-accent" />
-      <div className="bg-bg-secondary rounded px-3 py-1.5 text-xs max-w-[85%] whitespace-pre-wrap break-words">
+      <Bot size={14} className="shrink-0 mt-0.5 text-accent" />
+      <div className="bg-bg-secondary rounded px-3 py-1.5 text-xs max-w-[85%] whitespace-pre-wrap wrap-break-word">
         <MarkdownLite text={msg.content} />
-        {/* Action buttons — Retry (regenerate) + Copy. Always visible. */}
-        <div className="mt-1 flex justify-end gap-2">
+        {/* Action buttons — Retry (regenerate) + Copy + Save to favorites. Always visible. */}
+        <div className="mt-1 flex flex-wrap justify-end gap-2">
           {onRegenerate && (
             <button
               onClick={onRegenerate}
               className="flex items-center gap-0.5 text-3xs text-text-tertiary hover:text-accent transition-colors"
-              title="Regenerate this response"
+              title={t('aiAssistant.regenerateResponse')}
             >
               <RefreshCw size={9} />
-              Retry
+              {t('aiAssistant.retry')}
             </button>
           )}
           <button
             onClick={handleCopy}
             className="flex items-center gap-0.5 text-3xs text-text-tertiary hover:text-accent transition-colors"
-            title="Copy message"
+            title={t('aiAssistant.copyMessage')}
           >
             {copied ? <Check size={9} className="text-status-added" /> : <Copy size={9} />}
-            {copied ? 'Copied' : 'Copy'}
+            {copied ? t('aiAssistant.copied') : t('aiAssistant.copy')}
           </button>
+          {onSaveFavorite && (
+            <button
+              onClick={onSaveFavorite}
+              className="flex items-center gap-0.5 text-3xs text-text-tertiary hover:text-accent transition-colors"
+              title={t('aiFav.saveTooltip')}
+            >
+              <Star size={9} />
+              {t('aiFav.save')}
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -865,9 +1017,10 @@ function MessageBubble({ msg, onRegenerate }: { msg: ChatMessage; onRegenerate?:
  * When expanded, the full content is shown in a scrollable monospace block
  * (max-h-60 so even 1000-line outputs don't take over the chat).
  */
-function ToolResultBubble({ msg }: { msg: ChatMessage }) {
+export function ToolResultBubble({ msg, t }: { msg: ChatMessage; t?: (key: string) => string }) {
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
+  const tFn = t ?? ((k: string) => k);
 
   const handleCopy = useCallback((e: React.MouseEvent) => {
     e.stopPropagation(); // don't toggle expand when clicking copy
@@ -880,9 +1033,9 @@ function ToolResultBubble({ msg }: { msg: ChatMessage }) {
   // One-line preview — first non-empty line, truncated.
   const firstLine = useMemo(() => {
     const line = msg.content.split('\n').find(l => l.trim());
-    if (!line) return '(empty result)';
+    if (!line) return tFn('aiAssistant.emptyResult');
     return line.length > 80 ? line.slice(0, 80) + '…' : line;
-  }, [msg.content]);
+  }, [msg.content, tFn]);
 
   // Total line count — shown as a badge so the user knows how much is hidden.
   const lineCount = useMemo(() => msg.content.split('\n').length, [msg.content]);
@@ -902,21 +1055,21 @@ function ToolResultBubble({ msg }: { msg: ChatMessage }) {
           <span className="text-text-tertiary truncate flex-1 ml-1 opacity-70">{firstLine}</span>
         )}
         {/* Line count badge — tells the user how much is hidden. */}
-        <span className="text-3xs text-text-tertiary flex-shrink-0 ml-auto px-1 rounded bg-bg-secondary">
-          {lineCount} {lineCount === 1 ? 'line' : 'lines'}
+        <span className="text-3xs text-text-tertiary shrink-0 ml-auto px-1 rounded bg-bg-secondary">
+          {lineCount} {lineCount === 1 ? tFn('aiAssistant.line') : tFn('aiAssistant.lines')}
         </span>
         {/* Copy button — always visible, stops propagation so it doesn't toggle. */}
         <span
           onClick={handleCopy}
-          className="icon-btn !w-4 !h-4 hover:text-accent flex-shrink-0 cursor-pointer"
-          title="Copy result"
+          className="icon-btn !w-4 !h-4 hover:text-accent shrink-0 cursor-pointer"
+          title={tFn('aiAssistant.copyResult')}
         >
           {copied ? <Check size={10} className="text-status-added" /> : <Copy size={10} />}
         </span>
       </button>
       {/* Content — only rendered when expanded. */}
       {expanded && (
-        <div className="px-2.5 pb-2 text-text-secondary max-h-60 overflow-y-auto whitespace-pre-wrap break-words border-t border-border-subtle">
+        <div className="px-2.5 pb-2 text-text-secondary max-h-60 overflow-y-auto whitespace-pre-wrap wrap-break-word border-t border-border-subtle">
           {msg.content}
         </div>
       )}
@@ -925,132 +1078,13 @@ function ToolResultBubble({ msg }: { msg: ChatMessage }) {
 }
 
 /**
- * Lightweight markdown renderer — no external dependency.
- * Supports the subset that LLMs commonly emit in chat:
- *   - ```code blocks``` (with language hint)
- *   - `inline code`
- *   - **bold**
- *   - - bullet lists
- *   - 1. numbered lists
- *   - paragraphs (split on \n\n)
+ * Lightweight markdown renderer — DELEGATES to MarkdownRenderer.tsx which has
+ * full support for syntax highlighting, tables, blockquotes, nested lists,
+ * headings, links, and task lists.
  *
- * For anything more complex (tables, nested lists, links), the raw text
- * is shown as-is. This keeps the bundle small (no react-markdown dep)
- * while covering ~95% of what LLMs actually produce in a git assistant.
+ * Kept as a thin wrapper for backwards compatibility (other files import
+ * MarkdownLite from this module).
  */
-function MarkdownLite({ text }: { text: string }) {
-  // Split into code-block and non-code-block segments. Code blocks are
-  // extracted first so their content isn't processed by the inline rules.
-  const segments = useMemo(() => {
-    const parts: { type: 'code' | 'text'; content: string; lang?: string }[] = [];
-    // Match ```lang\n...\n``` blocks (greedy match per block).
-    const re = /```(\w*)\n?([\s\S]*?)```/g;
-    let lastIdx = 0;
-    let match: RegExpExecArray | null;
-    while ((match = re.exec(text)) !== null) {
-      if (match.index > lastIdx) {
-        parts.push({ type: 'text', content: text.slice(lastIdx, match.index) });
-      }
-      parts.push({ type: 'code', content: match[2] || '', lang: match[1] || undefined });
-      lastIdx = match.index + match[0].length;
-    }
-    if (lastIdx < text.length) {
-      parts.push({ type: 'text', content: text.slice(lastIdx) });
-    }
-    return parts;
-  }, [text]);
-
-  return (
-    <div className="space-y-2">
-      {segments.map((seg, i) => {
-        if (seg.type === 'code') {
-          return (
-            <div key={i} className="relative">
-              <pre className="bg-bg-tertiary border border-border-subtle rounded p-2 text-2xs font-mono overflow-x-auto max-h-60">
-                <code>{seg.content}</code>
-              </pre>
-              {seg.lang && (
-                <span className="absolute top-1 right-2 text-3xs text-text-tertiary uppercase">
-                  {seg.lang}
-                </span>
-              )}
-            </div>
-          );
-        }
-        // Text segment — render with inline formatting (bold, inline code, lists).
-        return <TextSegment key={i} text={seg.content} />;
-      })}
-    </div>
-  );
-}
-
-/** Render a text segment with inline bold/code and bullet/numbered lists. */
-function TextSegment({ text }: { text: string }) {
-  // Split into lines, group consecutive bullet/numbered lines into <ul>/<ol>.
-  const lines = text.split('\n');
-  const blocks: React.ReactNode[] = [];
-  let listItems: { ordered: boolean; items: string[] } | null = null;
-
-  const flushList = (key: number) => {
-    if (!listItems) return;
-    if (listItems.ordered) {
-      blocks.push(
-        <ol key={`ol-${key}`} className="list-decimal ml-4 space-y-0.5 text-text-primary">
-          {listItems.items.map((it, i) => <li key={i}><InlineFormat text={it} /></li>)}
-        </ol>
-      );
-    } else {
-      blocks.push(
-        <ul key={`ul-${key}`} className="list-disc ml-4 space-y-0.5 text-text-primary">
-          {listItems.items.map((it, i) => <li key={i}><InlineFormat text={it} /></li>)}
-        </ul>
-      );
-    }
-    listItems = null;
-  };
-
-  lines.forEach((line, i) => {
-    const bulletMatch = line.match(/^\s*[-*]\s+(.*)$/);
-    const numberedMatch = line.match(/^\s*\d+\.\s+(.*)$/);
-    if (bulletMatch) {
-      if (!listItems || listItems.ordered) {
-        flushList(i);
-        listItems = { ordered: false, items: [] };
-      }
-      listItems.items.push(bulletMatch[1]);
-    } else if (numberedMatch) {
-      if (!listItems || !listItems.ordered) {
-        flushList(i);
-        listItems = { ordered: true, items: [] };
-      }
-      listItems.items.push(numberedMatch[1]);
-    } else {
-      flushList(i);
-      if (line.trim()) {
-        blocks.push(<p key={`p-${i}`} className="text-text-primary leading-relaxed"><InlineFormat text={line} /></p>);
-      }
-    }
-  });
-  flushList(lines.length);
-
-  return <>{blocks}</>;
-}
-
-/** Inline formatting: **bold** and `inline code`. */
-function InlineFormat({ text }: { text: string }) {
-  // Split on **bold** and `code` markers, preserving the markers.
-  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
-  return (
-    <>
-      {parts.map((part, i) => {
-        if (part.startsWith('**') && part.endsWith('**')) {
-          return <strong key={i} className="font-semibold text-text-primary">{part.slice(2, -2)}</strong>;
-        }
-        if (part.startsWith('`') && part.endsWith('`')) {
-          return <code key={i} className="px-1 py-0.5 rounded bg-bg-tertiary text-text-primary text-3xs font-mono">{part.slice(1, -1)}</code>;
-        }
-        return <span key={i}>{part}</span>;
-      })}
-    </>
-  );
+export function MarkdownLite({ text }: { text: string }) {
+  return <MarkdownRenderer text={text} />;
 }

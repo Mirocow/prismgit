@@ -1,14 +1,14 @@
-import { useState, useMemo, useCallback, useRef } from 'react';
+import { memo, useState, useMemo, useCallback, useRef } from 'react';
 import { type DiffResult, type DiffHunk, type DiffLine } from '../lib/api';
 import { api } from '../lib/api';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { cn } from '../lib/utils';
-import { RefreshCw, Copy, ChevronDown, ChevronRight, Download, Loader, ExternalLink } from './icons';
+import { RefreshCw, Copy, ChevronDown, ChevronRight, Download, Loader, ExternalLink, Pencil, Check } from './icons';
 import { wordDiff, type WordSegment } from '../lib/wordDiff';
 import { useI18n } from '../lib/i18n';
 import { useContextMenu } from '../lib/useContextMenu';
 import {
-  tokenizeLine, tokensToHtml, detectLang, type SupportedLang,
+  tokenizeLineCached, tokensToHtml, detectLang, type SupportedLang,
 } from '../lib/syntaxHighlight';
 
 interface DiffViewerProps {
@@ -66,14 +66,38 @@ function shouldShowLine(line: DiffLine, wsMode: WhitespaceMode): boolean {
  *
  * Falls back to plain text if the language is 'text' (unknown extension).
  */
+
+/**
+ * Syntax-highlight cache — keyed by `${lang}|${content}`. The tokenizer is
+ * O(n) per line, and a 1000-line diff with the same lang re-runs it 1000
+ * times per render. With this cache, repeated lines (common in diffs where
+ * only a few lines changed but context is shown) hit the cache.
+ *
+ * The cache is module-level (shared across all DiffViewer instances) and
+ * capped at 5000 entries (~250KB for typical code lines) — enough for a
+ * large diff without unbounded memory growth.
+ */
+const SYNTAX_CACHE = new Map<string, string>();
+const SYNTAX_CACHE_MAX = 5000;
+
 function highlightLine(content: string, lang: SupportedLang): React.ReactNode {
   if (lang === 'text' || !content) return content;
-  const tokens = tokenizeLine(content, lang);
-  const html = tokensToHtml(tokens);
+  const cacheKey = `${lang}|${content}`;
+  let html = SYNTAX_CACHE.get(cacheKey);
+  if (html === undefined) {
+    const tokens = tokenizeLineCached(content, lang);
+    html = tokensToHtml(tokens);
+    // Evict the oldest entry if the cache is full.
+    if (SYNTAX_CACHE.size >= SYNTAX_CACHE_MAX) {
+      const oldestKey = SYNTAX_CACHE.keys().next().value;
+      if (oldestKey !== undefined) SYNTAX_CACHE.delete(oldestKey);
+    }
+    SYNTAX_CACHE.set(cacheKey, html);
+  }
   return <span dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
-export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit', onStaged, onForceCompare }: DiffViewerProps) {
+function DiffViewerImpl({ diff, loading, repoPath, filePath, mode = 'commit', onStaged, onForceCompare }: DiffViewerProps) {
   const toast = useToastActions();
   const { t } = useI18n();
   const showContextMenu = useContextMenu();
@@ -140,30 +164,36 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
    * and allocates a Uint32Array up to 2MB per call. For a 1000-line diff this
    * was 1000 wordDiff() calls on every click = 1-5s of frozen UI.
    *
-   * Now: wordDiff is computed once and cached by line identity. Clicking a
-   * line only triggers a cheap JSX re-render (Set.has lookup) — no LCS.
+   * Now: wordDiff is computed LAZILY (on first access for each line) and
+   * cached by line identity. Only lines that are actually rendered pay the
+   * LCS cost — lines beyond MAX_LINES_PER_HUNK that are never shown don't
+   * get their word-diff computed at all.
    */
-  const wordDiffCache = useMemo(() => {
+  const wordDiffCacheRef = useRef<Map<string, { segs: WordSegment[]; isDel: boolean }>>(new Map());
+  // Clear the cache when the diff changes — otherwise stale word-diffs from
+  // the previous file's diff would leak into the new one.
+  const prevDiffRef = useRef(diff);
+  if (prevDiffRef.current !== diff) {
+    prevDiffRef.current = diff;
+    wordDiffCacheRef.current.clear();
+  }
+
+  const getWordDiff = useCallback((hunkIdx: number, lineIdx: number, line: DiffLine, paired: DiffLine): { segs: WordSegment[]; isDel: boolean } | null => {
     if (!diff || !useWordDiff) return null;
-    // Key: `${hunkIdx}:${lineIdx}` → WordSegment[] for that line
-    const cache = new Map<string, { segs: WordSegment[]; isDel: boolean }>();
-    diff.hunks.forEach((hunk, hi) => {
-      hunk.lines.forEach((line, li) => {
-        if (line.type !== 'add' && line.type !== 'del') return;
-        const paired = findPairedLine(hunk.lines, li);
-        if (!paired) return;
-        const content = line.content || '';
-        const oldContent = line.type === 'del' ? content : (paired.content || '');
-        const newContent = line.type === 'add' ? content : (paired.content || '');
-        const { old: oldSegs, new: newSegs } = wordDiff(oldContent, newContent);
-        cache.set(`${hi}:${li}`, {
-          segs: line.type === 'del' ? oldSegs : newSegs,
-          isDel: line.type === 'del',
-        });
-      });
-    });
-    return cache;
-  }, [diff, useWordDiff, findPairedLine]);
+    const key = `${hunkIdx}:${lineIdx}`;
+    const cached = wordDiffCacheRef.current.get(key);
+    if (cached) return cached;
+    const content = line.content || '';
+    const oldContent = line.type === 'del' ? content : (paired.content || '');
+    const newContent = line.type === 'add' ? content : (paired.content || '');
+    const { old: oldSegs, new: newSegs } = wordDiff(oldContent, newContent);
+    const result = {
+      segs: line.type === 'del' ? oldSegs : newSegs,
+      isDel: line.type === 'del',
+    };
+    wordDiffCacheRef.current.set(key, result);
+    return result;
+  }, [diff, useWordDiff]);
 
   /**
    * Render a diff line with word-level highlighting.
@@ -182,16 +212,20 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
       if (!useWordDiff || !pairedLine) {
         return lang ? highlightLine(content, lang) : content;
       }
-      const cached = wordDiffCache?.get(`${hunkIdx}:${lineIdx}`);
+      // Lazy word-diff: compute on first access, then cache. This avoids
+      // the O(m·n) LCS cost for lines that are never rendered (e.g. lines
+      // beyond MAX_LINES_PER_HUNK that the user hasn't expanded).
+      const cached = getWordDiff(hunkIdx, lineIdx, line, pairedLine);
       if (!cached) {
         return lang ? highlightLine(content, lang) : content;
       }
       return cached.segs.map((seg, i) => {
         if (seg.kind === 'equal') {
           // Apply syntax highlighting to 'equal' segments so keywords/strings
-          // keep their colors even when word-diff is active.
+          // keep their colors even when word-diff is active. Uses the same
+          // SYNTAX_CACHE as highlightLine() so repeated segments hit the cache.
           if (lang) {
-            return <span key={i} dangerouslySetInnerHTML={{ __html: tokensToHtml(tokenizeLine(seg.text, lang)) }} />;
+            return <span key={i} dangerouslySetInnerHTML={{ __html: tokensToHtml(tokenizeLineCached(seg.text, lang)) }} />;
           }
           return <span key={i}>{seg.text}</span>;
         }
@@ -206,7 +240,7 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
         return <span key={i} className={highlightClass} style={highlightStyle}>{seg.text}</span>;
       });
     },
-    [useWordDiff, lang, wordDiffCache]
+    [useWordDiff, lang, getWordDiff]
   );
 
   const toggleHunk = useCallback((idx: number) => {
@@ -336,6 +370,67 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
     }
   }, [repoPath, filePath, toast, t]);
 
+  // ─── Edit-and-save flow ────────────────────────────────────────────────
+  // The user complaint: Diff tool was read-only. Now we add an "Edit" button
+  // that opens the file in the OS default editor (or VSCode if available).
+  // After the user saves and returns, a "Stage changes?" prompt asks whether
+  // to `git add` the just-edited file.
+  const [stagePromptOpen, setStagePromptOpen] = useState(false);
+  const [staging, setStaging] = useState(false);
+
+  const handleEditFile = useCallback(async () => {
+    if (!repoPath || !filePath) return;
+    // Open the working-tree file in the OS default editor. The user edits,
+    // saves, closes the editor, then we offer to stage the result.
+    // We DON'T wait for the editor to close (no portable way to do that
+    // from Electron's shell.openPath) — instead, after the user returns
+    // focus to the app, we show the "Stage changes?" prompt.
+    const fullPath = repoPath.replace(/\/+$/, '') + '/' + filePath;
+    const ok = await api.git.openFile(fullPath);
+    if (!ok) {
+      toast.error(t('diff.editOpenFailed', { defaultValue: 'Failed to open file for editing' }));
+      return;
+    }
+    toast.info(
+      t('diff.editOpened', { defaultValue: 'File opened for editing' }),
+      t('diff.editOpenedHint', { defaultValue: 'Save your changes in the editor, then return here to stage them.' })
+    );
+    // After ~2s of focus loss + regain, prompt for staging. We use a
+    // window focus event listener so the prompt only appears AFTER the
+    // user comes back to the app (i.e. after editing).
+    const onFocusBack = () => {
+      window.removeEventListener('focus', onFocusBack);
+      // Small delay so the editor has time to flush the write.
+      setTimeout(() => setStagePromptOpen(true), 500);
+    };
+    // Only prompt on the NEXT focus event — don't attach a permanent
+    // listener (would fire on every focus change afterwards).
+    window.addEventListener('focus', onFocusBack, { once: true });
+  }, [repoPath, filePath, toast, t]);
+
+  const handleStageAfterEdit = useCallback(async () => {
+    if (!repoPath || !filePath) return;
+    setStaging(true);
+    try {
+      await api.git.add(repoPath, [filePath]);
+      toast.success(
+        t('diff.stagedAfterEdit', { defaultValue: 'Staged {file}', file: filePath.split('/').pop() ?? filePath })
+      );
+      setStagePromptOpen(false);
+      // Notify the parent (Changes page / Diff page) so it refreshes the
+      // status — the just-staged file should now appear in the staged list.
+      onStaged?.();
+    } catch (e) {
+      toast.error(t('diff.stageFailed', { defaultValue: 'Failed to stage file' }), String(e));
+    } finally {
+      setStaging(false);
+    }
+  }, [repoPath, filePath, toast, t, onStaged]);
+
+  const handleDiscardEditPrompt = useCallback(() => {
+    setStagePromptOpen(false);
+  }, []);
+
   const rendered = useMemo(() => {
     if (!diff || diff.binary) return null;
 
@@ -413,16 +508,16 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
                     showLineContextMenu(e, lineNo);
                   }}
                 >
-                  <span className="w-12 flex-shrink-0 text-right pr-2 text-text-tertiary select-none border-r border-border-subtle group-hover:bg-bg-hover">
+                  <span className="w-12 shrink-0 text-right pr-2 text-text-tertiary select-none border-r border-border-subtle group-hover:bg-bg-hover">
                     {line.oldLineNumber ?? ''}
                   </span>
-                  <span className="w-12 flex-shrink-0 text-right pr-2 text-text-tertiary select-none border-r border-border-subtle group-hover:bg-bg-hover">
+                  <span className="w-12 shrink-0 text-right pr-2 text-text-tertiary select-none border-r border-border-subtle group-hover:bg-bg-hover">
                     {line.newLineNumber ?? ''}
                   </span>
                   {highlightMode === 'text' && (
                     <span
                       className={cn(
-                        'w-6 flex-shrink-0 text-center select-none font-bold',
+                        'w-6 shrink-0 text-center select-none font-bold',
                         isAdd ? 'text-status-added' : isDel ? 'text-status-deleted' : 'text-text-tertiary'
                       )}
                     >
@@ -479,7 +574,7 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
                   if (line.type === 'add') {
                     return (
                       <div key={li} className="flex hover:bg-bg-hover font-mono text-xs" style={{ lineHeight: '20px', minHeight: '20px' }}>
-                        <span className="w-10 flex-shrink-0 text-right pr-2 text-text-tertiary select-none">{line.oldLineNumber ?? ''}</span>
+                        <span className="w-10 shrink-0 text-right pr-2 text-text-tertiary select-none">{line.oldLineNumber ?? ''}</span>
                         {/* Empty placeholder for 'add' line in the OLD pane —
                             background tint (not text color) for both modes. */}
                         <pre className="flex-1 pl-2 whitespace-pre-wrap m-0" style={{ fontFamily: 'inherit', background: 'var(--diff-added-line)' }}> </pre>
@@ -500,7 +595,7 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
                       style={{ lineHeight: '20px', minHeight: '20px' }}
                       onClick={() => isDel && toggleLineSelection(hi, li)}
                     >
-                      <span className="w-10 flex-shrink-0 text-right pr-2 text-text-tertiary select-none">{line.oldLineNumber ?? ''}</span>
+                      <span className="w-10 shrink-0 text-right pr-2 text-text-tertiary select-none">{line.oldLineNumber ?? ''}</span>
                       <pre className={cn('flex-1 pl-2 whitespace-pre-wrap m-0', textColor)} style={{ fontFamily: 'inherit' }}>
                         {highlightMode === 'background' && lang
                           ? highlightLine(line.content || ' ', lang)
@@ -516,7 +611,7 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
                   if (line.type === 'del') {
                     return (
                       <div key={li} className="flex hover:bg-bg-hover font-mono text-xs" style={{ lineHeight: '20px', minHeight: '20px' }}>
-                        <span className="w-10 flex-shrink-0 text-right pr-2 text-text-tertiary select-none">{line.newLineNumber ?? ''}</span>
+                        <span className="w-10 shrink-0 text-right pr-2 text-text-tertiary select-none">{line.newLineNumber ?? ''}</span>
                         {/* Empty placeholder for 'del' line in the NEW pane —
                             background tint (not text color) for both modes. */}
                         <pre className="flex-1 pl-2 whitespace-pre-wrap m-0" style={{ fontFamily: 'inherit', background: 'var(--diff-removed-line)' }}> </pre>
@@ -537,7 +632,7 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
                       style={{ lineHeight: '20px', minHeight: '20px' }}
                       onClick={() => isAdd && toggleLineSelection(hi, li)}
                     >
-                      <span className="w-10 flex-shrink-0 text-right pr-2 text-text-tertiary select-none group-hover:bg-bg-hover">{line.newLineNumber ?? ''}</span>
+                      <span className="w-10 shrink-0 text-right pr-2 text-text-tertiary select-none group-hover:bg-bg-hover">{line.newLineNumber ?? ''}</span>
                       <pre className={cn('flex-1 pl-2 whitespace-pre-wrap m-0', textColor)} style={{ fontFamily: 'inherit' }}>
                         {highlightMode === 'background' && lang
                           ? highlightLine(line.content || ' ', lang)
@@ -600,7 +695,7 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-bg-primary">
       {/* Diff header */}
-      <div className="px-3 py-2 border-b border-border-default text-xs bg-bg-secondary flex items-center justify-between flex-shrink-0 gap-2">
+      <div className="px-3 py-2 border-b border-border-default text-xs bg-bg-secondary flex items-center justify-between shrink-0 gap-2">
         <div className="flex items-center gap-2 min-w-0">
           {diff.newFile && <span className="badge badge-added">{t('diff.badgeNew')}</span>}
           {diff.deletedFile && <span className="badge badge-deleted">{t('diff.badgeDeleted')}</span>}
@@ -608,7 +703,7 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
           {diff.modeChange && <span className="badge badge-modified">{t('diff.badgeMode')}</span>}
           <span className="font-mono truncate text-text-primary">{diff.newPath}</span>
         </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="flex items-center gap-2 shrink-0">
           <span className="text-status-added font-medium">+{addedLines}</span>
           <span className="text-status-deleted font-medium">-{removedLines}</span>
           {diff.hunks.length > 1 && (
@@ -772,6 +867,19 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
               {mode === 'staged' ? t('diff.unstage') : t('toolbar.stage')} {t('diff.selectionCount', { count: selectedLines.size })}
             </button>
           )}
+          {/* Edit-and-save — opens the working-tree file in the OS default
+              editor (or VSCode if available). After the user returns to the
+              app, a "Stage changes?" prompt offers to `git add` the result. */}
+          {repoPath && filePath && !diff.binary && (
+            <button
+              className="btn btn-secondary text-2xs !py-0.5 !px-2"
+              onClick={handleEditFile}
+              title={t('diff.editFileTooltip', { defaultValue: 'Edit this file in your editor. After saving, you’ll be prompted to stage the changes.' })}
+            >
+              <Pencil size={11} />
+              {t('diff.editFile', { defaultValue: 'Edit' })}
+            </button>
+          )}
         </div>
       </div>
       {/* Diff content */}
@@ -781,6 +889,60 @@ export function DiffViewer({ diff, loading, repoPath, filePath, mode = 'commit',
           <div className="p-4 text-sm text-text-tertiary">{t('diff.noChanges')}</div>
         )}
       </div>
+
+      {/* Stage-after-edit prompt. Shows up after the user returns to the app
+          from the editor (handleEditFile schedules it via a window focus
+          listener). Asks whether to `git add` the just-edited file. */}
+      {stagePromptOpen && (
+        <div
+          className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50 animate-fade-in"
+          onClick={handleDiscardEditPrompt}
+        >
+          <div
+            className="panel w-[420px] flex flex-col shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border-default">
+              <h3 className="text-base font-medium flex items-center gap-2">
+                <Check size={16} className="text-status-added" />
+                {t('diff.stageAfterEditTitle', { defaultValue: 'Stage edited changes?' })}
+              </h3>
+            </div>
+            <div className="p-4 space-y-2">
+              <div className="text-sm text-text-primary">
+                {t('diff.stageAfterEditBody', { defaultValue: 'You edited {file} in your editor. Stage the changes now?', file: filePath?.split('/').pop() ?? '' })}
+              </div>
+              <div className="text-xs text-text-tertiary">
+                {t('diff.stageAfterEditHint', { defaultValue: 'Staging adds the file to the index so it can be committed. You can also stage later from the Changes page.' })}
+              </div>
+            </div>
+            <div className="flex flex-wrap justify-end gap-2 px-4 py-3 border-t border-border-default">
+              <button className="btn btn-secondary" onClick={handleDiscardEditPrompt}>
+                {t('common.cancel', { defaultValue: 'Cancel' })}
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={handleStageAfterEdit}
+                disabled={staging}
+              >
+                {staging ? <Loader size={13} className="spin" /> : <Check size={13} />}
+                {t('toolbar.stage', { defaultValue: 'Stage' })}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
+/**
+ * RENDER-PERF: DiffViewer is expensive to reconcile (its `rendered` useMemo
+ * guards the heavy tree, but every parent re-render still re-ran the whole
+ * function body + hook chain). memo() lets it bail out entirely when the
+ * parent re-renders for unrelated reasons (status refreshes, banner toggles,
+ * toasts) as long as props keep stable identities — ChangesPage now passes
+ * a useCallback'd onStaged and the diff/state props are stable between
+ * refreshes.
+ */
+export const DiffViewer = memo(DiffViewerImpl);

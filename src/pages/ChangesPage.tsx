@@ -1,20 +1,26 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import type { AppSettings } from '../../electron/types/settings-api';
-import { CommitMarkdownPreview } from '../components/CommitMarkdownPreview';
+import { CommitMessageEditor, type CommitMessageEditorHandle } from '../components/CommitMessageEditor';
 import { CommitTypeDropdown } from '../components/CommitTypeDropdown';
 import { DiffViewer } from '../components/DiffViewer';
 import { DirTreePanel, ROOT_KEY } from '../components/DirTreePanel';
 import { FilterInput } from '../components/FilterInput';
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Cubes, Download, EyeOff, FileCheck, FilePlus, Folder, FolderOpen, GitCommit, GitPullRequest, ListTree, Loader, Lock, Minus, Plus, RefreshCw, RotateCcw, Route, SkipForward, Sparkles, SplitSquareHorizontal, Trash, X } from '../components/icons';
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Cubes, Download, EyeOff, FileCheck, FilePlus, Folder, FolderOpen, GitCommit, GitPullRequest, ListTree, Lock, Minus, Plus, RefreshCw, RotateCcw, Route, SkipForward, Sparkles, SplitSquareHorizontal, Trash, X } from '../components/icons';
 import { LazyFileList } from '../components/LazyFileList';
 import { RepoStateBanner } from '../components/RepoStateBanner';
 import { ResizableSplitter, useResizableHeight, useResizableWidth } from '../components/ResizableSplitter';
 import { CommitHashLink } from '../components/StatusBar';
 import { applyAIPlaceholder, detectAIPlaceholder, generateCommitMessage, generateCommitMessageStream, type LLMProvider } from '../lib/aiCommitMessages';
+import { llmErrorDetail } from '../lib/aiErrors';
+import { buildProviderFromSettings } from '../lib/aiUtils';
+import { LS_FILES_V_ARGS, parseLsFilesV } from '../lib/changesIndexScan';
 import { api, type DiffResult, type DirNode, type FileStatus, type LogEntry } from '../lib/api';
-import { formatTime, getAuthorColor, getInitials } from '../lib/authorBadges';
+import { findCommentLines, resolveCommentChar, stripCommitComments } from '../lib/commitMessage';
+import { formatTime } from '../lib/authorBadges';
+import { Avatar } from '../components/Avatar';
 import { buildFileMenu, getIndexFlagsAsync, invalidateIndexFlagsCache, runFileAction, type IndexFlags } from '../lib/fileContextMenu';
 import { useI18n } from '../lib/i18n';
+import { computeStateColumnWidth, measureTextWidth, UI_FONT_STACK } from '../lib/measure';
 import { loadProjectPrefs, saveProjectPrefs } from '../lib/projectPrefs';
 import { describePushResult } from '../lib/pushResult';
 import { RefBadges } from '../lib/refBadge';
@@ -22,6 +28,9 @@ import { isCommitBlocked } from '../lib/repoState';
 import { useContextMenu } from '../lib/useContextMenu';
 import { cn, getStatusColor } from '../lib/utils';
 import { useGitStore } from '../stores/gitStore';
+import { offerPushRejection } from '../stores/pushRejectionStore';
+import { offerSslBypass } from '../stores/sslBypassStore';
+import { offerAuthBypass } from '../stores/authBypassStore';
 import { useOperationLogStore } from '../stores/operationLogStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore, type FileDisplayFlag } from '../stores/selectionStore';
@@ -29,25 +38,16 @@ import { useSettingsStore } from '../stores/settingsStore';
 import { useToastActions } from '../stores/toastStore';
 
 import { confirmDialog, promptDialog } from '../components/ConfirmDialog';
+import { confirmWithRemember, CONFIRMATION_IDS } from '../lib/confirmations';
+import { getLowLevelNumber } from '../lib/lowLevelProps';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 
+// 2.2 — module-level throttle: the slow-rename hint appears at most once
+// per app session (reset by reloading the window).
+let slowRenameToastShown = false;
+
 /** Build an LLMProvider from settings, or null if not configured. */
-function buildAIProvider(settings: Partial<AppSettings> | undefined): LLMProvider | null {
-  if (!settings?.aiProvider) return null;
-  const type = settings.aiProvider as LLMProvider['type'];
-  const id = settings.aiProvider;
-  const url = settings.aiUrl || '';
-  const model = settings.aiModel || '';
-  if (!model) return null;
-  return {
-    id,
-    name: id,
-    type,
-    url,
-    apiKey: settings.aiApiKey,
-    model,
-  };
-}
+const buildAIProvider = buildProviderFromSettings;
 
 interface ChangesPageProps {
   onResolveConflict?: (file: string) => void;
@@ -126,7 +126,14 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   // state change (e.g. clone progress, fetch metadata) re-rendered the
   // entire 1969-line page. Now only `status` changes trigger re-render.
   const status = useGitStore((s) => s.status);
-  const lastRefresh = useGitStore((s) => s.lastRefresh);
+  // RENDER-PERF: `lastRefresh` is NOT subscribed here anymore. The numstat
+  // reload below needs to fire when the status refresh completes, but a
+  // hook subscription re-rendered this entire page (2.9k lines, thousands
+  // of file rows) on EVERY refresh tick (~5s under watcher churn) even
+  // when the status content was identical. The store's subscribe()
+  // listener now triggers the reload imperatively — zero re-renders.
+  // (status is still subscribed: the file list itself legitimately
+  // re-renders when the content changes.)
   const refreshStatus = useGitStore((s) => s.refreshStatus);
   const stageFiles = useGitStore((s) => s.stageFiles);
   const stageAll = useGitStore((s) => s.stageAll);
@@ -134,6 +141,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   const push = useGitStore((s) => s.push);
   const pull = useGitStore((s) => s.pull);
   const settings = useSettingsStore((s) => s.settings);
+  const setSetting = useSettingsStore((s) => s.setSetting);
   const toast = useToastActions();
 
   // Listen for conflict resolution requests from GitToolbar
@@ -166,6 +174,22 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   const toggleDirTreeVisible = useSelectionStore((s) => s.toggleDirTreeVisible);
   const colWidths = useSelectionStore((s) => s.colWidths);
   const setColWidth = useSelectionStore((s) => s.setColWidth);
+
+  // ── Locale-aware state column width ─────────────────────────────────────
+  // RU/DE status labels are 2-4x longer than the EN ones the 70px default
+  // was sized for ("Unstaged" -> "Рабочее дерево"). The column clamps to the
+  // longest localized label so text is never cut; users can still make it
+  // WIDER by dragging the header resizer (Math.max keeps the larger value).
+  const stateColWidth = computeStateColumnWidth(
+    colWidths.state,
+    [
+      t('changes.statusUntracked'), t('changes.conflicted'), t('changes.statusModified'),
+      t('changes.stateAdded'), t('changes.statusDeleted'), t('changes.statusRenamed'),
+      t('changes.stateCopied'), t('changes.stateUnchanged'), t('changes.stateIgnored'),
+      t('changes.stateAssumeUnchanged'), t('changes.stateSkipped'), t('changes.stateSubmodule'),
+    ],
+    (s) => measureTextWidth(s, `italic 12px ${UI_FONT_STACK}`),
+  );
 
   // Sync 'subdirectories' flag with file scope:
   //   subdirectories ON  → show files from current dir AND all subdirectories
@@ -245,7 +269,16 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   };
   const [diff, setDiff] = useState<DiffResult | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
-  const [commitMsg, setCommitMsg] = useState('');
+  // RENDER-PERF: the commit-message draft lives in the isolated
+  // CommitMessageEditor child (ref-imperative API). Keeping the draft in
+  // THIS component's state re-rendered the entire page (~3k lines, three
+  // file lists, DiffViewer) on EVERY keystroke and on every AI-stream token
+  // (20-50 full-page renders/s during generation). The page now re-renders
+  // at most twice per message: on empty <-> non-empty transitions
+  // (commitMsgEmpty, used only for the Commit buttons' disabled state).
+  const editorRef = useRef<CommitMessageEditorHandle>(null);
+  const [commitMsgEmpty, setCommitMsgEmpty] = useState(true);
+  const handleCommitMsgEmptyChange = useCallback((empty: boolean) => setCommitMsgEmpty(empty), []);
   const [amend, setAmend] = useState(false);
   // ── Auto-suggest commit message ───────────────────────────────────────
   // When the user stages files and the commit message is empty, the AI
@@ -258,6 +291,18 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   const aiSuggestAbortRef = useRef<AbortController | null>(null);
   // When true, commit auto-stages all changes before committing (git add . && git commit)
   const [commitAll, setCommitAll] = useState(false);
+  // ── SmartGit Preferences → Commands — activated settings ───────────────
+  // 0.3 EOL-only changes: paths whose ONLY difference is line endings
+  // (CRLF↔LF). Detected in the background when distinguishEolChanges is on;
+  // rendered as an "EOL" badge in the file rows + hideable via a toggle.
+  const [eolOnlyPaths, setEolOnlyPaths] = useState<Set<string>>(new Set());
+  const [hideEolOnly, setHideEolOnly] = useState(false);
+  // 1.1 core.commentChar for the commit-message comment detection ('#' default).
+  const [commentChar, setCommentChar] = useState('#');
+  // 1.2 "If nothing is staged" — SmartGit's 3-button dialog.
+  const [showNothingStagedDialog, setShowNothingStagedDialog] = useState(false);
+  // 1.3 Suggestion banners (add untracked / stage missing) — dismiss per session.
+  const [dismissedBanners, setDismissedBanners] = useState<Set<'untracked' | 'missing'>>(new Set());
   const [fileFilter, setFileFilter] = useState('');
   const [draggedFile, setDraggedFile] = useState<string | null>(null);
   const [journal, setJournal] = useState<LogEntry[]>([]);
@@ -326,26 +371,44 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     return () => clearTimeout(t);
   }, [repo.path, leftWidth, treeWidth, journalHeight, commitHeight]);
 
+  // RACE FIX (R4): per-request counter — when the user clicks file A then
+  // file B within 150 ms, both loadDiff() calls fire. If A resolves AFTER
+  // B, `setDiff(diffA)` would overwrite B's diff with stale content.
+  // The counter tags each request; only the latest request's result is
+  // applied to state.
+  const diffRequestIdRef = useRef(0);
+
   const loadDiff = useCallback(
     async (file: string, staged: boolean) => {
+      const requestId = ++diffRequestIdRef.current;
       setDiffLoading(true);
       try {
         const result = await api.git.diff(repo.path, file, { staged });
+        // Stale-write guard: only apply the result if this is still the
+        // latest request. If the user has selected another file in the
+        // meantime, drop the result on the floor.
+        if (requestId !== diffRequestIdRef.current) return;
         setDiff(result);
       } catch (e) {
+        if (requestId !== diffRequestIdRef.current) return;
         toast.error(t('changes.loadDiffFailed'), String(e));
         setDiff(null);
       } finally {
-        setDiffLoading(false);
+        if (requestId === diffRequestIdRef.current) setDiffLoading(false);
       }
     },
-    [repo.path, toast]
+    [repo.path, toast, t]
   );
 
   const loadJournal = useCallback(async () => {
     setJournalLoading(true);
     try {
-      const result = await api.git.log(repo.path, { maxCount: 20 });
+      // User-configurable journal size (Settings → Git → "Changes journal
+      // commit count"). Default 20; clamp to [5, 100] so a misconfigured
+      // value can't nuke the UI with 1000-row logs or break with 0.
+      const rawCount = (settings as { changesJournalCount?: number }).changesJournalCount;
+      const count = Math.min(100, Math.max(5, rawCount ?? 20));
+      const result = await api.git.log(repo.path, { maxCount: count });
       setJournal(result);
     } catch (e) {
       // Previously this was a silent catch — but it hid real bugs (the most
@@ -357,7 +420,30 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     } finally {
       setJournalLoading(false);
     }
-  }, [repo.path, toast, t]);
+  }, [repo.path, settings, toast, t]);
+
+  // ─── Debounced journal loading ─────────────────────────────────────────
+  // The journal (last N commits) was being reloaded on EVERY status refresh
+  // (file-watcher tick, commit, stage, etc.) — which spawned a `git log -N`
+  // subprocess each time. On a repo with LFS, each git invocation takes
+  // 1-5 seconds, so the journal was the #1 source of git subprocess spam.
+  //
+  // The user explicitly asked for this to be configurable from Settings
+  // ('Сделать настраиваемым из Setting частоту обращения к "git log -20"
+  // сейчас летит огромное кол-во запросов'). We read the debounce interval
+  // from settings.changesJournalIntervalSec (default 5s).
+  //
+  // 0 = reload on every event (NOT recommended — restores the spam bug).
+  const journalLoadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadJournalDebounced = useCallback(() => {
+    if (journalLoadTimerRef.current) clearTimeout(journalLoadTimerRef.current);
+    const intervalSec = (settings as { changesJournalIntervalSec?: number }).changesJournalIntervalSec ?? 5;
+    const intervalMs = Math.max(0, intervalSec) * 1000;
+    journalLoadTimerRef.current = setTimeout(() => {
+      journalLoadTimerRef.current = null;
+      void loadJournal();
+    }, intervalMs);
+  }, [loadJournal, settings]);
 
   // Load diff when selected file changes — debounced to avoid multiple calls
   // when status refreshes or multiple events fire simultaneously.
@@ -380,9 +466,29 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     return () => clearTimeout(timer);
   }, [selectedFile, status, loadDiff]);
 
+  // PERF (v3.1, repo-open): the journal is COLLAPSED by default (Task 9),
+  // yet its `git log -20` spawn fired in the same burst as status /
+  // numstat / ls-files — competing with the data the user actually sees
+  // first. Defer the initial load: longer when the panel is collapsed
+  // (content invisible — only the header count updates late), short when
+  // it's expanded (user is looking at it). Uses journalLoadTimerRef so an
+  // expand-click CANCELS the pending timer and loads immediately (no
+  // double spawn), and the debounce path (stage/commit events) behaves
+  // exactly as before.
   useEffect(() => {
-    loadJournal();
-  }, [loadJournal]);
+    const initialDelay = journalCollapsed ? 700 : 120;
+    journalLoadTimerRef.current = setTimeout(() => {
+      journalLoadTimerRef.current = null;
+      void loadJournal();
+    }, initialDelay);
+    return () => {
+      if (journalLoadTimerRef.current) {
+        clearTimeout(journalLoadTimerRef.current);
+        journalLoadTimerRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repo.path]); // Only reload journal when repo changes — NOT on every status refresh
 
   const loadDirTree = useCallback(async () => {
     setDirTreeLoading(true);
@@ -402,15 +508,26 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     }
   }, [repo.path, fileDisplayFlags]);
 
-  const loadTrackedCount = useCallback(async () => {
+  // PERF (v3.1): `ls-files` + `ls-files -v` MERGED into ONE index walk — the
+  // `-v` output is the plain listing with a one-char tag prefix, so a single
+  // call yields the tracked count, the unchanged-files list, AND the
+  // assume-unchanged / skip-worktree flags (see lib/changesIndexScan.ts).
+  // On a 50k-file repo this halves the repo-open index-scan cost.
+  const loadTrackedAndIndexFlags = useCallback(async () => {
     try {
-      const out = await api.git.raw(repo.path, ['ls-files']);
-      const list = out ? out.split('\n').filter(Boolean) : [];
-      setTrackedTotal(list.length);
-      setTrackedFilesList(list);
+      // v3.6: worker-process read — the whole-index ls-files output never
+      // crosses the main loop (repo-switch freeze fix).
+      const out = await api.git.rawBackground(repo.path, [...LS_FILES_V_ARGS]);
+      const scan = parseLsFilesV(out);
+      setTrackedTotal(scan.trackedTotal);
+      setTrackedFilesList(scan.trackedFiles);
+      setAssumeUnchangedFiles(scan.assumeUnchanged);
+      setSkippedFiles(scan.skipped);
     } catch {
       setTrackedTotal(0);
       setTrackedFilesList([]);
+      setAssumeUnchangedFiles([]);
+      setSkippedFiles([]);
     }
   }, [repo.path]);
 
@@ -419,7 +536,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
    *  and returns both files and directories. */
   const loadIgnored = useCallback(async () => {
     try {
-      const out = await api.git.raw(repo.path, ['status', '--porcelain', '--ignored']);
+      const out = await api.git.rawBackground(repo.path, ['status', '--porcelain', '--ignored']);
       const list = out.split('\n')
         .filter(l => l.startsWith('!! '))
         .map(l => l.slice(3).trim())
@@ -430,39 +547,20 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     }
   }, [repo.path]);
 
-  /** Load assume-unchanged + skip-worktree files via `git ls-files -v`.
-   *  Lines starting with lowercase letter (h,k,l,m,n) = assume-unchanged.
-   *  Lines starting with 'S' = skip-worktree. */
-  const loadIndexFlags = useCallback(async () => {
-    try {
-      const out = await api.git.raw(repo.path, ['ls-files', '-v']);
-      const assumeUnchanged: string[] = [];
-      const skipped: string[] = [];
-      for (const line of out.split('\n').filter(Boolean)) {
-        const tag = line[0];
-        const path = line.slice(1).trim();
-        if (!path) continue;
-        // Lowercase tags = assume-unchanged (h, k, l, m, n)
-        if (tag === 'h' || tag === 'k' || tag === 'l' || tag === 'm' || tag === 'n') {
-          assumeUnchanged.push(path);
-        }
-        // 'S' = skip-worktree
-        if (tag === 'S') {
-          skipped.push(path);
-        }
-      }
-      setAssumeUnchangedFiles(assumeUnchanged);
-      setSkippedFiles(skipped);
-    } catch {
-      setAssumeUnchangedFiles([]);
-      setSkippedFiles([]);
-    }
-  }, [repo.path]);
-
-  /** Load submodule changes via `git submodule summary`. */
+  /** Load submodule changes via `git submodule summary`.
+   *  PERF (v3.1): gated on `.gitmodules` existence — `git submodule summary`
+   *  spawns a git process that scans the worktree even on the ~99% of repos
+   *  with no submodules, where its output is ALWAYS empty. The fs:exists
+   *  round-trip is subprocess-free. (Index has mode-160000 entries but no
+   *  .gitmodules → summary errors → catch → [] — same result as skipping.) */
   const loadSubmoduleChanges = useCallback(async () => {
     try {
-      const out = await api.git.raw(repo.path, ['submodule', 'summary']);
+      const hasGitmodules = await api.fs.exists(`${repo.path}/.gitmodules`);
+      if (!hasGitmodules) {
+        setSubmoduleChanges([]);
+        return;
+      }
+      const out = await api.git.rawBackground(repo.path, ['submodule', 'summary']);
       // Format: '* <hash> <name> <commits>
       //          <commit lines>
       // Lines starting with '* ' are submodule entries with changes
@@ -485,9 +583,11 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   // Load line-change counts (+N -M) for working tree and index in one go.
   const loadNumstat = useCallback(async () => {
     try {
+      // v3.6: numstat spawns run in the background worker process — the
+      // repo-open read burst stays off the main event loop.
       const [unstagedOut, stagedOut] = await Promise.all([
-        api.git.raw(repo.path, ['diff', '--numstat']),
-        api.git.raw(repo.path, ['diff', '--cached', '--numstat']),
+        api.git.rawBackground(repo.path, ['diff', '--numstat']),
+        api.git.rawBackground(repo.path, ['diff', '--cached', '--numstat']),
       ]);
       const parse = (out: string) => {
         const map = new Map<string, { add: number; del: number; binary: boolean }>();
@@ -511,14 +611,67 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     }
   }, [repo.path]);
 
+  // R9 FIX: split the repo-open effect from the status-refresh effect:
+  // 1. Repo switch — run the loaders that are ALWAYS needed. Only fires
+  //    when repo.path changes (not on every status refresh).
+  // 2. Status refresh — run ONLY numstat (the one that depends on
+  //    staged/unstaged diff output). Fires on every lastRefresh, but
+  //    only spawns TWO git subprocesses (one Promise.all pair) instead
+  //    of the whole loader set.
+  //
+  // PERF (v3.1) repo-open spawn budget (default display flags):
+  //   OLD: ls-files + ls-files -v + status --porcelain --ignored +
+  //        submodule summary + numstat×2 = 6 git subprocesses.
+  //   NEW: ls-files -v (merged scan) + numstat×2 = 3 git subprocesses —
+  //   - `status --porcelain --ignored` is the SECOND full status walk of
+  //     the same tree (and the most expensive one: it descends into
+  //     ignored directories like node_modules) — now LAZY: only runs when
+  //     the 'ignored' display flag is ON (see effect below).
+  //   - `submodule summary` is fs-gated on .gitmodules existing.
+  //   - `ls-files` + `ls-files -v` merged into one walk.
   useEffect(() => {
     loadDirTree();
-    loadTrackedCount();
-    loadIgnored();
-    loadIndexFlags();
-    loadSubmoduleChanges();
+    loadTrackedAndIndexFlags();
     loadNumstat();
-  }, [loadDirTree, loadTrackedCount, loadIgnored, loadIndexFlags, loadSubmoduleChanges, loadNumstat, lastRefresh, status]);
+    if (fileDisplayFlags.has('ignored')) loadIgnored();
+    loadSubmoduleChanges();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repo.path]);
+
+  // PERF (v3.1): lazy-load the ignored-files scan when the user turns the
+  // 'ignored' display flag ON (or a repo is opened with it already on).
+  // Guarded per-repo so toggling OTHER flags while 'ignored' stays on does
+  // not re-run the expensive scan — same freshness as the old always-loaded
+  // behavior (loaded once per repo open), just deferred to first need.
+  const ignoredLoadedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!fileDisplayFlags.has('ignored')) return;
+    if (ignoredLoadedFor.current === repo.path) return;
+    ignoredLoadedFor.current = repo.path;
+    loadIgnored();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fileDisplayFlags, repo.path]);
+
+  // RENDER-PERF: numstat reload on status refresh — via the store's
+  // subscribe() listener instead of a lastRefresh subscription + effect.
+  // Same trigger semantics (fires whenever a refresh commits a NEW status
+  // — the gitStore's content-equality gate already skips no-op refreshes,
+  // so numstat is not re-spawned when nothing changed), but without
+  // re-rendering this page on every tick. loadNumstat is a useCallback
+  // keyed on repo.path; keep it in a ref so the listener is subscribed once.
+  const loadNumstatRef = useRef(loadNumstat);
+  loadNumstatRef.current = loadNumstat;
+  useEffect(() => {
+    const unsub = useGitStore.subscribe((s, prev) => {
+      if (s.lastRefresh !== prev.lastRefresh) {
+        // Only reload numstat on status refresh — the other loaders
+        // (dirTree, tracked+indexFlags, ignored, submoduleChanges)
+        // don't depend on the working-tree diff and would be redundant.
+        loadNumstatRef.current();
+      }
+    });
+    return unsub;
+  }, []);
 
   // Reset folder scope and tree expansion when switching repositories
   useEffect(() => {
@@ -601,7 +754,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
 
   const handleRefresh = () => {
     refreshStatus(repo.path);
-    loadJournal();
+    loadJournal(); // Manual refresh — user clicked the button, so load immediately
   };
 
   const handleStageAll = async () => {
@@ -632,7 +785,8 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   };
 
   const handleRestoreFile = async (file: string) => {
-    if (!(await confirmDialog({
+    // 4.5 — supports persistent "Don't ask again" (confirmations registry).
+    if (!(await confirmWithRemember(CONFIRMATION_IDS.discardChanges, {
       title: t('changes.restoreFileTitle'),
       message: t('changes.restoreFileConfirm', { file }),
       confirmLabel: t('changes.restore'),
@@ -722,7 +876,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   };
 
   const handleCommit = async () => {
-    if (!commitMsg.trim()) {
+    if (!(editorRef.current?.getText() ?? '').trim()) {
       toast.warning(t('changes.commitMessageRequired'));
       return;
     }
@@ -740,9 +894,60 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       );
       return;
     }
+    // ── SmartGit "If nothing is staged" (Preferences → Commands) ──────────
+    // Previously the Commit button was simply disabled with an empty index;
+    // now it stays enabled while ANY change exists and this setting decides
+    // what to commit: ask (3-button dialog) / all-except-untracked / all.
+    if (!commitAll && stagedFiles.length === 0) {
+      const hasUntracked = (status?.files ?? []).some(
+        (f) => (f.index as string) === '?' && (f.working_dir as string) === '?'
+      );
+      const hasUnstaged = unstagedFiles.length > 0 || hasUntracked;
+      if (hasUnstaged) {
+        const mode = settings?.commitNothingStaged ?? 'ask';
+        if (mode === 'ask') {
+          setShowNothingStagedDialog(true);
+          return;
+        }
+        try {
+          if (mode === 'all-except-untracked') {
+            await api.git.stageAllTracked(repo.path);
+          } else {
+            await stageAll(repo.path);
+          }
+          await refreshStatus(repo.path);
+        } catch (e) {
+          toast.error(t('changes.stageFailed'), String(e));
+          return;
+        }
+      }
+    }
+    await performCommit();
+  };
+
+  // "If nothing is staged → ask" dialog — user chose what to stage.
+  const handleNothingStagedChoice = async (kind: 'tracked' | 'all') => {
+    setShowNothingStagedDialog(false);
+    try {
+      if (kind === 'tracked') {
+        await api.git.stageAllTracked(repo.path);
+      } else {
+        await stageAll(repo.path);
+      }
+      await refreshStatus(repo.path);
+    } catch (e) {
+      toast.error(t('changes.stageFailed'), String(e));
+      return;
+    }
+    await performCommit();
+  };
+
+  /** Shared commit path — runs after staging decisions; handles the
+   *  SmartGit commit-message behaviors and the pushed-commit warning. */
+  const performCommit = async () => {
     try {
       // SmartGit Manual: AI Commit Messages — @ai placeholder → replace with AI-generated
-      let finalMsg = commitMsg.trim();
+      let finalMsg = (editorRef.current?.getText() ?? '').trim();
       const placeholder = detectAIPlaceholder(finalMsg);
       if (placeholder && settings?.aiCommitMessagesEnabled) {
         const provider = buildAIProvider(settings);
@@ -756,22 +961,73 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
               recentMessages: journal.slice(0, 5).map(j => j.subject),
             });
             finalMsg = applyAIPlaceholder(finalMsg, aiMessage, placeholder);
-            setCommitMsg(finalMsg);
+            editorRef.current?.setText(finalMsg);
             toast.success(t('changes.aiMessageGenerated'), t('changes.reviewAndCommit'));
           } catch (e) {
-            toast.warning(t('changes.aiGenFailedPlaceholder'), String(e));
+            toast.warning(t('changes.aiGenFailedPlaceholder'), llmErrorDetail(e));
             return;
           } finally {
             setAiGenerating(false);
           }
         }
       }
+      // ── SmartGit "Commit Comments" handling (Preferences → Commands) ─────
+      // Lines starting with core.commentChar are treated like the editor
+      // template comments git strips during `git commit`. Three modes.
+      const commentsMode = settings?.commitCommentsMode ?? 'ask';
+      if (commentsMode !== 'as-is') {
+        const commentCount = findCommentLines(finalMsg, commentChar).length;
+        if (commentsMode === 'strip') {
+          finalMsg = stripCommitComments(finalMsg, commentChar);
+        } else if (commentCount > 0) {
+          const strip = await confirmDialog({
+            title: t('changes.commentsDetectedTitle'),
+            message: t('changes.commentsDetectedBody', { n: commentCount, char: commentChar }),
+            confirmLabel: t('changes.commentsStrip'),
+            cancelLabel: t('changes.commentsKeep'),
+          });
+          if (strip) finalMsg = stripCommitComments(finalMsg, commentChar);
+        }
+        if (!finalMsg.trim()) {
+          toast.warning(t('changes.emptyAfterStrip'));
+          return;
+        }
+      }
+      // ── Pushed-commit warning (Preferences → Commands) ────────────
+      // isCommitPushed() IPC existed with ZERO callers. Before amending a
+      // commit that is already on a remote, warn the user: rewriting history
+      // forces a push and breaks collaborators. allowModifyingPushedCommits
+      // downgrades the confirmation to a warning toast.
+      if (amend) {
+        try {
+          const headHash = (await api.git.raw(repo.path, ['rev-parse', 'HEAD'])).trim();
+          const pushed = await api.git.isCommitPushed(repo.path, headHash);
+          if (pushed) {
+            if (settings?.allowModifyingPushedCommits) {
+              toast.warning(t('changes.pushedAmendWarn'));
+            } else {
+              const ok = await confirmDialog({
+                title: t('changes.pushedAmendTitle'),
+                message: t('changes.pushedAmendBody'),
+                confirmLabel: t('changes.pushedAmendProceed'),
+                danger: true,
+              });
+              if (!ok) return;
+            }
+          }
+        } catch { /* best-effort check — never block the commit on it */ }
+      }
       // If commitAll is checked, stage everything first (git add .)
       if (commitAll) {
         await stageAll(repo.path);
       }
       const hash = await commit(repo.path, finalMsg, amend);
-      toast.success(t('status.commitCreated'), t('changes.hashDetail', { hash: hash.substring(0, 7) }));
+      // Task 29: hash as a PROMINENT chip (copy button, 8s duration) — the
+      // old plain-text «Хеш: …» detail was easy to miss entirely. (The
+      // parallel «hash in the title» approach from the perf round is
+      // superseded by this chip — with the commit() fix for slashed
+      // branches, the hash now carries the real HEAD.)
+      toast.successCommit(t('status.commitCreated'), hash);
       // Save commit message to per-project history for reuse
       const prefs = loadProjectPrefs(repo.path);
       const history = prefs.commitMessageHistory || [];
@@ -781,7 +1037,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       const newHistory = [finalMsg, ...filtered].slice(0, 50);
       saveProjectPrefs(repo.path, { commitMessageHistory: newHistory });
       setCommitMsgHistory(newHistory);
-      setCommitMsg('');
+      editorRef.current?.setText('');
       setAmend(false);
       setCommitAll(false);
       await loadJournal();
@@ -809,21 +1065,13 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
    */
   const handlePickCommitType = useCallback((type: string) => {
     const CONVENTIONAL_PREFIX = /^(feat|fix|docs|style|refactor|perf|test|chore|build|ci|revert):\s/;
-    setCommitMsg((prev) => {
-      const stripped = prev.replace(CONVENTIONAL_PREFIX, '');
-      const trimmed = stripped.replace(/^\s+/, '');
-      return trimmed.length === 0 ? `${type}: ` : `${type}: ${trimmed}`;
-    });
+    const prev = editorRef.current?.getText() ?? '';
+    const stripped = prev.replace(CONVENTIONAL_PREFIX, '');
+    const trimmed = stripped.replace(/^\s+/, '');
+    editorRef.current?.setText(trimmed.length === 0 ? `${type}: ` : `${type}: ${trimmed}`);
     // Re-focus the textarea at end so the user can continue typing.
-    requestAnimationFrame(() => {
-      const ta = document.getElementById('commit-message-input') as HTMLTextAreaElement | null;
-      if (ta) {
-        ta.focus();
-        const end = ta.value.length;
-        ta.setSelectionRange(end, end);
-      }
-    });
-  }, [setCommitMsg]);
+    editorRef.current?.focusEnd();
+  }, []);
 
   // Load commit message history when repo changes
   useEffect(() => {
@@ -834,14 +1082,19 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   }, [repo?.path]);
 
   const handleAIGenerate = async () => {
-    if (!settings?.aiCommitMessagesEnabled) {
-      toast.warning(t('changes.aiDisabled'), t('changes.aiEnableHint'));
-      return;
-    }
+    // v2.3.11 — provider FIRST, flag second. Out of the box both the flag
+    // and the registry are empty, and the button used to be DISABLED by the
+    // flag — a dead control with no way in («AI не работает»). Now the
+    // button is always clickable: no provider → actionable toast; provider
+    // configured → the click itself turns the feature on (auto-suggest +
+    // the @ai placeholder follow) instead of bouncing the user to Settings.
     const provider = buildAIProvider(settings);
     if (!provider) {
       toast.warning(t('changes.aiNoProvider'), t('changes.aiSetProviderHint'));
       return;
+    }
+    if (!settings?.aiCommitMessagesEnabled) {
+      void setSetting('aiCommitMessagesEnabled', true);
     }
     setAiGenerating(true);
     try {
@@ -851,8 +1104,10 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
         return;
       }
       // LAR-1 — streaming AI: tokens arrive as they're generated, so the
-      // user sees the commit message compose itself in real time.
-      setCommitMsg(''); // clear the textarea so we can stream into it
+      // user sees the commit message compose itself in real time. Each
+      // token updates the ISOLATED editor only (ref imperative setText) —
+      // no page-level re-render per token.
+      editorRef.current?.setText(''); // clear the textarea so we can stream into it
       let accumulated = '';
       for await (const _tok of generateCommitMessageStream({
         diff: diffText,
@@ -861,18 +1116,18 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       }, {
         onToken: (token) => {
           accumulated += token;
-          setCommitMsg(accumulated);
+          editorRef.current?.setText(accumulated);
         },
       })) {
         // tokens are applied via the onToken callback above; we don't
         // need to do anything extra in the loop body.
       }
       if (accumulated) {
-        setCommitMsg(accumulated.trim());
+        editorRef.current?.setText(accumulated.trim());
         toast.success(t('changes.aiMessageGenerated'), t('changes.reviewBeforeCommitting'));
       }
     } catch (e) {
-      toast.error(t('changes.aiGenerationFailed'), String(e));
+      toast.error(t('changes.aiGenerationFailed'), llmErrorDetail(e));
     } finally {
       setAiGenerating(false);
     }
@@ -922,6 +1177,25 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     return () => window.removeEventListener('smartgit:stash-selection', handler);
   }, [selectedFiles, repo.path, refreshStatus, toast]);
 
+  // RENDER-PERF: stable callbacks for the memoized CommitMessageEditor.
+  // The ref-indirection keeps the identity stable across re-renders while
+  // always invoking the freshest handler — so the child never re-renders
+  // just because the page re-rendered.
+  const handleCommitRef = useRef(handleCommit);
+  handleCommitRef.current = handleCommit;
+  const handleCommitSubmit = useCallback(() => { void handleCommitRef.current(); }, []);
+  const handleSuggestionConsumed = useCallback(() => setAiSuggestion(null), []);
+
+  // RENDER-PERF: stable identity for the memoized DiffViewer's onStaged —
+  // an inline arrow broke the memo bailout on every page re-render.
+  const handleDiffStaged = useCallback(() => {
+    // Reset the skip-guard so the diff-reload effect re-runs when the
+    // refreshed status arrives (partial staging changes index, not worktree,
+    // so the fs watcher will NOT fire by itself).
+    lastLoadedFileRef.current = null;
+    refreshStatus(repo.path);
+  }, [refreshStatus, repo.path]);
+
   const handleCommitAndPush = async () => {
     await handleCommit();
     try {
@@ -931,6 +1205,32 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       else if (t.kind === 'info') toast.info(t.title, t.detail);
       else toast.success(t.title, t.detail);
     } catch (e) {
+      // Remote-conflict reaction — same matrix as the Toolbar push: the
+      // dialog offers pull/rebase/force recovery instead of a raw toast;
+      // TLS certificate rejection (expired / self-signed corporate Git) —
+      // the SSL bypass dialog retries the push after disabling verification.
+      if (offerPushRejection(e, { repoPath: repo.path })) return;
+      // Retry ONLY the push half — the commit above already succeeded, so
+      // re-running handleCommitAndPush would die on "nothing to commit".
+      if (offerSslBypass(e, {
+        repoPath: repo.path,
+        retry: () => push(repo.path).then((res) => {
+          const d = describePushResult(res);
+          if (d.kind === 'error') toast.error(d.title, d.detail);
+          else if (d.kind === 'info') toast.info(d.title, d.detail);
+          else toast.success(d.title, d.detail);
+        }),
+      })) return;
+      // Required login the app has not stored — ask, save, retry the push.
+      if (offerAuthBypass(e, {
+        repoPath: repo.path,
+        retry: () => push(repo.path).then((res) => {
+          const d = describePushResult(res);
+          if (d.kind === 'error') toast.error(d.title, d.detail);
+          else if (d.kind === 'info') toast.info(d.title, d.detail);
+          else toast.success(d.title, d.detail);
+        }),
+      })) return;
       toast.error(t('changes.pushFailed'), String(e));
     }
   };
@@ -946,7 +1246,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       toast.success(okMsg);
       await refreshStatus(repo.path);
     } catch (e) {
-      toast.error(`${title} failed`, String(e));
+      toast.error(`${title} ${t('toast.generic.failed')}`.toLowerCase(), String(e));
     } finally {
       setCpBusy(false);
     }
@@ -957,17 +1257,17 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       setCpBusy(true);
       try {
         const res = await useOperationLogStore.getState().logOperation(
-          'Cherry-pick Continue', repo.path, 'git cherry-pick --continue',
+          t('changes.cp.continueTitle'), repo.path, 'git cherry-pick --continue',
           () => api.git.cherryPickContinue(repo.path)
         );
         if (res?.empty) {
-          toast.warning('The previous cherry-pick is now empty', 'Use Skip (drop it) or Commit Empty (commit it anyway)');
+          toast.warning(t('changes.cp.emptyAfter'), t('changes.cp.emptyDetail'));
         } else {
-          toast.success('Cherry-pick finished — commit created');
+          toast.success(t('changes.cp.finished'));
         }
         await refreshStatus(repo.path);
       } catch (e) {
-        toast.error('Cherry-pick Continue failed', String(e));
+        toast.error(t('changes.cp.continueFailed'), String(e));
       } finally {
         setCpBusy(false);
       }
@@ -976,31 +1276,31 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   const handleCpCommitEmpty = () => {
     if (!status?.isCherryPicking) return;
     void runCherryPickOp(
-      'Cherry-pick Commit Empty', 'git commit --allow-empty',
+      t('changes.cp.commitEmptyTitle'), 'git commit --allow-empty',
       () => api.git.cherryPickContinue(repo.path, true).then(() => undefined),
-      'Empty commit created — cherry-pick finished'
+      t('changes.cp.emptyCommitCreated')
     );
   };
   const handleCpSkip = () => {
     if (!status?.isCherryPicking) return;
     void runCherryPickOp(
-      'Cherry-pick Skip', 'git cherry-pick --skip',
+      t('changes.cp.skipTitle'), 'git cherry-pick --skip',
       () => api.git.cherryPickSkip(repo.path),
-      'Cherry-pick skipped'
+      t('changes.cp.skipped')
     );
   };
   const handleCpAbort = async () => {
     if (!status?.isCherryPicking) return;
     if (!(await confirmDialog({
-      title: 'Abort cherry-pick',
-      message: 'Cancel the cherry-pick and restore the branch to its previous state?\n\nPicked changes will be discarded.',
-      confirmLabel: 'Abort',
+      title: t('changes.cp.abortDialogTitle'),
+      message: t('changes.cp.abortDialogMessage'),
+      confirmLabel: t('changes.abortButtonLabel'),
       danger: true,
     }))) return;
     void runCherryPickOp(
       'Cherry-pick Abort', 'git cherry-pick --abort',
       () => api.git.cherryPickAbort(repo.path),
-      'Cherry-pick aborted'
+      t('changes.cp.aborted')
     );
   };
 
@@ -1008,31 +1308,31 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   const handleRvContinue = () => {
     if (!status?.isReverting) return;
     void runCherryPickOp(
-      'Revert Continue', 'git revert --continue',
+      t('changes.rv.continueTitle'), 'git revert --continue',
       () => api.git.revertContinue(repo.path),
-      'Revert finished — commit created'
+      t('changes.rv.finished')
     );
   };
   const handleRvSkip = () => {
     if (!status?.isReverting) return;
     void runCherryPickOp(
-      'Revert Skip', 'git revert --skip',
+      t('changes.rv.skipTitle'), 'git revert --skip',
       () => api.git.revertSkip(repo.path),
-      'Revert step skipped'
+      t('changes.rv.skipped')
     );
   };
   const handleRvAbort = async () => {
     if (!status?.isReverting) return;
     if (!(await confirmDialog({
-      title: 'Abort revert',
-      message: 'Cancel the revert and restore the branch to its previous state?\n\nRevert changes will be discarded.',
-      confirmLabel: 'Abort',
+      title: t('changes.rv.abortDialogTitle'),
+      message: t('changes.rv.abortDialogMessage'),
+      confirmLabel: t('changes.abortButtonLabel'),
       danger: true,
     }))) return;
     void runCherryPickOp(
       'Revert Abort', 'git revert --abort',
       () => api.git.revertAbort(repo.path),
-      'Revert aborted'
+      t('changes.rv.aborted')
     );
   };
 
@@ -1041,15 +1341,15 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   const handleMergeAbort = async () => {
     if (!status?.isMerging) return;
     if (!(await confirmDialog({
-      title: 'Abort merge',
-      message: 'Cancel the merge and restore the branch to its pre-merge state?\n\nMerged changes will be discarded.',
-      confirmLabel: 'Abort Merge',
+      title: t('changes.merge.abortDialogTitle'),
+      message: t('changes.merge.abortDialogMessage'),
+      confirmLabel: t('changes.merge.abortDialogButton'),
       danger: true,
     }))) return;
     void runCherryPickOp(
       'Merge Abort', 'git merge --abort',
       () => api.git.abortMerge(repo.path),
-      'Merge aborted'
+      t('changes.merge.aborted')
     );
   };
 
@@ -1057,31 +1357,31 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   const handleRbContinue = () => {
     if (!status?.isRebasing) return;
     void runCherryPickOp(
-      'Rebase Continue', 'git rebase --continue',
+      t('changes.rb.continueTitle'), 'git rebase --continue',
       () => api.git.rebase(repo.path, '', { continue: true }),
-      'Rebase continued'
+      t('changes.rb.continued')
     );
   };
   const handleRbSkip = () => {
     if (!status?.isRebasing) return;
     void runCherryPickOp(
-      'Rebase Skip', 'git rebase --skip',
+      t('changes.rb.skipTitle'), 'git rebase --skip',
       () => api.git.rebase(repo.path, '', { skip: true }),
-      'Rebase step skipped'
+      t('changes.rb.stepSkipped')
     );
   };
   const handleRbAbort = async () => {
     if (!status?.isRebasing) return;
     if (!(await confirmDialog({
-      title: 'Abort rebase',
-      message: 'Cancel the rebase and restore the branch to its original state?\n\nRebased commits will be discarded.',
-      confirmLabel: 'Abort',
+      title: t('changes.rb.abortDialogTitle'),
+      message: t('changes.rb.abortDialogMessage'),
+      confirmLabel: t('changes.abortButtonLabel'),
       danger: true,
     }))) return;
     void runCherryPickOp(
       'Rebase Abort', 'git rebase --abort',
       () => api.git.rebase(repo.path, '', { abort: true }),
-      'Rebase aborted'
+      t('changes.rb.aborted')
     );
   };
 
@@ -1089,38 +1389,38 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   const handleBsGood = () => {
     if (!status?.isBisecting) return;
     void runCherryPickOp(
-      'Bisect Good', 'git bisect good',
+      t('changes.bs.goodTitle'), 'git bisect good',
       () => api.git.bisectGood(repo.path),
-      'Marked good — bisect continues'
+      t('changes.bs.markedGood')
     );
   };
   const handleBsBad = () => {
     if (!status?.isBisecting) return;
     void runCherryPickOp(
-      'Bisect Bad', 'git bisect bad',
+      t('changes.bs.badTitle'), 'git bisect bad',
       () => api.git.bisectBad(repo.path),
-      'Marked bad — bisect continues'
+      t('changes.bs.markedBad')
     );
   };
   const handleBsSkip = () => {
     if (!status?.isBisecting) return;
     void runCherryPickOp(
-      'Bisect Skip', 'git bisect skip',
+      t('changes.bs.skipTitle'), 'git bisect skip',
       () => api.git.bisectSkip(repo.path),
-      'Revision skipped — bisect continues'
+      t('changes.bs.skipped')
     );
   };
   const handleBsReset = async () => {
     if (!status?.isBisecting) return;
     if (!(await confirmDialog({
-      title: 'Reset bisect',
-      message: 'End the bisect session and return to the original branch?',
-      confirmLabel: 'Reset',
+      title: t('changes.bs.resetDialogTitle'),
+      message: t('changes.bs.resetDialogMessage'),
+      confirmLabel: t('changes.resetButton'),
     }))) return;
     void runCherryPickOp(
       'Bisect Reset', 'git bisect reset',
       () => api.git.bisectReset(repo.path),
-      'Bisect finished — back on the original branch'
+      t('changes.bs.finished')
     );
   };
 
@@ -1130,25 +1430,25 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   // the Stashes page. This is the "start fresh" option SmartGit offers.
   const handleStashAll = async () => {
     if (!(await confirmDialog({
-      title: 'Stash all and abort?',
-      message: 'This will stash ALL local changes (including untracked files) and abort the current operation.\n\nThe stash is saved with a descriptive message and is recoverable via the Stashes page.',
-      confirmLabel: 'Stash All & Abort',
+      title: t('changes.stashAllTitle'),
+      message: t('changes.stashAllMessage'),
+      confirmLabel: t('changes.stashAllButton'),
       danger: true,
     }))) return;
     try {
       const stateLabel = status?.isMerging ? 'merge' : status?.isRebasing ? 'rebase' : status?.isCherryPicking ? 'cherry-pick' : status?.isReverting ? 'revert' : 'operation';
       await api.git.stashPush(repo.path, `auto-stash before abort (${stateLabel})`, true, false);
-      toast.success('All changes stashed', 'Now aborting the operation…');
+      toast.success(t('changes.stashAllStashed'), t('changes.stashAllStashedDetail'));
       // Abort the in-progress operation based on the active state
       if (status?.isMerging) await api.git.abortMerge(repo.path);
       else if (status?.isRebasing) await api.git.rebase(repo.path, '', { abort: true });
       else if (status?.isCherryPicking) await api.git.cherryPickAbort(repo.path);
       else if (status?.isReverting) await api.git.revertAbort(repo.path);
       else if (status?.isBisecting) await api.git.bisectReset(repo.path);
-      toast.success('Operation aborted', 'Stash is available on the Stashes page.');
+      toast.success(t('changes.stashAllAborted'), t('changes.stashAllAbortedDetail'));
       await refreshStatus(repo.path);
     } catch (e) {
-      toast.error('Stash & abort failed', String(e));
+      toast.error(t('changes.stashAllFailed'), String(e));
     }
   };
 
@@ -1223,16 +1523,29 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   // Changed files are ALWAYS shown. Flags ADD categories (union).
   const hasFlag = useCallback((flag: FileDisplayFlag) => fileDisplayFlags.has(flag), [fileDisplayFlags]);
 
+  // ── Conflict classification (BUGFIX: "статистика… ошибочно показывается
+  //    (особенно на конфликтах)") ──
+  // The old `idx === 'U' || wd === 'U'` filter misses the porcelain combos
+  // AA (both added) and DD (both deleted) — no 'U' character in either
+  // code. Those conflicted files vanished from the Conflicts section (and
+  // leaked into Staged/Unstaged), while the Toolbar counter (which uses
+  // status.conflicted — ALL 7 unmerged combos) disagreed with the section
+  // count. Use the same source of truth: status.conflicted (parsed by
+  // simple-git from `git status`), with the code-set check as a fallback
+  // for transports that don't populate `conflicted`.
+  const UNMERGED_CODES = new Set(['UU', 'AA', 'DD', 'AU', 'UA', 'DU', 'UD']);
+  const conflictedPaths = useMemo(() => new Set(status?.conflicted ?? []), [status]);
+  const isUnmergedFile = useCallback((f: FileStatus): boolean =>
+    conflictedPaths.has(f.path) || UNMERGED_CODES.has(`${f.index as string}${f.working_dir as string}`),
+    [conflictedPaths]);
+
   // Memoize file lists to avoid re-sorting on every render (e.g. when
   // hovering over rows causes a re-render but status hasn't changed).
   // Staged files go to their own section — NOT affected by display flags.
   const stagedFiles: FileStatus[] = useMemo(() => sortFiles((status?.files || []).filter((f) => {
-    // Exclude conflicted files (UU/AU/UA/DD etc.) — they show in the
-    // Conflicts section, NOT in Staged. A conflicted file has index='U'
-    // or working_dir='U' in git porcelain status.
-    const idx = f.index as string;
-    const wd = f.working_dir as string;
-    if (idx === 'U' || wd === 'U') return false;
+    // Exclude conflicted files (all 7 unmerged combos — see
+    // isUnmergedFile): they show in the Conflicts section, NOT in Staged.
+    if (isUnmergedFile(f)) return false;
     const staged = status?.staged.find((s) => s.path === f.path);
     if (!staged) return false;
     const stagedIdx = staged.index as string;
@@ -1240,7 +1553,8 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   }).filter((f) => matchesFileFilter(f.path))
     .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
     .filter((f) => matchesDirScope(f.path))
-    ), [status, sortFiles, fileDisplayFlags]);
+    .filter((f) => !hideEolOnly || !eolOnlyPaths.has(f.path))
+    ), [status, sortFiles, fileDisplayFlags, hideEolOnly, eolOnlyPaths, isUnmergedFile]);
 
   // Detect unstaged renames by comparing content hashes of deleted tracked
   // files with untracked files. Delegates the heavy lifting to a single
@@ -1262,6 +1576,13 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   const [detectedRenames, setDetectedRenames] = useState<{ oldPath: string; newPath: string }[]>([]);
   useEffect(() => {
     if (!repo?.path || !status) return;
+    // ── SmartGit "Detect renames" setting (Preferences → Commands) ──
+    // The setting existed in the UI but nothing consumed it (dead setting).
+    // When OFF, added/deleted files stay as-is — no pairing pass at all.
+    if (settings?.detectRenames === false) {
+      setDetectedRenames(prev => prev.length === 0 ? prev : []);
+      return;
+    }
     const deletedFiles = status.files
       .filter(f => {
         const wd = f.working_dir as string;
@@ -1296,8 +1617,21 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     let cancelled = false;
     const timer = setTimeout(async () => {
       try {
+        // 2.2 — SmartGit: warn (once per session) when rename detection is
+        // slow. Threshold — low-level `renames.warnMs` (default 3000 ms);
+        // hint can be disabled with warnSlowRenameDetection.
+        const renameStarted = performance.now();
         const result = await api.git.detectWorkingTreeRenames(repo.path, deletedFiles, untrackedFiles);
         if (!cancelled) {
+          const elapsedMs = performance.now() - renameStarted;
+          if (
+            !slowRenameToastShown &&
+            settings?.warnSlowRenameDetection !== false &&
+            elapsedMs >= getLowLevelNumber(settings, 'renames.warnMs')
+          ) {
+            slowRenameToastShown = true;
+            toast.info(t('changes.slowRenameWarning', { seconds: (elapsedMs / 1000).toFixed(1) }));
+          }
           // Only update state if the result actually changed. Returning the
           // previous reference skips the re-render entirely when the detected
           // renames are the same as before (common case on auto-refresh).
@@ -1329,7 +1663,71 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [repo?.path, status]);
+  }, [repo?.path, status, settings?.detectRenames]);
+
+  // ── 1.1 core.commentChar — read once per repository ─────────────────────
+  // Used by the commit-comments handling in performCommit ('ask'/'strip').
+  // Local config wins over global (same as git). Missing → '#' (git default).
+  useEffect(() => {
+    if (!repo?.path) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const local = await api.git.configGet(repo.path, 'core.commentChar', 'local').catch(() => undefined);
+        const global = local
+          ? undefined
+          : await api.git.configGet(repo.path, 'core.commentChar', 'global').catch(() => undefined);
+        if (!cancelled) setCommentChar(resolveCommentChar(local ?? global));
+      } catch {
+        if (!cancelled) setCommentChar('#');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [repo?.path]);
+
+  // ── 0.3 EOL-only change detection (Preferences → Commands) ──────────
+  // The IPC (git:isEolOnlyChange) existed but had ZERO renderer callers —
+  // dead backend. When distinguishEolChanges is ON, changed files are
+  // checked in the background (batch, 4-way concurrency, capped at 100
+  // files); results power the "EOL" badge in file rows and the
+  // "hide EOL-only" toggle. When OFF — no diff subprocesses at all.
+  useEffect(() => {
+    if (!repo?.path || !status) return;
+    if (!settings?.distinguishEolChanges) {
+      setEolOnlyPaths(prev => prev.size === 0 ? prev : new Set<string>());
+      return;
+    }
+    // Only unstaged modifications matter here: `git diff` (worktree vs
+    // index) is what isEolOnlyChange inspects. Staged-only changes would
+    // be false negatives; untracked/deleted files have no EOL diff.
+    const changed = status.files
+      .filter(f => (f.working_dir as string) === 'M')
+      .map(f => f.path)
+      .slice(0, 100);
+    if (changed.length === 0) {
+      setEolOnlyPaths(prev => prev.size === 0 ? prev : new Set<string>());
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      // PERF (v3.1): ONE batched IPC (chunked `git diff --ignore-cr-at-eol
+      // --name-only` in the main process) replaces the old worker pool that
+      // spawned up to 100 PER-FILE `git diff` subprocesses on EVERY status
+      // refresh — with 50 modified files that was 50 spawns per ~5s watcher
+      // tick, permanently saturating the git process queue.
+      try {
+        const realSet = new Set(
+          await api.git.filesWithRealChanges(repo.path, changed)
+        );
+        if (cancelled) return;
+        // EOL-only = modified files that did NOT show up as real changes.
+        setEolOnlyPaths(new Set(changed.filter(p => !realSet.has(p))));
+      } catch {
+        if (!cancelled) setEolOnlyPaths(new Set());
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [repo?.path, status, settings?.distinguishEolChanges]);
 
   // Sets of old/new paths for detected renames — used to filter out the
   // individual delete + untracked entries and show a single renamed entry.
@@ -1347,7 +1745,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     aiSuggestAbortRef.current = null;
 
     if (!settings?.aiCommitMessagesEnabled) { setAiSuggestion(null); return; }
-    if (commitMsg.trim()) { setAiSuggestion(null); return; }
+    if (!commitMsgEmpty) { setAiSuggestion(null); return; }
     if (stagedFiles.length === 0) { setAiSuggestion(null); return; }
 
     aiSuggestTimerRef.current = setTimeout(async () => {
@@ -1380,7 +1778,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     return () => {
       if (aiSuggestTimerRef.current) clearTimeout(aiSuggestTimerRef.current);
     };
-  }, [stagedFiles.length, commitMsg, settings?.aiCommitMessagesEnabled, settings, repo.path, journal]);
+  }, [stagedFiles.length, commitMsgEmpty, settings?.aiCommitMessagesEnabled, settings, repo.path, journal]);
 
   // Unstaged (changed, non-staged) files — always visible (default).
   // Exclude files that are part of a detected rename (old path = delete,
@@ -1393,13 +1791,12 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     // a Renamed row instead of an Untracked row.
     if (renamedNewPaths.has(f.path)) return false;
     // Exclude conflicted files — they show in the Conflicts section only.
-    const idx = f.index as string;
-    const wd = f.working_dir as string;
-    if (idx === 'U' || wd === 'U') return false;
+    if (isUnmergedFile(f)) return false;
     const staged = status?.staged.find((s) => s.path === f.path);
     if (!staged) {
       // Exclude untracked ('??') from the unstaged list — they render in
       // their own Untracked section (if 'unversioned' flag is ON).
+      const wd = f.working_dir as string;
       return wd !== ' ' && wd !== '!' && !((f.index as string) === '?' && wd === '?');
     }
     const stagedWd = staged.working_dir as string;
@@ -1407,7 +1804,8 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
   }).filter((f) => matchesFileFilter(f.path))
     .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
     .filter((f) => matchesDirScope(f.path))
-    ), [status, sortFiles, fileDisplayFlags, renamedOldPaths, renamedNewPaths, fileFilter, fileExtensionFilter, fileScopeDir, showSubdirs]);
+    .filter((f) => !hideEolOnly || !eolOnlyPaths.has(f.path))
+    ), [status, sortFiles, fileDisplayFlags, renamedOldPaths, renamedNewPaths, fileFilter, fileExtensionFilter, fileScopeDir, showSubdirs, hideEolOnly, eolOnlyPaths, isUnmergedFile]);
 
   // Detected rename entries — shown in the unstaged section as Renamed rows.
   // Each entry has the new path as the file path and old_path set.
@@ -1425,12 +1823,10 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
 
   // Conflicted files — shown in their OWN section (red accent) ABOVE staged.
   const conflictedFiles: FileStatus[] = useMemo(() => sortFiles((status?.files || []).filter((f) => {
-    const idx = f.index as string;
-    const wd = f.working_dir as string;
-    return idx === 'U' || wd === 'U';
+    return isUnmergedFile(f);
   }).filter((f) => matchesFileFilter(f.path))
     .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
-    .filter((f) => matchesDirScope(f.path))), [status, sortFiles, fileFilter, fileExtensionFilter, fileScopeDir, showSubdirs]);
+    .filter((f) => matchesDirScope(f.path))), [status, sortFiles, fileFilter, fileExtensionFilter, fileScopeDir, showSubdirs, isUnmergedFile]);
 
   // Untracked files — shown only when 'unversioned' flag is ON.
   // Exclude files that are the NEW path of a detected rename — they show
@@ -1445,8 +1841,9 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       if (renamedNewPaths.has(f.path)) return false;
       return true;
     }).filter((f) => matchesFileFilter(f.path))
-      .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
-      .filter((f) => matchesDirScope(f.path)));
+    .filter(f => !fileExtensionFilter || f.path.toLowerCase().endsWith(fileExtensionFilter.toLowerCase()))
+    .filter((f) => matchesDirScope(f.path))
+    .filter((f) => !hideEolOnly || !eolOnlyPaths.has(f.path)));
   }, [status, sortFiles, hasFlag, fileFilter, fileScopeDir, renamedNewPaths]);
 
   // Unchanged tracked files — shown only when 'unchanged' flag is ON.
@@ -1606,7 +2003,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     const isSkipped = skippedFiles.includes(file.path);
     const isSubmodule = submoduleChanges.includes(file.path);
     const isUntracked = idx === '?' && wd === '?';
-    const isConflicted = idx === 'U' || wd === 'U';
+    const isConflicted = isUnmergedFile(file);
     const isIgnored = idx === 'ignored' || wd === 'ignored';
     const isUnmodified = idx === 'unmodified' || wd === 'unmodified';
 
@@ -1654,11 +2051,11 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       deleted: 'changes.statusDeleted',
       renamed: 'changes.statusRenamed',
       copied: 'changes.stateCopied',
-      unmodified: 'Unchanged',
-      ignored: 'Ignored',
-      assumeUnchanged: 'Assume-Unch',
-      skipped: 'Skipped',
-      submodule: 'Submodule',
+      unmodified: 'changes.stateUnchanged',
+      ignored: 'changes.stateIgnored',
+      assumeUnchanged: 'changes.stateAssumeUnchanged',
+      skipped: 'changes.stateSkipped',
+      submodule: 'changes.stateSubmodule',
     };
     const stateLabel = t(stateKeys[statusCode] ?? 'changes.statusModified');
     // Untracked directories come from porcelain as 'dir/' — show the folder
@@ -1686,7 +2083,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       <div
         key={file.path}
         className={cn(
-          'group flex items-center gap-2 px-2 py-1 cursor-pointer text-xs border-b border-border-subtle',
+          'group flex items-center gap-2 px-2 py-1.5 cursor-pointer text-xs border-b border-border-subtle',
           isSelected ? 'bg-bg-selected' : 'hover:bg-bg-hover',
           isDimmed && 'opacity-50',
         )}
@@ -1828,16 +2225,25 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       >
         {/* State icon */}
         <span
-          className="w-4 text-center font-bold flex-shrink-0"
+          className="w-4 text-center font-bold shrink-0"
           style={{ color: getStatusColor(statusCode) }}
         >
           {statusLetter}
         </span>
         {/* Name */}
         <span className="flex-1 truncate font-mono whitespace-nowrap" title={renameTitle}>{renameLabel}</span>
+        {/* 0.3 — EOL-only badge: the file's only change is line endings (CRLF↔LF) */}
+        {eolOnlyPaths.has(file.path) && (
+          <span
+            className="text-3xs px-1 rounded border border-border-subtle text-text-tertiary shrink-0"
+            title={t('changes.eolOnlyTitle')}
+          >
+            EOL
+          </span>
+        )}
         {/* Line-change counts (+N -M) — reserved width keeps columns aligned */}
         <span
-          className="text-2xs flex-shrink-0 text-right tabular-nums whitespace-nowrap overflow-hidden"
+          className="text-2xs shrink-0 text-right tabular-nums whitespace-nowrap overflow-hidden"
           style={{ width: 74 }}
           title={t('changes.linesAddedRemoved')}
         >
@@ -1849,15 +2255,15 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
           )}
         </span>
         {/* State text */}
-        <span className="text-text-tertiary flex-shrink-0 italic truncate whitespace-nowrap" style={{ width: colWidths.state }}>{stateLabel}</span>
+        <span className="text-text-tertiary shrink-0 italic truncate whitespace-nowrap" style={{ width: stateColWidth }} title={stateLabel}>{stateLabel}</span>
         {/* Relative directory — always reserve the cell when the column is
             visible, so rows with an empty relDir (repo-root files) stay
             column-aligned with the header and other rows. */}
         {!compressFilePaths && (
-          <span className="text-text-tertiary flex-shrink-0 truncate whitespace-nowrap" style={{ width: colWidths.dir }} title={relDir}>{relDir}</span>
+          <span className="text-text-tertiary shrink-0 truncate whitespace-nowrap" style={{ width: colWidths.dir }} title={relDir}>{relDir}</span>
         )}
         {/* Actions — fixed width so all rows stay column-aligned */}
-        <div className="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 flex-shrink-0 overflow-hidden" style={{ width: 92 }}>
+        <div className="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 shrink-0 overflow-hidden" style={{ width: 92 }}>
           {isStaged ? (
             <button className="icon-btn !w-5 !h-5" title={t('changes.unstage')} onClick={(e) => { e.stopPropagation(); handleUnstageFile(file.path); }}>
               <Minus size={11} />
@@ -1892,10 +2298,29 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
     );
   };
 
+  // ── SmartGit Commands settings — derived render data ───────────────────
+  // 1.3 Banner counts: untracked files + files missing on disk (unstaged 'D').
+  const untrackedBannerCount = (status?.files ?? []).filter(
+    (f) => (f.index as string) === '?' && (f.working_dir as string) === '?'
+  ).length;
+  const missingBannerPaths = (status?.files ?? [])
+    .filter((f) => (f.working_dir as string) === 'D')
+    .map((f) => f.path);
+  // 1.4 Commit-message line length guides (SmartGit 50/72 convention).
+  // The guide columns themselves are computed inside CommitMessageEditor
+  // (primitive `lineGuides` prop → stable identity for the memoized child).
+  const lineGuidesSetting = settings?.commitLineGuides ?? 'none';
+  // 1.2 — Commit stays enabled while ANY change exists (nothing-staged
+  // setting decides what gets staged); with an empty tree it stays disabled.
+  const hasAnyCommittableChanges =
+    stagedFiles.length > 0 ||
+    unstagedFiles.length > 0 ||
+    untrackedBannerCount > 0;
+
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-1 border-b border-border-default bg-bg-tertiary">
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-border-default bg-bg-tertiary">
         <div className="flex items-center gap-2">
           <span className="text-xs font-medium">{t('changes.files')}</span>
           {totalChanged > 0 && (
@@ -1906,7 +2331,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
           {hiddenCount > 0 && !hasFlag('unchanged') && (
             <button
               className="clickable-text text-2xs"
-              title="Show unchanged files"
+              title={t('changes.showUnchangedFiles')}
               onClick={() => toggleFileDisplayFlag('unchanged')}
             >
               {t('changes.filesHidden', { count: hiddenCount.toLocaleString() })}
@@ -1917,6 +2342,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
           <FilterInput
             value={fileFilter}
             onChange={setFileFilter}
+            debounceMs={150}
             placeholder={t('changes.fileFilter')}
             ariaLabel={t('changes.fileFilter')}
             isRegex={fileFilterRegex}
@@ -1956,6 +2382,21 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
               );
             })}
           </div>
+          {/* 0.3 — Hide EOL-only files toggle (visible when detection is ON and found any) */}
+          {settings?.distinguishEolChanges && eolOnlyPaths.size > 0 && (
+            <button
+              className={cn(
+                'w-5 h-5 rounded flex items-center justify-center transition-colors text-2xs font-bold',
+                hideEolOnly
+                  ? 'bg-accent-muted text-accent'
+                  : 'text-text-tertiary hover:bg-bg-hover hover:text-text-secondary'
+              )}
+              title={hideEolOnly ? t('changes.showEolOnly') : t('changes.hideEolOnly')}
+              onClick={() => setHideEolOnly(v => !v)}
+            >
+              EOL
+            </button>
+          )}
           {/* Extension filter */}
           <input
             type="text"
@@ -2055,7 +2496,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
         {/* Directory tree panel (SmartGit-style) — selects the folder scope */}
         {dirTreeVisible && (
           <>
-            <div className="flex flex-col overflow-hidden flex-shrink-0" style={{ width: treeWidth }}>
+            <div className="flex flex-col overflow-hidden shrink-0" style={{ width: treeWidth }}>
               <div className="flex items-center justify-between px-2 py-1 bg-bg-tertiary border-b border-border-default">
                 <span className="text-2xs font-semibold uppercase text-text-secondary">{t('sidebar.repositories')}</span>
                 <div className="flex items-center gap-0.5">
@@ -2137,7 +2578,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
               <span className="w-4"></span>
               <SortableHeader label={t('changes.colName')} sortKey="name" sort={fileSort} onSort={handleSort} width={colWidths.name} onResizeStart={(e) => startColResize(e, 'name')} />
               <span style={{ width: 74 }} title={t('changes.addedRemovedLines')}></span>
-              <SortableHeader label={t('changes.colState')} sortKey="state" sort={fileSort} onSort={handleSort} width={colWidths.state} onResizeStart={(e) => startColResize(e, 'state')} />
+              <SortableHeader label={t('changes.colState')} sortKey="state" sort={fileSort} onSort={handleSort} width={stateColWidth} onResizeStart={(e) => startColResize(e, 'state')} />
               {!compressFilePaths && (
                 <SortableHeader label={t('changes.colRelDir')} sortKey="dir" sort={fileSort} onSort={handleSort} width={colWidths.dir} onResizeStart={(e) => startColResize(e, 'dir')} />
               )}
@@ -2164,7 +2605,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
             {stagedFiles.length > 0 && (
               <>
                 <div
-                  className="px-2 py-1 bg-status-added/8 text-2xs font-bold uppercase text-status-added border-b border-status-added/20 border-l-2 border-l-status-added/40 flex items-center justify-between cursor-pointer hover:bg-status-added/12 transition-colors"
+                  className="px-2 py-1.5 bg-status-added/8 text-2xs font-bold uppercase text-status-added border-b border-status-added/20 border-l-2 border-l-status-added/40 flex items-center justify-between cursor-pointer hover:bg-status-added/12 transition-colors"
                   onClick={() => {
                     if (repo) {
                       useOperationLogStore.getState().logOperation(
@@ -2205,7 +2646,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
               return (
                 <>
                   <div
-                    className="px-2 py-1 bg-status-modified/8 text-2xs font-bold uppercase text-status-modified border-b border-status-modified/20 border-l-2 border-l-status-modified/40 flex items-center justify-between cursor-pointer hover:bg-status-modified/12 transition-colors"
+                    className="px-2 py-1.5 bg-status-modified/8 text-2xs font-bold uppercase text-status-modified border-b border-status-modified/20 border-l-2 border-l-status-modified/40 flex items-center justify-between cursor-pointer hover:bg-status-modified/12 transition-colors"
                     onClick={() => {
                       if (repo) {
                         useGitStore.getState().stageAll(repo.path);
@@ -2227,22 +2668,48 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
              untrackedFiles.length === 0 && ignoredFileList.length === 0 &&
              assumeUnchangedFileList.length === 0 && skippedFileList.length === 0 &&
              submoduleFileList.length === 0 && unchangedFiles.length === 0 && (
-              <div className="flex items-center gap-2 px-3 py-1.5 bg-status-added/5 border-b border-status-added/20 text-2xs text-status-added">
-                <span className="w-1.5 h-1.5 rounded-full bg-status-added inline-block" />
-                {t('changes.workingTreeClean')}
-              </div>
+              status === null ? (
+                // Repo-switch window: status was cleared and the new repo's
+                // `git status` is still resolving in the worker. Showing
+                // "Working tree clean" here (the old behavior) during the
+                // 0.3-5s gap read as "the app hung and lost my changes".
+                // An explicit loading row tells the user data is coming.
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-bg-secondary border-b border-border-default text-2xs text-text-secondary">
+                  <span className="spinner" />
+                  {t('changes.loadingRepository')}
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-status-added/5 border-b border-status-added/20 text-2xs text-status-added">
+                  <span className="w-1.5 h-1.5 rounded-full bg-status-added inline-block" />
+                  {t('changes.workingTreeClean')}
+                </div>
+              )
             )}
           </div>
 
           {/* Journal panel (bottom) — shows recent commits like SmartGit */}
-          <div className="flex-shrink-0" style={{ height: journalCollapsed ? 24 : journalHeight }}>
+          <div className="shrink-0" style={{ height: journalCollapsed ? 24 : journalHeight }}>
             {!journalCollapsed && (
               <ResizableSplitter direction="vertical" onResize={(d) => handleJournalResize(-d)} />
             )}
             <div className="flex items-center justify-between px-2 py-1 bg-bg-tertiary border-b border-border-default">
               <button
                 className="flex items-center gap-1 text-2xs font-semibold uppercase text-text-secondary hover:text-text-primary transition-colors"
-                onClick={() => setJournalCollapsed(!journalCollapsed)}
+                onClick={() => {
+                  const expanding = journalCollapsed;
+                  setJournalCollapsed(!journalCollapsed);
+                  // PERF (v3.1): the journal load is deferred while collapsed
+                  // (repo-open burst relief) — if the user expands it before
+                  // the deferred timer fired, load NOW and cancel the timer
+                  // (the user is looking at the panel; no double spawn).
+                  if (expanding && journal.length === 0 && !journalLoading) {
+                    if (journalLoadTimerRef.current) {
+                      clearTimeout(journalLoadTimerRef.current);
+                      journalLoadTimerRef.current = null;
+                    }
+                    void loadJournal();
+                  }
+                }}
                 title={journalCollapsed ? t('changes.expandJournal') : t('changes.collapseJournal')}
               >
                 {journalCollapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
@@ -2283,8 +2750,6 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
                         </div>
                       )}
                       {grp.entries.map((entry) => {
-                        const initials = getInitials(entry.author.name);
-                        const color = getAuthorColor(entry.author.name);
                         return (
                           <div
                             key={entry.hash}
@@ -2295,17 +2760,12 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
                             }}
                             title={t('changes.viewInHistoryTitle')}
                           >
-                            <span
-                              className="flex-shrink-0 rounded author-badge text-center"
-                              style={{ backgroundColor: color.bg, width: 24, height: 18, fontSize: 9, lineHeight: '18px' }}
-                            >
-                              {initials}
-                            </span>
+                            <Avatar name={entry.author.name} email={entry.author.email} size={18} />
                             <RefBadges refs={entry.refs} max={3} hash={entry.hash} onChanged={loadJournal} />
                             <span className="flex-1 truncate font-medium text-text-primary">{entry.subject}</span>
                             <CommitHashLink hash={entry.hash} />
                             {grp.entries.length === 1 && (
-                              <span className="text-text-tertiary flex-shrink-0">{grp.label}</span>
+                              <span className="text-text-tertiary shrink-0">{grp.label}</span>
                             )}
                           </div>
                         );
@@ -2320,7 +2780,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
           </div>
 
           {/* Commit editor — resizable with markdown preview */}
-          <div className="bg-bg-secondary flex-shrink-0 flex flex-col" style={{ height: commitHeight }}>
+          <div className="bg-bg-secondary shrink-0 flex flex-col" style={{ height: commitHeight }}>
             <ResizableSplitter direction="vertical" onResize={(d) => handleCommitResize(-d)} />
             <div className="flex items-center gap-2 px-2 py-1">
               <label className="flex items-center gap-1 text-2xs text-text-secondary cursor-pointer">
@@ -2346,16 +2806,15 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
               >
                 MD
               </button>
-              {/* SmartGit Manual: AI Commit Messages — generate button */}
+              {/* SmartGit Manual: AI Commit Messages — generate button.
+                  v2.3.11: always clickable (see handleAIGenerate). */}
               <button
                 className={cn(
                   'text-2xs px-1.5 py-0.5 rounded flex items-center gap-1',
-                  settings?.aiCommitMessagesEnabled
-                    ? 'text-accent hover:bg-accent-muted'
-                    : 'text-text-tertiary cursor-not-allowed opacity-50'
+                  'text-accent hover:bg-accent-muted'
                 )}
                 onClick={handleAIGenerate}
-                disabled={!settings?.aiCommitMessagesEnabled || aiGenerating}
+                disabled={aiGenerating}
                 title={t('changes.aiGenerateTitle')}
               >
                 <Sparkles size={10} className={aiGenerating ? 'animate-pulse' : ''} />
@@ -2375,14 +2834,14 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
                   {t('nav.history')}
                 </button>
                 {showMsgHistory && commitMsgHistory.length > 0 && (
-                  <div className="absolute bottom-full left-0 mb-1 bg-bg-elevated border border-border-default rounded shadow-lg z-50 min-w-64 max-h-48 overflow-y-auto">
+                  <div className="absolute bottom-full left-0 mb-1 bg-zone-popover border border-border-default rounded shadow-lg z-50 min-w-64 max-h-48 overflow-y-auto">
                     {commitMsgHistory.map((msg, i) => (
                       <button
                         key={i}
                         className="w-full text-left px-3 py-1.5 text-xs hover:bg-bg-hover truncate border-b border-border-subtle last:border-b-0"
                         title={msg}
                         onClick={() => {
-                          setCommitMsg(msg);
+                          editorRef.current?.setText(msg);
                           setShowMsgHistory(false);
                         }}
                       >
@@ -2396,7 +2855,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
               <button
                 className="btn btn-secondary text-xs"
                 onClick={handleCommitAndPush}
-                disabled={!commitMsg.trim() || (!commitAll && stagedFiles.length === 0) || isCommitBlocked(status)}
+                disabled={commitMsgEmpty || (!commitAll && !hasAnyCommittableChanges) || isCommitBlocked(status)}
                 title={isCommitBlocked(status) ? t('changes.operationBlockedTitle') : t('changes.commitThenPushTitle')}
               >
                 <GitPullRequest size={11} />
@@ -2405,58 +2864,56 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
               <button
                 className="btn btn-primary text-xs"
                 onClick={handleCommit}
-                disabled={!commitMsg.trim() || (!commitAll && stagedFiles.length === 0) || isCommitBlocked(status)}
-                title={isCommitBlocked(status) ? 'A git operation is in progress — finish it first (use the banner above)' : 'Ctrl+Enter'}
+                disabled={commitMsgEmpty || (!commitAll && !hasAnyCommittableChanges) || isCommitBlocked(status)}
+                title={isCommitBlocked(status) ? t('changes.operationBlockedTitle') : t('changes.ctrlEnterHint')}
               >
                 <GitCommit size={11} />
-                Commit
+                {t('changes.commitButton')}
               </button>
             </div>
-            <div className="flex-1 flex overflow-hidden flex-col">
-              {/* AI auto-suggestion hint — appears above the textarea when
-                  the AI has generated a suggestion in the background.
-                  Click to fill the textarea. Non-intrusive: subtle styling,
-                  dismissable by just typing in the textarea (which sets
-                  commitMsg → the useEffect clears the suggestion). */}
-              {aiSuggestion && !commitMsg.trim() && (
+            {/* 1.3 — SmartGit suggestion banners (Preferences → Commands):
+                "N untracked files — Add all?" / "N missing files — Stage deletions?".
+                Non-blocking inline banners, dismissible for the session. */}
+            {settings?.commitSuggestAddUntracked && untrackedBannerCount > 0 && !dismissedBanners.has('untracked') && (
+              <div className="flex items-center gap-2 px-2 py-1 bg-bg-tertiary border-b border-border-subtle text-2xs">
+                <FilePlus size={10} className="shrink-0 text-accent" />
+                <span className="flex-1 truncate">{t('changes.suggestAddUntracked', { n: untrackedBannerCount })}</span>
                 <button
-                  className="flex items-center gap-1.5 px-2 py-1 bg-accent-muted/50 border-b border-accent/20 text-2xs text-accent hover:bg-accent-muted transition-colors text-left"
-                  onClick={() => { setCommitMsg(aiSuggestion); setAiSuggestion(null); }}
-                  title="Click to use this AI-generated commit message"
+                  className="btn btn-secondary text-2xs !py-0 !px-1.5"
+                  onClick={async () => { try { await stageAll(repo.path); } catch (e) { toast.error(t('changes.stageFailed'), String(e)); } }}
                 >
-                  <Sparkles size={9} className="flex-shrink-0" />
-                  <span className="truncate flex-1 font-mono">{aiSuggestion.split('\n')[0]}</span>
-                  <span className="text-3xs text-text-tertiary flex-shrink-0">click to use</span>
+                  {t('changes.suggestAddAll')}
                 </button>
-              )}
-              {aiSuggesting && !aiSuggestion && !commitMsg.trim() && (
-                <div className="flex items-center gap-1.5 px-2 py-1 bg-bg-tertiary border-b border-border-subtle text-2xs text-text-tertiary">
-                  <Loader size={9} className="animate-spin" />
-                  <span>Suggesting commit message…</span>
-                </div>
-              )}
-              <div className="flex-1 flex overflow-hidden">
-                <textarea
-                id="commit-message-input"
-                className="flex-1 text-sm font-mono resize-none p-2 bg-bg-primary border-r border-border-subtle"
-                placeholder={t('changes.commitMessage')}
-                value={commitMsg}
-                onChange={(e) => setCommitMsg(e.target.value)}
-                onKeyDown={(e) => {
-                  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-                    e.preventDefault();
-                    handleCommit();
-                  }
-                }}
-                style={{ minHeight: 0 }}
-              />
-              {showMarkdownPreview && (
-                <div className="flex-1 overflow-y-auto p-2 text-xs">
-                  <CommitMarkdownPreview content={commitMsg} />
-                </div>
-              )}
+                <button className="icon-btn !w-4 !h-4 shrink-0" title={t('changes.dismissBanner')} onClick={() => setDismissedBanners(prev => new Set(prev).add('untracked'))}>
+                  <X size={10} />
+                </button>
               </div>
-            </div>
+            )}
+            {settings?.commitSuggestRemoveMissing !== false && missingBannerPaths.length > 0 && !dismissedBanners.has('missing') && (
+              <div className="flex items-center gap-2 px-2 py-1 bg-bg-tertiary border-b border-border-subtle text-2xs">
+                <Trash size={10} className="shrink-0 text-status-deleted" />
+                <span className="flex-1 truncate">{t('changes.suggestStageMissing', { n: missingBannerPaths.length })}</span>
+                <button
+                  className="btn btn-secondary text-2xs !py-0 !px-1.5"
+                  onClick={async () => { try { await api.git.add(repo.path, missingBannerPaths); await refreshStatus(repo.path); } catch (e) { toast.error(t('changes.stageFailed'), String(e)); } }}
+                >
+                  {t('changes.suggestStageDeletions')}
+                </button>
+                <button className="icon-btn !w-4 !h-4 shrink-0" title={t('changes.dismissBanner')} onClick={() => setDismissedBanners(prev => new Set(prev).add('missing'))}>
+                  <X size={10} />
+                </button>
+              </div>
+            )}
+            <CommitMessageEditor
+              ref={editorRef}
+              aiSuggestion={aiSuggestion}
+              aiSuggesting={aiSuggesting}
+              onSuggestionConsumed={handleSuggestionConsumed}
+              onSubmit={handleCommitSubmit}
+              onEmptyChange={handleCommitMsgEmptyChange}
+              showMarkdownPreview={showMarkdownPreview}
+              lineGuides={lineGuidesSetting}
+            />
           </div>
         </div>
 
@@ -2471,18 +2928,41 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
                 repoPath={repo.path}
                 filePath={selectedFile || undefined}
                 mode={selectedFile && (status?.staged.some((s) => s.path === selectedFile)) ? 'staged' : 'unstaged'}
-                onStaged={() => {
-                  // Reset the skip-guard so the diff-reload effect re-runs when the
-                  // refreshed status arrives (partial staging changes index, not worktree,
-                  // so the fs watcher will NOT fire by itself).
-                  lastLoadedFileRef.current = null;
-                  refreshStatus(repo.path);
-                }}
+                onStaged={handleDiffStaged}
               />
             </div>
           </>
         )}
       </div>
+
+      {/* 1.2 — SmartGit "If nothing is staged" ask dialog (Preferences → Commands).
+          The Commit button is now enabled with an empty index; this dialog
+          lets the user pick what to stage: tracked modifications only, or
+          everything including untracked files. */}
+      {showNothingStagedDialog && (
+        <div
+          className="fixed inset-0 bg-black/30 dark:bg-black/55 flex items-center justify-center z-50"
+          onClick={() => setShowNothingStagedDialog(false)}
+        >
+          <div className="panel w-[460px]" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-medium px-4 pt-4">{t('changes.nothingStagedTitle')}</h3>
+            <div className="px-4 py-2 text-xs text-text-tertiary">
+              {t('changes.nothingStagedBody')}
+            </div>
+            <div className="flex flex-col gap-2 px-4 pb-4 pt-1">
+              <button className="btn btn-primary w-full" onClick={() => handleNothingStagedChoice('tracked')}>
+                {t('changes.nothingStagedTracked')}
+              </button>
+              <button className="btn btn-secondary w-full" onClick={() => handleNothingStagedChoice('all')}>
+                {t('changes.nothingStagedAll')}
+              </button>
+              <button className="btn btn-secondary w-full" onClick={() => setShowNothingStagedDialog(false)}>
+                {t('common.cancel')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Clean untracked: dry-run preview → confirm → git clean -fd */}
       {showCleanDialog && (
@@ -2508,7 +2988,7 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
                 ))
               )}
             </div>
-            <div className="flex justify-end gap-2 px-4 py-3">
+            <div className="flex flex-wrap justify-end gap-2 px-4 py-3">
               <button className="btn btn-secondary" onClick={() => setShowCleanDialog(false)}>
                 {t('common.cancel')}
               </button>

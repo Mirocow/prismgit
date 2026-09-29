@@ -32,6 +32,14 @@ export const en: Record<string, string> = {
   'toast.git.pushFailed': 'Push failed',
   'toast.git.pullFailed': 'Pull failed',
   'toast.git.pullConflicts': 'Pull resulted in conflicts',
+  'toast.git.rebaseConflicts': "Rebase resulted in conflicts",
+  'toast.git.rebaseConflictsHint': "Resolve them in the Changes tool (Continue / Skip / Abort)",
+  'toast.git.cherryPickConflicts': "Cherry-pick resulted in conflicts",
+  'toast.git.cherryPickConflictsHint': "Resolve them in the Changes tool, then Continue",
+  'toast.git.revertConflicts': "Revert resulted in conflicts",
+  'toast.git.revertConflictsHint': "Resolve them in the Changes tool, then Continue",
+  'toast.gitflow.finishConflicts': "Git-flow finish stopped — merge conflicts",
+  'toast.gitflow.finishConflictsHint': "The branch was NOT deleted and nothing was pushed; resolve the conflicts in the Changes tool",
   'toast.git.fetchSuccess': 'Fetched successfully',
   'toast.git.fetchFailed': 'Fetch failed',
   'toast.git.stageSuccess': 'Staged {file}',
@@ -42,6 +50,11 @@ export const en: Record<string, string> = {
   'toast.git.unstageAllSuccess': 'All changes unstaged',
   'toast.git.discardSuccess': 'Changes discarded',
   'toast.git.discardFailed': 'Discard failed',
+  'toast.git.unhandledRejection': 'Operation failed (unhandled)',
+  'toast.git.uncaughtError': 'Error',
+  'toast.git.lfsNotInstalled': 'Git LFS is not installed — skipping LFS operations. Install it from https://git-lfs.com',
+  'toast.git.lfsFilterFailed': 'Git LFS filter failed (git-lfs not installed). The operation completed but LFS-tracked files may not have been processed correctly.',
+  'toast.git.discardAllConfirm': 'This will permanently discard all staged and unstaged changes.\nThis cannot be undone.',
   'toast.git.discardedIn': 'Discarded changes in {file}',
   'toast.git.checkoutSuccess': 'Checked out {ref}',
   'toast.git.checkoutFailed': 'Checkout failed',
@@ -162,6 +175,28 @@ export const en: Record<string, string> = {
 
   // ── Generic fallback ────────────────────────────────────────────────────
   'toast.generic.failed': 'Failed',
+
+  // ── Stash continuation (HistoryPage) ─────────────────────────────────────
+  'toast.stash.applied': 'Stash applied',
+  'toast.stash.applyFailed': 'Apply stash failed',
+  'toast.stash.dropped': 'Stash dropped',
+  'toast.stash.dropFailed': 'Drop stash failed',
+
+  // ── App-level toast messages ────────────────────────────────────────────
+  'toast.app.undoCommitSuccess': 'Last commit undone — changes are back in the Index',
+  'toast.app.undoCommitFailed': 'Undo commit failed',
+  'toast.app.selectStashApply': 'Select a stash and click Apply',
+  'toast.app.useTrackButton': 'Use the Track button on the LFS page',
+  'toast.app.perspectiveReset': 'Perspective reset — layout preferences cleared',
+
+  // ── squash-to-branch (History multi-selection) ──
+  'toast.squashToBranch.done': 'Squashed onto {branch}',
+  'toast.squashToBranch.switched': 'Switched to {branch}',
+  'toast.squashToBranch.switchFailed': 'Could not switch branches',
+  'toast.squashToBranch.conflicts': 'Conflicts: {count} on {branch}',
+  'toast.squashToBranch.conflictsDetail': 'Resolve them in Changes, then Continue — the squash lands as one commit',
+  'toast.squashToBranch.empty': '{branch} already contains these changes',
+  'toast.squashToBranch.failed': 'Squash to branch failed',
 };
 
 export const ru: Record<string, string> = {
@@ -169,6 +204,14 @@ export const ru: Record<string, string> = {
   'toast.git.pushFailed': 'Ошибка push',
   'toast.git.pullFailed': 'Ошибка pull',
   'toast.git.pullConflicts': 'Pull привёл к конфликтам',
+  'toast.git.rebaseConflicts': "Rebase привёл к конфликтам",
+  'toast.git.rebaseConflictsHint': "Разрешите их в инструменте Changes (Продолжить / Пропустить / Прервать)",
+  'toast.git.cherryPickConflicts': "Cherry-pick привёл к конфликтам",
+  'toast.git.cherryPickConflictsHint': "Разрешите их в инструменте Changes, затем Продолжить",
+  'toast.git.revertConflicts': "Revert привёл к конфликтам",
+  'toast.git.revertConflictsHint': "Разрешите их в инструменте Changes, затем Продолжить",
+  'toast.gitflow.finishConflicts': "Завершение Git-flow остановлено — конфликты слияния",
+  'toast.gitflow.finishConflictsHint': "Ветка НЕ удалена и ничего не отправлено; разрешите конфликты в инструменте Changes",
   'toast.git.fetchSuccess': 'Успешно получено',
   'toast.git.fetchFailed': 'Ошибка fetch',
   'toast.git.stageSuccess': 'Индексирован {file}',
@@ -179,6 +222,11 @@ export const ru: Record<string, string> = {
   'toast.git.unstageAllSuccess': 'Все изменения сняты с индексации',
   'toast.git.discardSuccess': 'Изменения отменены',
   'toast.git.discardFailed': 'Не удалось отменить изменения',
+  'toast.git.unhandledRejection': 'Операция не удалась (необработанная ошибка)',
+  'toast.git.uncaughtError': 'Ошибка',
+  'toast.git.lfsNotInstalled': 'Git LFS не установлен — операции LFS пропускаются. Установите с https://git-lfs.com',
+  'toast.git.lfsFilterFailed': 'Сбой фильтра Git LFS (git-lfs не установлен). Операция завершена, но файлы под LFS могли быть обработаны некорректно.',
+  'toast.git.discardAllConfirm': 'Это навсегда отменит все проиндексированные и непроиндексированные изменения.\nДействие нельзя отменить.',
   'toast.git.discardedIn': 'Изменения в {file} отменены',
   'toast.git.checkoutSuccess': 'Переключено на {ref}',
   'toast.git.checkoutFailed': 'Ошибка переключения ветки',
@@ -284,6 +332,26 @@ export const ru: Record<string, string> = {
   'toast.iRebase.targetRequired': 'Требуется целевая ветка',
 
   'toast.generic.failed': 'Не удалось',
+
+  'toast.stash.applied': 'Stash применён',
+  'toast.stash.applyFailed': 'Не удалось применить stash',
+  'toast.stash.dropped': 'Stash удалён',
+  'toast.stash.dropFailed': 'Не удалось удалить stash',
+
+  'toast.app.undoCommitSuccess': 'Последний коммит отменён — изменения возвращены в индекс',
+  'toast.app.undoCommitFailed': 'Не удалось отменить коммит',
+  'toast.app.selectStashApply': 'Выберите stash и нажмите Apply',
+  'toast.app.useTrackButton': 'Используйте кнопку Track на странице LFS',
+  'toast.app.perspectiveReset': 'Перспектива сброшена — настройки раскладки очищены',
+
+  // ── squash-to-branch (History multi-selection) ──
+  'toast.squashToBranch.done': 'Сквош применён к {branch}',
+  'toast.squashToBranch.switched': 'Переключено на {branch}',
+  'toast.squashToBranch.switchFailed': 'Не удалось переключить ветку',
+  'toast.squashToBranch.conflicts': 'Конфликтов: {count} на {branch}',
+  'toast.squashToBranch.conflictsDetail': 'Разрешите их в «Изменениях», затем Continue — сквош станет одним коммитом',
+  'toast.squashToBranch.empty': '{branch} уже содержит эти изменения',
+  'toast.squashToBranch.failed': 'Не удалось сделать сквош в ветку',
 };
 
 export const zh: Record<string, string> = {
@@ -291,6 +359,14 @@ export const zh: Record<string, string> = {
   'toast.git.pushFailed': '推送失败',
   'toast.git.pullFailed': '拉取失败',
   'toast.git.pullConflicts': '拉取导致冲突',
+  'toast.git.rebaseConflicts': "变基产生了冲突",
+  'toast.git.rebaseConflictsHint': "请在更改工具中解决（继续 / 跳过 / 中止）",
+  'toast.git.cherryPickConflicts': "Cherry-pick 产生了冲突",
+  'toast.git.cherryPickConflictsHint': "请在更改工具中解决，然后继续",
+  'toast.git.revertConflicts': "回退产生了冲突",
+  'toast.git.revertConflictsHint': "请在更改工具中解决，然后继续",
+  'toast.gitflow.finishConflicts': "Git-flow 完成已停止——合并冲突",
+  'toast.gitflow.finishConflictsHint': "分支未被删除、未推送任何内容；请在更改工具中解决冲突",
   'toast.git.fetchSuccess': '获取成功',
   'toast.git.fetchFailed': '获取失败',
   'toast.git.stageSuccess': '已暂存 {file}',
@@ -301,6 +377,11 @@ export const zh: Record<string, string> = {
   'toast.git.unstageAllSuccess': '所有更改已取消暂存',
   'toast.git.discardSuccess': '更改已丢弃',
   'toast.git.discardFailed': '丢弃更改失败',
+  'toast.git.unhandledRejection': '操作失败（未处理错误）',
+  'toast.git.uncaughtError': '错误',
+  'toast.git.lfsNotInstalled': 'Git LFS 未安装 — 跳过 LFS 操作。从 https://git-lfs.com 安装',
+  'toast.git.lfsFilterFailed': 'Git LFS 过滤器失败（未安装 git-lfs）。操作已完成，但 LFS 跟踪的文件可能未正确处理。',
+  'toast.git.discardAllConfirm': '这将永久丢弃所有暂存和未暂存的更改。\n此操作无法撤销。',
   'toast.git.discardedIn': '已丢弃 {file} 中的更改',
   'toast.git.checkoutSuccess': '已切换到 {ref}',
   'toast.git.checkoutFailed': '切换分支失败',
@@ -406,6 +487,26 @@ export const zh: Record<string, string> = {
   'toast.iRebase.targetRequired': '需要目标分支',
 
   'toast.generic.failed': '失败',
+
+  'toast.stash.applied': '贮藏已应用',
+  'toast.stash.applyFailed': '应用贮藏失败',
+  'toast.stash.dropped': '贮藏已丢弃',
+  'toast.stash.dropFailed': '丢弃贮藏失败',
+
+  'toast.app.undoCommitSuccess': '已撤销最后提交 — 更改已返回到索引',
+  'toast.app.undoCommitFailed': '撤销提交失败',
+  'toast.app.selectStashApply': '选择一个贮藏并点击应用',
+  'toast.app.useTrackButton': '使用 LFS 页面上的 Track 按钮',
+  'toast.app.perspectiveReset': '布局已重置 — 布局偏好已清除',
+
+  // ── squash-to-branch (History multi-selection) ──
+  'toast.squashToBranch.done': '已压合到 {branch}',
+  'toast.squashToBranch.switched': '已切换到 {branch}',
+  'toast.squashToBranch.switchFailed': '无法切换分支',
+  'toast.squashToBranch.conflicts': '{branch} 上有 {count} 个冲突',
+  'toast.squashToBranch.conflictsDetail': '在「更改」中解决冲突后点击继续——压合将作为单个提交落地',
+  'toast.squashToBranch.empty': '{branch} 已包含这些更改',
+  'toast.squashToBranch.failed': '压合到分支失败',
 };
 
 export const de: Record<string, string> = {
@@ -413,6 +514,14 @@ export const de: Record<string, string> = {
   'toast.git.pushFailed': 'Push fehlgeschlagen',
   'toast.git.pullFailed': 'Pull fehlgeschlagen',
   'toast.git.pullConflicts': 'Pull führte zu Konflikten',
+  'toast.git.rebaseConflicts': "Rebase führte zu Konflikten",
+  'toast.git.rebaseConflictsHint': "Lösen Sie sie im Changes-Werkzeug (Fortsetzen / Überspringen / Abbrechen)",
+  'toast.git.cherryPickConflicts': "Cherry-pick führte zu Konflikten",
+  'toast.git.cherryPickConflictsHint': "Im Changes-Werkzeug lösen, dann Fortsetzen",
+  'toast.git.revertConflicts': "Revert führte zu Konflikten",
+  'toast.git.revertConflictsHint': "Im Changes-Werkzeug lösen, dann Fortsetzen",
+  'toast.gitflow.finishConflicts': "Git-Flow-Abschluss gestoppt — Merge-Konflikte",
+  'toast.gitflow.finishConflictsHint': "Der Branch wurde NICHT gelöscht und nichts gepusht; Konflikte im Changes-Werkzeug lösen",
   'toast.git.fetchSuccess': 'Erfolgreich geholt',
   'toast.git.fetchFailed': 'Fetch fehlgeschlagen',
   'toast.git.stageSuccess': '{file} indexiert',
@@ -423,6 +532,11 @@ export const de: Record<string, string> = {
   'toast.git.unstageAllSuccess': 'Alle Änderungen deindexiert',
   'toast.git.discardSuccess': 'Änderungen verworfen',
   'toast.git.discardFailed': 'Verwerfen fehlgeschlagen',
+  'toast.git.unhandledRejection': 'Vorgang fehlgeschlagen (unbehandelt)',
+  'toast.git.uncaughtError': 'Fehler',
+  'toast.git.lfsNotInstalled': 'Git LFS ist nicht installiert — LFS-Operationen werden übersprungen. Von https://git-lfs.com installieren',
+  'toast.git.lfsFilterFailed': 'Git LFS-Filter fehlgeschlagen (git-lfs nicht installiert). Der Vorgang wurde abgeschlossen, aber LFS-verfolgte Dateien wurden möglicherweise nicht korrekt verarbeitet.',
+  'toast.git.discardAllConfirm': 'Dies verwirft alle indexierten und nicht indexierten Änderungen dauerhaft.\nDies kann nicht rückgängig gemacht werden.',
   'toast.git.discardedIn': 'Änderungen in {file} verworfen',
   'toast.git.checkoutSuccess': 'Zu {ref} gewechselt',
   'toast.git.checkoutFailed': 'Checkout fehlgeschlagen',
@@ -528,4 +642,55 @@ export const de: Record<string, string> = {
   'toast.iRebase.targetRequired': 'Ziel-Branch erforderlich',
 
   'toast.generic.failed': 'Fehlgeschlagen',
+
+  'toast.stash.applied': 'Stash angewendet',
+  'toast.stash.applyFailed': 'Stash anwenden fehlgeschlagen',
+  'toast.stash.dropped': 'Stash verworfen',
+  'toast.stash.dropFailed': 'Stash verwerfen fehlgeschlagen',
+
+  'toast.app.undoCommitSuccess': 'Letzter Commit rückgängig — Änderungen zurück im Index',
+  'toast.app.undoCommitFailed': 'Commit rückgängig fehlgeschlagen',
+  'toast.app.selectStashApply': 'Wählen Sie einen Stash und klicken Sie auf Apply',
+  'toast.app.useTrackButton': 'Verwenden Sie die Track-Schaltfläche auf der LFS-Seite',
+  'toast.app.perspectiveReset': 'Perspektive zurückgesetzt — Layout-Einstellungen gelöscht',
+
+  // ── squash-to-branch (History multi-selection) ──
+  'toast.squashToBranch.done': 'Auf {branch} gesquasht',
+  'toast.squashToBranch.switched': 'Zu {branch} gewechselt',
+  'toast.squashToBranch.switchFailed': 'Branch-Wechsel fehlgeschlagen',
+  'toast.squashToBranch.conflicts': 'Konflikte: {count} auf {branch}',
+  'toast.squashToBranch.conflictsDetail': 'In Änderungen auflösen, dann Weiter — der Squash wird ein einzelner Commit',
+  'toast.squashToBranch.empty': '{branch} enthält diese Änderungen bereits',
+  'toast.squashToBranch.failed': 'Squash in Branch fehlgeschlagen',
+};
+
+// ── App.tsx remaining toasts ──
+export const en_app = {
+  'toast.git.ignoreFailed': 'Ignore failed',
+  'toast.git.openIgnoreFailed': 'Failed to open .gitignore',
+  'toast.git.toggleFailed': 'Toggle failed',
+  'toast.git.moveRenameFailed': 'Move/rename failed',
+  'toast.git.deleteFailed2': 'Delete failed',
+  'toast.git.removeFailed': 'Remove failed',
+  'toast.git.lfsInstalled': 'Git LFS installed for this repository',
+  'toast.git.lfsOperationFailed': 'LFS operation failed',
+  'toast.git.fetchAllSuccess': 'Fetched all remotes',
+  'toast.git.fetchAllFailed': 'Fetch all failed',
+  'toast.git.pullHint': 'Right-click the branch → Pull... for options (merge/rebase/ff-only)',
+  'toast.git.fetchMoreHint': 'Right-click a remote → Fetch More... (or Set Depth... for shallow clones)',
+  'toast.git.verifyFailed': 'Verify failed',
+  'toast.git.gcFailed': 'GC failed',
+  'toast.git.openTerminalFailed': 'Could not open a terminal',
+  'toast.git.formatPatchFailed': 'Format patch failed',
+  'toast.git.deepLinkCopied': 'Deep link copied to clipboard',
+  'toast.git.deepLinkInvalid': 'Invalid deep link',
+  'toast.git.windowStyle': 'Window style: {style}',
+  'toast.git.toggleFailed2': 'Toggle failed',
+  'toast.git.undoLastCommit': 'Last commit undone — changes restored to working tree',
+  'toast.git.undoFailed': 'Undo failed',
+  'toast.git.operationAborted2': 'Operation aborted',
+  'toast.git.stashAbortFailed2': 'Stash & abort failed',
+  'toast.git.lastCommitUndo': 'Undone: {hash}',
+  'toast.git.nothingToAbort': 'Nothing to abort — no sequencer in progress',
+  'toast.git.abortFailed2': 'Abort failed',
 };

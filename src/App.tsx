@@ -1,1501 +1,2918 @@
-import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
-import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
-import { ConfirmDialogHost, confirmDialog, promptDialog } from './components/ConfirmDialog';
-import { DeepLinkHandler } from './components/DeepLinkHandler';
-import { DragDropHandler } from './components/DragDropHandler';
-import { HelpBanner } from './components/HelpBanner';
-import { NAV_SHORTCUTS } from './components/navItems';
-import { ResizableSplitter } from './components/ResizableSplitter';
-import { Sidebar } from './components/Sidebar';
-import { StatusBar } from './components/StatusBar';
-import { ToastContainer } from './components/ToastContainer';
-import { GitToolbar, Toolbar } from './components/Toolbar';
-import { WelcomeScreen } from './components/WelcomeScreen';
-import { useWindowStyleStore } from './components/WindowStyleSwitcher';
-import { useBackgroundFetch } from './hooks/useBackgroundFetch';
-import { useChunkPreload } from './hooks/useChunkPreload';
-import { useRemotePolling } from './hooks/useRemotePolling';
-import { api } from './lib/api';
 import {
-  buildCurrentDeepLink,
-  clearPendingDeepLinkPage,
-  currentHashPath,
-  isValidDeepLinkPath,
-  takePendingDeepLinkPage,
-} from './lib/deepLinks';
-import { t as i18nT, useI18nStore } from './lib/i18n';
-import { clearProjectPrefs, loadProjectPrefs, saveProjectPrefs } from './lib/projectPrefs';
-import { useAuthStore } from './stores/authStore';
-import { useCommandLogStore } from './stores/commandLogStore';
-import { initOperationLogIpcListener } from './stores/operationLogStore';
-import { useGitStore } from './stores/gitStore';
-import { useRepositoryStore } from './stores/repositoryStore';
-import { useSelectionStore } from './stores/selectionStore';
-import { useSettingsStore } from './stores/settingsStore';
-import { useToastStore, useToastActions } from './stores/toastStore';
+    Suspense,
+    lazy,
+    useCallback,
+    useEffect,
+    useRef,
+    useState,
+} from "react";
+import {
+    Navigate,
+    Route,
+    Routes,
+    useLocation,
+    useNavigate,
+} from "react-router-dom";
+import {
+    ConfirmDialogHost,
+    confirmDialog,
+    promptDialog,
+} from "./components/ConfirmDialog";
+import { DeepLinkHandler } from "./components/DeepLinkHandler";
+import { DragDropHandler } from "./components/DragDropHandler";
+import {
+    ErrorReportDialog,
+    clearPersistedError,
+    collectEnvironment,
+    formatErrorStack,
+    loadPersistedError,
+    persistError,
+    type CapturedError,
+} from "./components/ErrorReportDialog";
+import { GlobalErrorBoundary } from "./components/GlobalErrorBoundary";
+import { HelpBanner } from "./components/HelpBanner";
+import { effectiveNavHotkeys } from "./components/navItems";
+import { ResizableSplitter } from "./components/ResizableSplitter";
+import { Sidebar } from "./components/Sidebar";
+import { StatusBar } from "./components/StatusBar";
+import { ToastContainer } from "./components/ToastContainer";
+import { GitToolbar, Toolbar } from "./components/Toolbar";
+import { WelcomeScreen } from "./components/WelcomeScreen";
+import { useWindowStyleStore } from "./components/WindowStyleSwitcher";
+import { useAutoPush } from "./hooks/useAutoPush";
+import { useChunkPreload } from "./hooks/useChunkPreload";
+import { useRemotePolling } from "./hooks/useRemotePolling";
+import { useWatchdog } from "./hooks/useWatchdog";
+import { api } from "./lib/api";
+import {
+    buildCurrentDeepLink,
+    clearPendingDeepLinkPage,
+    currentHashPath,
+    isValidDeepLinkPath,
+    takePendingDeepLinkPage,
+} from "./lib/deepLinks";
+import { t as i18nT, initLocaleFromSettings, useI18nStore } from "./lib/i18n";
+import {
+    clearProjectPrefs,
+    loadProjectPrefs,
+    saveProjectPrefs,
+} from "./lib/projectPrefs";
+import { buildThemeOverrideCss } from "./lib/themeOverrideCss";
+import { useAuthStore } from "./stores/authStore";
+import { useCommandLogStore } from "./stores/commandLogStore";
+import { surfaceConflictedState, useGitStore } from "./stores/gitStore";
+import { useNavHistoryStore } from "./stores/navHistoryStore";
+import { initOperationLogIpcListener } from "./stores/operationLogStore";
+import { offerPushRejection } from "./stores/pushRejectionStore";
+import { offerSslBypass } from "./stores/sslBypassStore";
+import { offerAuthBypass } from "./stores/authBypassStore";
+import { useRepositoryStore } from "./stores/repositoryStore";
+import { useSelectionStore } from "./stores/selectionStore";
+import { useSettingsStore } from "./stores/settingsStore";
+import { useToastActions } from "./stores/toastStore";
+import { useUiLayoutStore } from "./stores/uiLayoutStore";
 
 // Heavy dialogs are code-split: they are never needed for first paint, and
 // pulling them out of the initial bundle makes the app window show faster.
 // Their chunks are warmed on idle by useChunkPreload, so the first open of
 // each dialog stays instant (no fetch/parse penalty for the user).
-const CloneModal = lazy(() => import('./components/CloneModal').then(m => ({ default: m.CloneModal })));
-const InitModal = lazy(() => import('./components/InitModal').then(m => ({ default: m.InitModal })));
-const GitFlowDialog = lazy(() => import('./components/GitFlowDialog').then(m => ({ default: m.GitFlowDialog })));
-const InteractiveRebaseDialog = lazy(() => import('./components/InteractiveRebaseDialog').then(m => ({ default: m.InteractiveRebaseDialog })));
-const ConflictSolver = lazy(() => import('./components/ConflictSolver').then(m => ({ default: m.ConflictSolver })));
-const RepoInfoDialog = lazy(() => import('./components/RepoInfoDialog').then(m => ({ default: m.RepoInfoDialog })));
-const ApplyPatchModal = lazy(() => import('./components/ApplyPatchModal').then(m => ({ default: m.ApplyPatchModal })));
-const IndexEditorDialog = lazy(() => import('./components/IndexEditorDialog').then(m => ({ default: m.IndexEditorDialog })));
-const RepoSettingsDialog = lazy(() => import('./components/RepoSettingsDialog').then(m => ({ default: m.RepoSettingsDialog })));
+const CloneModal = lazy(() =>
+    import("./components/CloneModal").then((m) => ({ default: m.CloneModal })),
+);
+const InitModal = lazy(() =>
+    import("./components/InitModal").then((m) => ({ default: m.InitModal })),
+);
+const GitFlowDialog = lazy(() =>
+    import("./components/GitFlowDialog").then((m) => ({
+        default: m.GitFlowDialog,
+    })),
+);
+const InteractiveRebaseDialog = lazy(() =>
+    import("./components/InteractiveRebaseDialog").then((m) => ({
+        default: m.InteractiveRebaseDialog,
+    })),
+);
+const RepoInfoDialog = lazy(() =>
+    import("./components/RepoInfoDialog").then((m) => ({
+        default: m.RepoInfoDialog,
+    })),
+);
+const ApplyPatchModal = lazy(() =>
+    import("./components/ApplyPatchModal").then((m) => ({
+        default: m.ApplyPatchModal,
+    })),
+);
+const IndexEditorDialog = lazy(() =>
+    import("./components/IndexEditorDialog").then((m) => ({
+        default: m.IndexEditorDialog,
+    })),
+);
+const RepoSettingsDialog = lazy(() =>
+    import("./components/RepoSettingsDialog").then((m) => ({
+        default: m.RepoSettingsDialog,
+    })),
+);
+// Remote-conflict reaction surface — opened from ANY push catch site via
+// offerPushRejection() (pushRejectionStore). Mounted once, self-gating on ctx.
+const PushRejectionDialog = lazy(() =>
+    import("./components/PushRejectionDialog").then((m) => ({
+        default: m.PushRejectionDialog,
+    })),
+);
+// TLS-certificate reaction surface — opened from ANY network catch site via
+// offerSslBypass() (sslBypassStore) when git rejects the server's cert
+// (expired / self-signed / unknown CA). Mounted once, self-gating on ctx.
+const SslBypassDialog = lazy(() =>
+    import("./components/SslBypassDialog").then((m) => ({
+        default: m.SslBypassDialog,
+    })),
+);
+// HTTP-authentication reaction surface — opened from ANY network catch site
+// via offerAuthBypass() (authBypassStore) when the server requires
+// login/password and none are stored (or the stored ones were rejected).
+// Asks the user, SAVES per repo+remote (encrypted vault), retries the op.
+const RemoteAuthDialog = lazy(() =>
+    import("./components/RemoteAuthDialog").then((m) => ({
+        default: m.RemoteAuthDialog,
+    })),
+);
+const ErrorDialogHost = lazy(() =>
+    import("./components/ErrorDialogHost").then((m) => ({
+        default: m.ErrorDialogHost,
+    })),
+);
 // Rarely-used overlays — lazy-load to keep the initial bundle small.
 // These are triggered by keyboard shortcuts / toolbar buttons, so a
 // ~50ms chunk fetch on first open is invisible to the user.
-const CommandPalette = lazy(() => import('./components/CommandPalette').then(m => ({ default: m.CommandPalette })));
-const GlobalSearch = lazy(() => import('./components/GlobalSearch').then(m => ({ default: m.GlobalSearch })));
-const AiAssistant = lazy(() => import('./components/AiAssistant').then(m => ({ default: m.AiAssistant })));
-const TourOverlay = lazy(() => import('./components/TourOverlay').then(m => ({ default: m.TourOverlay })));
-const KeyboardShortcutsOverlay = lazy(() => import('./components/KeyboardShortcutsOverlay').then(m => ({ default: m.KeyboardShortcutsOverlay })));
-const RefActionDialog = lazy(() => import('./components/RefActionDialog').then(m => ({ default: m.RefActionDialog })));
-const FindObjectDialog = lazy(() => import('./components/FindObjectDialog').then(m => ({ default: m.FindObjectDialog })));
-const CommandLogPanel = lazy(() => import('./components/CommandLogPanel').then(m => ({ default: m.CommandLogPanel })));
+const CommandPalette = lazy(() =>
+    import("./components/CommandPalette").then((m) => ({
+        default: m.CommandPalette,
+    })),
+);
+const GlobalSearch = lazy(() =>
+    import("./components/GlobalSearch").then((m) => ({
+        default: m.GlobalSearch,
+    })),
+);
+const AiAssistant = lazy(() =>
+    import("./components/AiAssistant").then((m) => ({
+        default: m.AiAssistant,
+    })),
+);
+const TourOverlay = lazy(() =>
+    import("./components/TourOverlay").then((m) => ({
+        default: m.TourOverlay,
+    })),
+);
+const KeyboardShortcutsOverlay = lazy(() =>
+    import("./components/KeyboardShortcutsOverlay").then((m) => ({
+        default: m.KeyboardShortcutsOverlay,
+    })),
+);
+const RefActionDialog = lazy(() =>
+    import("./components/RefActionDialog").then((m) => ({
+        default: m.RefActionDialog,
+    })),
+);
+const FindObjectDialog = lazy(() =>
+    import("./components/FindObjectDialog").then((m) => ({
+        default: m.FindObjectDialog,
+    })),
+);
+const CommandLogPanel = lazy(() =>
+    import("./components/CommandLogPanel").then((m) => ({
+        default: m.CommandLogPanel,
+    })),
+);
 
 // Type-only re-export of RefAction so the refAction state can be typed
 // without pulling the component into the main bundle.
-import type { RefAction } from './components/RefActionDialog';
+import type { RefAction } from "./components/RefActionDialog";
 
 // Lazy-load pages for smaller initial bundle
-const ChangesPage = lazy(() => import('./pages/ChangesPage').then(m => ({ default: m.ChangesPage })));
-const HistoryPage = lazy(() => import('./pages/HistoryPage').then(m => ({ default: m.HistoryPage })));
-const DiffPage = lazy(() => import('./pages/DiffPage').then(m => ({ default: m.DiffPage })));
-const AnnotatePage = lazy(() => import('./pages/AnnotatePage').then(m => ({ default: m.AnnotatePage })));
-const BlamePage = lazy(() => import('./pages/BlamePage').then(m => ({ default: m.BlamePage })));
-const InvestigatePage = lazy(() => import('./pages/InvestigatePage').then(m => ({ default: m.InvestigatePage })));
-const JournalPage = lazy(() => import('./pages/JournalPage').then(m => ({ default: m.JournalPage })));
-const GitFlowPage = lazy(() => import('./pages/GitFlowPage').then(m => ({ default: m.GitFlowPage })));
-const PullRequestsPage = lazy(() => import('./pages/PullRequestsPage').then(m => ({ default: m.PullRequestsPage })));
-const ReviewsPage = lazy(() => import('./pages/ReviewsPage').then(m => ({ default: m.ReviewsPage })));
-const LfsPage = lazy(() => import('./pages/LfsPage').then(m => ({ default: m.LfsPage })));
-const BranchesPage = lazy(() => import('./pages/BranchesPage').then(m => ({ default: m.BranchesPage })));
-const StashesPage = lazy(() => import('./pages/StashesPage').then(m => ({ default: m.StashesPage })));
-const TagsPage = lazy(() => import('./pages/TagsPage').then(m => ({ default: m.TagsPage })));
-const SubmodulesPage = lazy(() => import('./pages/SubmodulesPage').then(m => ({ default: m.SubmodulesPage })));
-const ReflogPage = lazy(() => import('./pages/ReflogPage').then(m => ({ default: m.ReflogPage })));
-const RecyclablePage = lazy(() => import('./pages/RecyclablePage').then(m => ({ default: m.RecyclablePage })));
-const RemotesPage = lazy(() => import('./pages/RemotesPage').then(m => ({ default: m.RemotesPage })));
-const BisectPage = lazy(() => import('./pages/BisectPage').then(m => ({ default: m.BisectPage })));
-const SettingsPage = lazy(() => import('./pages/SettingsPage').then(m => ({ default: m.SettingsPage })));
-const AiChatPage = lazy(() => import('./pages/AiChatPage'));
+const ChangesPage = lazy(() =>
+    import("./pages/ChangesPage").then((m) => ({ default: m.ChangesPage })),
+);
+const HistoryPage = lazy(() =>
+    import("./pages/HistoryPage").then((m) => ({ default: m.HistoryPage })),
+);
+const DiffPage = lazy(() =>
+    import("./pages/DiffPage").then((m) => ({ default: m.DiffPage })),
+);
+const AnnotatePage = lazy(() =>
+    import("./pages/AnnotatePage").then((m) => ({ default: m.AnnotatePage })),
+);
+const BlamePage = lazy(() =>
+    import("./pages/BlamePage").then((m) => ({ default: m.BlamePage })),
+);
+const InvestigatePage = lazy(() =>
+    import("./pages/InvestigatePage").then((m) => ({
+        default: m.InvestigatePage,
+    })),
+);
+const JournalPage = lazy(() =>
+    import("./pages/JournalPage").then((m) => ({ default: m.JournalPage })),
+);
+const GitFlowPage = lazy(() =>
+    import("./pages/GitFlowPage").then((m) => ({ default: m.GitFlowPage })),
+);
+const PullRequestsPage = lazy(() =>
+    import("./pages/PullRequestsPage").then((m) => ({
+        default: m.PullRequestsPage,
+    })),
+);
+const ReviewsPage = lazy(() =>
+    import("./pages/ReviewsPage").then((m) => ({ default: m.ReviewsPage })),
+);
+const LfsPage = lazy(() =>
+    import("./pages/LfsPage").then((m) => ({ default: m.LfsPage })),
+);
+const BranchesPage = lazy(() =>
+    import("./pages/BranchesPage").then((m) => ({ default: m.BranchesPage })),
+);
+const StashesPage = lazy(() =>
+    import("./pages/StashesPage").then((m) => ({ default: m.StashesPage })),
+);
+const TagsPage = lazy(() =>
+    import("./pages/TagsPage").then((m) => ({ default: m.TagsPage })),
+);
+const SubmodulesPage = lazy(() =>
+    import("./pages/SubmodulesPage").then((m) => ({
+        default: m.SubmodulesPage,
+    })),
+);
+const ReflogPage = lazy(() =>
+    import("./pages/ReflogPage").then((m) => ({ default: m.ReflogPage })),
+);
+const RecyclablePage = lazy(() =>
+    import("./pages/RecyclablePage").then((m) => ({
+        default: m.RecyclablePage,
+    })),
+);
+const BisectPage = lazy(() =>
+    import("./pages/BisectPage").then((m) => ({ default: m.BisectPage })),
+);
+const SettingsPage = lazy(() =>
+    import("./pages/SettingsPage").then((m) => ({ default: m.SettingsPage })),
+);
+const AiChatPage = lazy(() => import("./pages/AiChatPage"));
 
 function PageLoader() {
-  return (
-    <div className="flex-1 flex items-center justify-center text-text-tertiary text-sm">
-      <div className="animate-fade-in">Loading...</div>
-    </div>
-  );
+    return (
+        <div className="flex-1 flex items-center justify-center text-text-tertiary text-sm">
+            <div className="animate-fade-in">
+                {i18nT("common.loadingEllipsis")}
+            </div>
+        </div>
+    );
 }
-
 
 // When a conflict file is clicked in Changes, redirect to Diff tool
 // (not a modal). The Diff tool's ConflictMergeView handles resolution.
-function ConflictRedirect({ file, onDone }: { file: string; onDone: () => void }) {
-  useEffect(() => {
-    useSelectionStore.getState().selectFile(file);
-    window.location.hash = '#/diff';
-    onDone();
-  }, [file, onDone]);
-  return null;
+function ConflictRedirect({
+    file,
+    onDone,
+}: {
+    file: string;
+    onDone: () => void;
+}) {
+    useEffect(() => {
+        useSelectionStore.getState().selectFile(file);
+        window.location.hash = "#/diff";
+        onDone();
+    }, [file, onDone]);
+    return null;
 }
 
 export default function App() {
-  const currentRepo = useRepositoryStore((s) => s.currentRepo);
-  const loadRepos = useRepositoryStore((s) => s.loadRepos);
-  const loadMetadata = useRepositoryStore((s) => s.loadMetadata);
-  const loadSettings = useSettingsStore((s) => s.loadSettings);
-  const loadAuth = useAuthStore((s) => s.loadAuthState);
-  const refreshStatus = useGitStore((s) => s.refreshStatus);
-  const status = useGitStore((s) => s.status);
-  const toast = useToastActions();
-  const windowStyle = useWindowStyleStore((s) => s.style);
-  const setWindowStyle = useWindowStyleStore((s) => s.setStyle);
-  const navigate = useNavigate();
-  const [showClone, setShowClone] = useState(false);
-  // Task 10 — listen for 'prismgit:clone-into-group' custom events
-  // dispatched by Sidebar's group right-click menu. Opens the Clone modal.
-  useEffect(() => {
-    const onCloneIntoGroup = (e: Event) => {
-      const detail = (e as CustomEvent).detail as { groupId: string; groupName: string } | undefined;
-      // Could pre-fill the target-group in CloneModal via prop, but the
-      // modal already groups new clones into the current group context.
-      // For now, just open the modal — the user can move it post-clone.
-      if (detail) {
-        // Persist target group so the cloned repo lands here.
-        sessionStorage.setItem('prismgit-clone-target-group', detail.groupId);
-      }
-      setShowClone(true);
-    };
-    window.addEventListener('prismgit:clone-into-group', onCloneIntoGroup);
-    // Root context menu 'Clone' → open Clone modal without a target group
-    const onOpenClone = () => setShowClone(true);
-    window.addEventListener('prismgit:open-clone-modal', onOpenClone);
-    return () => {
-      window.removeEventListener('prismgit:clone-into-group', onCloneIntoGroup);
-      window.removeEventListener('prismgit:open-clone-modal', onOpenClone);
-    };
-  }, []);
-  const [showInit, setShowInit] = useState(false);
-  const [showFind, setShowFind] = useState(false);
-  const [showGitFlow, setShowGitFlow] = useState(false);
-  const [showIRebase, setShowIRebase] = useState(false);
-  const [showRepoInfo, setShowRepoInfo] = useState(false);
-  const [showApplyPatch, setShowApplyPatch] = useState(false);
-  const [showPalette, setShowPalette] = useState(false);
-  // ONB-1 — first-run tour state. Auto-starts on first launch (when
-  // `tourCompleted` is not set in the settings store — also mirrored to
-  // localStorage for the fast synchronous check below), can be re-triggered
-  // via Help menu (Help → Restart Tour — wired in electron/menu.ts via IPC).
-  const [showTour, setShowTour] = useState(false);
-  useEffect(() => {
-    // Auto-start tour on first launch — but ONLY after we've confirmed
-    // via BOTH the sync localStorage check (instant) AND the async
-    // settings store check (authoritative). The sync check prevents the
-    // tour from briefly flashing on screen before the async check
-    // completes. The async check is the source of truth — it survives
-    // localStorage wipes (Tauri webview partition resets, "Clear site
-    // data", cache cleaning) which had been causing the tour to re-show
-    // on every launch despite the user checking "Don't show again".
-    let cancelled = false;
-    const cleanupTimers: Array<() => void> = [];
-    try {
-      // Fast sync check — if localStorage says '1', skip the tour
-      // immediately without waiting for the async settings store call.
-      // This is just an optimization; the async call below is still
-      // the authoritative check (we don't return early here, we just
-      // avoid the 800ms delay if we already know the tour is completed).
-      const localDone = localStorage.getItem('prismgit-tour-completed') === '1';
-
-      void (async () => {
-        if (cancelled) return;
-        // Authoritative check via settings store. Also handles legacy
-        // migration: if localStorage says done but settings store doesn't,
-        // we write it back so future launches aren't dependent on
-        // localStorage survival.
-        let done = localDone;
-        try {
-          const stored = await api.settings.get<boolean>('tourCompleted');
-          if (stored === true) {
-            done = true;
-          } else if (localDone) {
-            // Legacy migration — promote localStorage flag to settings store.
-            try { await api.settings.set('tourCompleted', true); } catch { /* ignore */ }
-          }
-        } catch { /* settings store unavailable — fall back to localDone */ }
-
-        if (cancelled || done) return;
-        // Defer until the rest of the UI has mounted so the spotlight
-        // targets exist in the DOM.
-        const t = setTimeout(() => {
-          if (!cancelled) setShowTour(true);
-        }, 800);
-        cleanupTimers.push(() => clearTimeout(t));
-      })();
-    } catch { /* SSR / test env */ }
-
-    return () => {
-      cancelled = true;
-      cleanupTimers.forEach(fn => fn());
-    };
-  }, []);
-  // Bug fix: safety timeout — if the tour overlay ever gets stuck (e.g.
-  // an error prevents the user from dismissing it, or all spotlight
-  // targets are unreachable), auto-hide after 5 minutes so the user can
-  // keep working. They can re-trigger via Help menu.
-  useEffect(() => {
-    if (!showTour) return;
-    const t = setTimeout(() => {
-      setShowTour(false);
-      try { localStorage.setItem('prismgit-tour-completed', '1'); } catch {}
-      try { void api.settings.set('tourCompleted', true); } catch { /* ignore */ }
-    }, 5 * 60_000);
-    return () => clearTimeout(t);
-  }, [showTour]);
-  /**
-   * Global Search modal — cross-entity search (commits/branches/tags/files/
-   * stashes/repos). Triggered by Ctrl+Shift+F (or Toolbar button). Distinct
-   * from CommandPalette (which is for actions/commands).
-   */
-  const [showGlobalSearch, setShowGlobalSearch] = useState(false);
-  const [conflictFile, setConflictFile] = useState<string | null>(null);
-  const [dismissRebase, setDismissRebase] = useState(false);
-  const [showShortcuts, setShowShortcuts] = useState(false);
-  // LAR-3 — AI Assistant chat panel visibility (toggle via toolbar button).
-  const [showAiAssistant, setShowAiAssistant] = useState(false);
-  const [showCommandLog, setShowCommandLog] = useState(false);
-  const [commandLogHeight, setCommandLogHeight] = useState(260);
-  /**
-   * When the command-log panel is auto-opened by a simple-git error, this
-   * flag tells CommandLogPanel to start with the "Errors only" filter ON
-   * and scroll to the latest failed entry. Reset to false on manual close
-   * or manual toggle so subsequent opens show the full command list.
-   */
-  const [commandLogErrorsOnly, setCommandLogErrorsOnly] = useState(false);
-  /**
-   * Tracks the last errorPulse we've seen — used to detect NEW errors
-   * while the panel is closed so we can auto-open it.
-   */
-  const [lastSeenErrorPulse, setLastSeenErrorPulse] = useState(0);
-  const errorPulse = useCommandLogStore((s) => s.errorPulse);
-  const [refAction, setRefAction] = useState<RefAction | null>(null);
-  const [indexEditorFile, setIndexEditorFile] = useState<string | null | undefined>(undefined);
-  const [showIndexEditor, setShowIndexEditor] = useState(false);
-  const [showRepoSettings, setShowRepoSettings] = useState(false);
-  const [gitFlowType, setGitFlowType] = useState<'feature' | 'release' | 'hotfix' | undefined>(undefined);
-
-  // SmartGit-style background "Poll or Fetch" for remotes marked in Configure remote properties
-  useBackgroundFetch();
-  // Periodic remote check for the repository list (fetch --all + ↓/↑ badges)
-  useRemotePolling();
-  // Warm lazily-loaded page/dialog chunks during idle time so every tool and
-  // dialog opens instantly (no first-open chunk fetch/parse penalty).
-  useChunkPreload();
-
-  // Locale sync: notify the main process so the native application menu is
-  // rebuilt in the active UI language (main initializes from the OS locale).
-  const locale = useI18nStore((s) => s.locale);
-  useEffect(() => {
-    window.smartgit?.app?.setLocale?.(locale);
-  }, [locale]);
-
-  // Auto-open the Command Log panel when a NEW git error arrives AND the
-  // panel is currently closed. The errorPulse counter increments in
-  // commandLogStore.append() whenever a failed entry (exitCode !== 0)
-  // arrives from the main-process spawn interceptor. By tracking
-  // lastSeenErrorPulse we only react to NEW errors — not the same error
-  // re-rendering the component.
-  //
-  // When triggered: opens the panel + sets errorsOnly=true so the user
-  // immediately sees the failed command (not the full command list). The
-  // panel auto-scrolls to the top (newest = the failed entry).
-  //
-  // QW-5 — snooze: if the user manually closed the panel less than 30s
-  // ago, suppress the auto-open. We still bump lastSeenErrorPulse so the
-  // counter tracks the latest error, but the panel stays hidden. This
-  // stops the "close → next git error pops it right back open" loop
-  // (e.g. when a rebase is producing one error per second).
-  useEffect(() => {
-    if (errorPulse > lastSeenErrorPulse && !showCommandLog) {
-      const sinceClose = Date.now() - useCommandLogStore.getState().lastManualCloseAt;
-      const SNOOZE_MS = 30_000;
-      if (sinceClose >= SNOOZE_MS) {
-        setCommandLogErrorsOnly(true);
-        setShowCommandLog(true);
-      }
-    }
-    setLastSeenErrorPulse(errorPulse);
-  }, [errorPulse, lastSeenErrorPulse, showCommandLog]);
-
-  useEffect(() => {
-    loadRepos();
-    loadMetadata();
-    loadSettings();
-    loadAuth();
-  }, [loadRepos, loadMetadata, loadSettings, loadAuth]);
-
-  // Initialize the IPC listener for operation-log events from main process.
-  // This captures ALL git operations (checkout, merge, cherry-pick, revert,
-  // rebase, stash, tag, clone, etc.) — not just the ones manually logged in
-  // the UI layer — and feeds them into the Operations tab.
-  useEffect(() => {
-    // Static import — operationLogStore is already pulled into the main
-    // bundle by StatusBar/Toolbar/etc., so dynamic import() gained nothing
-    // except a Vite warning. Calling init directly is simpler.
-    const cleanup = initOperationLogIpcListener();
-    return cleanup;
-  }, []);
-
-  // Listen for repo-closed events to clear global selections and free memory
-  useEffect(() => {
-    const handler = () => {
-      useSelectionStore.getState().clearAll();
-      // A pending deep link targets the OLD repo context — drop it
-      clearPendingDeepLinkPage();
-      // Navigate back to welcome screen
-      window.location.hash = '#/';
-    };
-    window.addEventListener('smartgit:repo-closed', handler);
-    return () => window.removeEventListener('smartgit:repo-closed', handler);
-  }, []);
-
-  // Per-project UI preferences (the user's request: "настройки интерфейса
-  // должны запоминаться на проект"). Two effects:
-  //   1. When a repo opens, load its saved UI prefs into selectionStore.
-  //   2. While a repo is open, subscribe to selectionStore and save the
-  //      preference keys back (debounced) whenever they change.
-  const repoPath = currentRepo?.path ?? null;
-  // Track repo switches: selections (commit/file/branch/tag/stash) belong to a
-  // specific repository — carrying them across repos would make History open a
-  // foreign pathFilter or Notes attach to a foreign commit. View prefs are
-  // per-project (applied right after) and are NOT touched.
-  const lastRepoPathRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!repoPath) {
-      lastRepoPathRef.current = null;
-      return;
-    }
-    if (lastRepoPathRef.current !== null && lastRepoPathRef.current !== repoPath) {
-      useSelectionStore.getState().clearAll();
-    }
-    lastRepoPathRef.current = repoPath;
-    useSelectionStore.getState().applyProjectPrefs(loadProjectPrefs(repoPath));
-  }, [repoPath]);
-  useEffect(() => {
-    if (!repoPath) return;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const unsub = useSelectionStore.subscribe((state, prev) => {
-      // fileDisplayFlags is NOT persisted — runtime only.
-      const changed =
-        state.fileViewMode !== prev.fileViewMode ||
-        state.commitViewMode !== prev.commitViewMode ||
-        state.compressFilePaths !== prev.compressFilePaths ||
-        state.fileSort !== prev.fileSort ||
-        state.fileFilterRegex !== prev.fileFilterRegex ||
-        state.dirTreeVisible !== prev.dirTreeVisible ||
-        state.colWidths !== prev.colWidths;
-      if (!changed) return;
-      clearTimeout(timer);
-      timer = setTimeout(() => {
-        const s = useSelectionStore.getState();
-        saveProjectPrefs(repoPath, {
-          fileViewMode: s.fileViewMode,
-          commitViewMode: s.commitViewMode,
-          compressFilePaths: s.compressFilePaths,
-          fileSort: s.fileSort,
-          fileFilterRegex: s.fileFilterRegex,
-          dirTreeVisible: s.dirTreeVisible,
-          colWidths: s.colWidths,
-        });
-      }, 400);
-    });
-    return () => {
-      unsub();
-      clearTimeout(timer);
-    };
-  }, [repoPath]);
-
-  // Resolve conflict — extracted as a useCallback so it can be used both
-  // from the menu event handler (inside the useEffect below) AND from the
-  // JSX (ChangesPage onResolveConflictAction prop). Without this, the handler
-  // was trapped inside the useEffect scope.
-  const resolveConflict = useCallback(async (mode: 'ours' | 'theirs' | 'both' | 'resolved', fileOverride?: string) => {
-    const repo = useRepositoryStore.getState().currentRepo;
-    const f = fileOverride ?? useSelectionStore.getState().selectedFilePath;
-    if (!repo) return;
-    if (!f) { toast.warning(i18nT('toast.git.noFileSelected'), 'Select a file in Changes first'); return; }
-    try {
-      if (mode === 'both') {
-        await api.git.raw(repo.path, ['checkout', '--ours', '--', f]);
-        const theirs = await api.git.raw(repo.path, ['show', `:3:${f}`]).catch(() => '');
-        if (theirs) {
-          const fs = await import('fs');
-          const path = await import('path');
-          const fullPath = path.join(repo.path, f);
-          const current = fs.existsSync(fullPath) ? fs.readFileSync(fullPath, 'utf-8') : '';
-          fs.writeFileSync(fullPath, current + '\n' + theirs);
+    const currentRepo = useRepositoryStore((s) => s.currentRepo);
+    const loadRepos = useRepositoryStore((s) => s.loadRepos);
+    const loadMetadata = useRepositoryStore((s) => s.loadMetadata);
+    const loadSettings = useSettingsStore((s) => s.loadSettings);
+    // v2.3 ZONE OVERRIDES — the old raw-JSON customThemeOverrides injection
+    // was replaced by the visual Custom Theme editor (settings.customThemes,
+    // applied by settingsStore.applyThemeToDOM → lib/customThemeCss.ts).
+    // The KEY is back, but now it stores ZONE-scoped overrides written by
+    // the Zone Colors editor (Settings → Appearance): each --zone-* token
+    // colors exactly ONE UI region ("зоны не соответствуют — настраиваешь
+    // одно, а цвета меняются в других окнах/областях" — fixed). The pure
+    // selector strategy lives in lib/themeOverrideCss.ts (unit-tested):
+    //   1. `:root, html[data-theme]` — beats :root/.dark/[data-theme]
+    //      palette blocks (incl. custom-<id> themes) by specificity or
+    //      source order (injected style is the LAST sheet in <head>).
+    //   2. `html .sidebar-root` for --zone-sidebar-bg — ties the
+    //      `[data-theme='light-dim-sidebar'] aside` rule (0,1,1) and wins
+    //      by source order, so the sidebar zone override works even for
+    //      the dim-sidebar theme with its own dark sidebar.
+    const customThemeOverrides = useSettingsStore((s) => s.settings.customThemeOverrides);
+    useEffect(() => {
+        const id = "prismgit-custom-theme-overrides";
+        let style = document.getElementById(id) as HTMLStyleElement | null;
+        const css = buildThemeOverrideCss(customThemeOverrides);
+        if (!css) {
+            style?.remove();
+            return;
         }
-      } else if (mode !== 'resolved') {
-        await api.git.raw(repo.path, ['checkout', `--${mode}`, '--', f]);
-      }
-      await api.git.add(repo.path, [f]);
-      toast.success(`${f}: ${mode === 'resolved' ? 'marked resolved' : mode === 'both' ? 'took both' : `took ${mode}`}`);
-      useGitStore.getState().refreshStatus(repo.path);
-    } catch (e) { toast.error(i18nT('toast.git.resolveFailed'), String(e)); }
-  }, [toast]);
-
-  // Listen for menu events
-  useEffect(() => {
-    const handleOpenRepo = (path: string) => {
-      useRepositoryStore.getState().openRepository(path).catch((e) => {
-        toast.error(i18nT('toast.git.openRepoFailed'), String(e));
-      });
-    };
-    const handleClone = () => setShowClone(true);
-    const handleInit = () => setShowInit(true);
-    const handleCommit = () => { window.location.hash = '#/changes'; };
-    const handlePush = () => {
-      const repo = useRepositoryStore.getState().currentRepo;
-      if (!repo) return;
-      useGitStore.getState().push(repo.path)
-        .then(() => {
-          toast.success(i18nT('toast.git.pushSuccess'));
-          // Notify History page to reload — emits a one-shot event that
-          // History's useEffect listens to (replaces the old `lastRefresh`
-          // subscription which caused an infinite refresh loop with the
-          // file watcher).
-          window.dispatchEvent(new CustomEvent('smartgit:history-refresh'));
-        })
-        .catch((e) => toast.error(i18nT('toast.git.pushFailed'), String(e)));
-    };
-    const handlePull = () => {
-      const repo = useRepositoryStore.getState().currentRepo;
-      if (!repo) return;
-      // SmartGit Manual: Smart Pull — prevents divergence after remote force-push
-      api.git.smartPull(repo.path)
-        .then((result) => {
-          toast.success(i18nT('toast.smartPull.success', { strategy: result.strategy }), result.message);
-          useGitStore.getState().refreshStatus(repo.path);
-          window.dispatchEvent(new CustomEvent('smartgit:history-refresh'));
-        })
-        .catch((e) => toast.error(i18nT('toast.git.pullFailed'), String(e)));
-    };
-    const handleFetch = () => {
-      const repo = useRepositoryStore.getState().currentRepo;
-      if (!repo) return;
-      useGitStore.getState().fetch(repo.path)
-        .then(() => {
-          toast.success(i18nT('toast.git.fetchSuccess'));
-          window.dispatchEvent(new CustomEvent('smartgit:history-refresh'));
-        })
-        .catch((e) => toast.error(i18nT('toast.git.fetchFailed'), String(e)));
-    };
-    const handleToggleTheme = () => useSettingsStore.getState().toggleTheme();
-    const handleGitFlow = () => setShowGitFlow(true);
-    const handleIRebase = () => setShowIRebase(true);
-    const handleShowShortcuts = () => setShowShortcuts(true);
-    const handleToggleCommandLog = () => {
-      // Manual toggle resets the errorsOnly flag — user wants to see the
-      // full command list, not just errors.
-      setCommandLogErrorsOnly(false);
-      setShowCommandLog(s => !s);
-    };
-
-    // ===== SmartGit-style command helpers =====
-    const requireRepo = () => useRepositoryStore.getState().currentRepo;
-    const selectedFile = () => useSelectionStore.getState().selectedFilePath;
-    const warnNoFile = () => toast.warning(i18nT('toast.git.noFileSelected'), 'Select a file in Changes first');
-    const infoBox = (title: string, message: string) =>
-      confirmDialog({ title, message: message.slice(0, 3000), confirmLabel: 'Close', hideCancel: true });
-
-    const handleCheckout = () => setRefAction('checkout');
-    const handleMerge = () => setRefAction('merge');
-    const handleRebase = () => setRefAction('rebase');
-    const handleCherryPick = () => setRefAction('cherry-pick');
-    const handleRevert = () => setRefAction('revert');
-
-    const handleAddTag = async () => {
-      const repo = requireRepo();
-      if (!repo) return;
-      const name = await promptDialog({
-        title: 'Add Tag',
-        message: 'Tag name (created at the commit selected in History, or HEAD)',
-        input: { placeholder: 'v1.0.0' },
-      });
-      if (!name) return;
-      const target = useSelectionStore.getState().selectedCommitHash;
-      try {
-        await api.git.createTag(repo.path, name, undefined, target || undefined);
-        toast.success(i18nT('toast.tag.created', { name, target: target ? ` at ${target.slice(0, 7)}` : '' }));
-        useGitStore.getState().refreshStatus(repo.path);
-      } catch (e) { toast.error(i18nT('toast.tag.createFailed'), String(e)); }
-    };
-
-    const handleSetTracked = async () => {
-      const repo = requireRepo();
-      if (!repo) return;
-      const branch = await api.git.currentBranch(repo.path).catch(() => null);
-      if (!branch) { toast.warning(i18nT('toast.git.noLocalBranch')); return; }
-      const remoteBranch = await promptDialog({
-        title: 'Set Tracked Branch',
-        message: `Remote branch that "${branch}" should track`,
-        input: { placeholder: 'origin/main' },
-      });
-      if (!remoteBranch) return;
-      try {
-        await api.git.raw(repo.path, ['branch', '--set-upstream-to', remoteBranch, branch]);
-        toast.success(`${branch} now tracks ${remoteBranch}`);
-        useGitStore.getState().refreshStatus(repo.path);
-      } catch (e) { toast.error(i18nT('toast.git.setTrackedFailed'), String(e)); }
-    };
-
-    const handleStopTracking = async () => {
-      const repo = requireRepo();
-      if (!repo) return;
-      const branch = await api.git.currentBranch(repo.path).catch(() => null);
-      if (!branch) return;
-      try {
-        await api.git.raw(repo.path, ['branch', '--unset-upstream', branch]);
-        toast.success(`${branch} no longer tracks a remote branch`);
-        useGitStore.getState().refreshStatus(repo.path);
-      } catch (e) { toast.error(i18nT('toast.git.stopTrackingFailed'), String(e)); }
-    };
-
-    // ===== Bisect =====
-    const bisect = async (op: 'start' | 'bad' | 'good' | 'skip' | 'reset' | 'log') => {
-      const repo = requireRepo();
-      if (!repo) return;
-      const g = useGitStore.getState();
-      const refresh = () => g.refreshStatus(repo.path).catch(() => {});
-      try {
-        switch (op) {
-          case 'start':
-            await api.git.bisectStart(repo.path);
-            await api.git.bisectBad(repo.path, 'HEAD');
-            toast.info(i18nT('toast.bisect.started'), 'HEAD marked as bad — now mark a good commit (Branch | Bisect)');
-            break;
-          case 'bad': await api.git.bisectBad(repo.path); toast.success(i18nT('toast.bisect.headBad')); break;
-          case 'good': await api.git.bisectGood(repo.path); toast.success(i18nT('toast.bisect.headGood')); break;
-          case 'skip': await api.git.bisectSkip(repo.path); toast.success(i18nT('toast.bisect.skipped')); break;
-          case 'reset': await api.git.bisectReset(repo.path); toast.success(i18nT('toast.bisect.finished')); break;
-          case 'log': {
-            const logText = await api.git.bisectLog(repo.path);
-            await infoBox('Bisect Log', logText);
-            break;
-          }
+        if (!style) {
+            style = document.createElement("style");
+            style.id = id;
+            document.head.appendChild(style);
         }
-        refresh();
-      } catch (e) { toast.error(i18nT('toast.bisect.failed'), String(e)); }
-    };
+        style.textContent = css;
+    }, [customThemeOverrides]);
+    const loadAuth = useAuthStore((s) => s.loadAuthState);
+    const refreshStatus = useGitStore((s) => s.refreshStatus);
+    // RENDER-PERF: do NOT subscribe to `s.status` here. The App component is
+    // the ROOT of the render tree — subscribing it to the status object meant
+    // every status refresh (~5s under watcher churn) re-rendered the ENTIRE
+    // app: Routes, the active page (History graph / Diff viewer / Changes
+    // list), Sidebar, Toolbar — even though nothing in App's own render used
+    // `status` (all three read sites go through useGitStore.getState().status
+    // inside callbacks/effects). This dead subscription was the single largest
+    // source of the "UI is sluggish" report: removed.
+    const toast = useToastActions();
+    const windowStyle = useWindowStyleStore((s) => s.style);
+    const setWindowStyle = useWindowStyleStore((s) => s.setStyle);
+    const navigate = useNavigate();
+    // ── Back/Forward navigation (browser-style, user trail only) ──
+    // Every location change is recorded in navHistoryStore UNLESS it came
+    // from the store's own back()/forward() (one-shot suppression). Automatic
+    // app navigations (repo open → /changes etc.) DO get recorded — they are
+    // part of what the user wants to undo with Back.
+    const location = useLocation();
+    useEffect(() => {
+        const store = useNavHistoryStore.getState();
+        if (store.consumeSuppressed()) return;
+        store.push(location.pathname + location.search);
+    }, [location]);
+    const goBack = useCallback(() => {
+        const target = useNavHistoryStore.getState().back();
+        if (target != null) navigate(target);
+    }, [navigate]);
+    const goForward = useCallback(() => {
+        const target = useNavHistoryStore.getState().forward();
+        if (target != null) navigate(target);
+    }, [navigate]);
+    const [showClone, setShowClone] = useState(false);
 
-    // ===== Local operations =====
-    const handleStage = async () => {
-      const repo = requireRepo();
-      const f = selectedFile();
-      if (!repo) return;
-      if (!f) { warnNoFile(); return; }
-      try { await api.git.add(repo.path, [f]); toast.success(i18nT('toast.git.stageSuccess', { file: f })); useGitStore.getState().refreshStatus(repo.path); }
-      catch (e) { toast.error(i18nT('toast.git.stageFailed'), String(e)); }
-    };
-    const handleUnstage = async () => {
-      const repo = requireRepo();
-      const f = selectedFile();
-      if (!repo) return;
-      if (!f) { warnNoFile(); return; }
-      try { await api.git.resetFile(repo.path, f); toast.success(i18nT('toast.git.unstageSuccess', { file: f })); useGitStore.getState().refreshStatus(repo.path); }
-      catch (e) { toast.error(i18nT('toast.git.unstageFailed'), String(e)); }
-    };
-    const handleStageAll = async () => {
-      const repo = requireRepo();
-      if (!repo) return;
-      try { await useGitStore.getState().stageAll(repo.path); toast.success(i18nT('toast.git.stageAllSuccess')); }
-      catch (e) { toast.error(i18nT('toast.git.stageFailed'), String(e)); }
-    };
-    const handleDiscard = async () => {
-      const repo = requireRepo();
-      const f = selectedFile();
-      if (!repo) return;
-      if (!f) { warnNoFile(); return; }
-      const ok = await confirmDialog({
-        title: 'Discard changes',
-        message: `Discard ALL changes of "\u200b${f}" in the Working Tree?\nThis cannot be undone.`,
-        confirmLabel: 'Discard',
-        danger: true,
-      });
-      if (!ok) return;
-      try {
-        await api.git.restore(repo.path, [f]);
-        toast.success(i18nT('toast.git.discardedIn', { file: f }));
-        useGitStore.getState().refreshStatus(repo.path);
-      } catch (e) { toast.error(i18nT('toast.git.discardFailed'), String(e)); }
-    };
-    const handleEditLastCommitMessage = async () => {
-      const repo = requireRepo();
-      if (!repo) return;
-      try {
-        const entries = await api.git.log(repo.path, { maxCount: 1 });
-        const current = entries[0]?.message ?? '';
-        const message = await promptDialog({
-          title: 'Edit Last Commit Message',
-          message: 'New commit message for HEAD',
-          input: { initialValue: current },
-        });
-        if (!message || message === current) return;
-        await api.git.editCommitMessage(repo.path, 'HEAD', message);
-        toast.success(i18nT('toast.edit.messageUpdated'));
-        useGitStore.getState().refreshStatus(repo.path);
-      } catch (e) { toast.error(i18nT('toast.edit.messageFailed'), String(e)); }
-    };
-    const handleEditCommitAuthor = async () => {
-      const repo = requireRepo();
-      if (!repo) return;
-      const value = await promptDialog({
-        title: 'Edit Commit Author',
-        message: 'Author of the commit selected in History (or HEAD): Name <email>',
-        input: { placeholder: 'Ada Lovelace <ada@example.com>' },
-      });
-      if (!value) return;
-      const m = value.match(/^([^<]+)<([^>]+)>\s*$/);
-      if (!m) { toast.error(i18nT('toast.git.invalidFormat'), 'Use: Name <email>'); return; }
-      const target = useSelectionStore.getState().selectedCommitHash || 'HEAD';
-      try {
-        await api.git.editCommitAuthor(repo.path, target, m[1].trim(), m[2].trim());
-        toast.success(`Author of ${target === 'HEAD' ? 'HEAD' : target.slice(0, 7)} changed to ${m[1].trim()}`);
-        useGitStore.getState().refreshStatus(repo.path);
-      } catch (e) { toast.error(i18nT('toast.edit.authorFailed'), String(e)); }
-    };
-    const handleUndoLastCommit = async () => {
-      const repo = requireRepo();
-      if (!repo) return;
-      const ok = await confirmDialog({
-        title: 'Undo Last Commit',
-        message: 'Move the last commit\u2019s changes back into the Index? The commit itself will be removed (soft reset).',
-        confirmLabel: 'Undo Commit',
-        danger: true,
-      });
-      if (!ok) return;
-      try {
-        await api.git.reset(repo.path, 'soft', 'HEAD~1');
-        toast.success('Last commit undone — changes are back in the Index');
-        useGitStore.getState().refreshStatus(repo.path);
-      } catch (e) { toast.error('Undo commit failed', String(e)); }
-    };
-    const handleStashSelection = () => {
-      window.location.hash = '#/changes';
-      // ChangesPage listens and stashes its selected files
-      setTimeout(() => window.dispatchEvent(new CustomEvent('smartgit:stash-selection')), 60);
-    };
-    const handleApplyStash = () => {
-      const repo = requireRepo();
-      if (!repo) return;
-      window.location.hash = '#/stashes';
-      toast.info('Select a stash and click Apply');
-    };
-
-    const handleIgnore = async () => {
-      const repo = requireRepo();
-      const f = selectedFile();
-      if (!repo) return;
-      if (!f) { warnNoFile(); return; }
-      try { await api.git.ignore(repo.path, [f]); toast.success(`${f} added to .gitignore`); useGitStore.getState().refreshStatus(repo.path); }
-      catch (e) { toast.error('Ignore failed', String(e)); }
-    };
-    const handleEditIgnoreFile = async () => {
-      const repo = requireRepo();
-      if (!repo) return;
-      try { await api.git.editIgnoreFile(repo.path, 'local'); toast.success('.gitignore opened in the default editor'); }
-      catch (e) { toast.error('Failed to open .gitignore', String(e)); }
-    };
-    const handleIndexFlag = async (flag: 'assume-unchanged' | 'skip-worktree') => {
-      const repo = requireRepo();
-      const f = selectedFile();
-      if (!repo) return;
-      if (!f) { warnNoFile(); return; }
-      try {
-        const flags = await api.git.getIndexFlags(repo.path, f);
-        const current = flag === 'assume-unchanged' ? flags.assumeUnchanged : flags.skipWorktree;
-        await api.git.setIndexFlag(repo.path, f, flag, !current);
-        toast.success(`${f}: ${flag} ${!current ? 'ON' : 'OFF'}`);
-        useGitStore.getState().refreshStatus(repo.path);
-      } catch (e) { toast.error('Toggle failed', String(e)); }
-    };
-    const handleMoveRename = async () => {
-      const repo = requireRepo();
-      const f = selectedFile();
-      if (!repo) return;
-      if (!f) { warnNoFile(); return; }
-      const target = await promptDialog({
-        title: 'Move or Rename',
-        message: 'New path for the file (git mv — the rename is staged)',
-        input: { initialValue: f },
-      });
-      if (!target || target === f) return;
-      try {
-        await api.git.moveFile(repo.path, f, target);
-        toast.success(`${f} → ${target}`);
-        useGitStore.getState().refreshStatus(repo.path);
-      } catch (e) { toast.error('Move/rename failed', String(e)); }
-    };
-    const handleDeleteFile = async () => {
-      const repo = requireRepo();
-      const f = selectedFile();
-      if (!repo) return;
-      if (!f) { warnNoFile(); return; }
-      const ok = await confirmDialog({
-        title: 'Delete file',
-        message: `Delete "${f}" from the Working Tree AND the repository?\nThis cannot be undone.`,
-        confirmLabel: 'Delete',
-        danger: true,
-      });
-      if (!ok) return;
-      try { await api.git.deleteFile(repo.path, f); toast.success(`${f} deleted`); useGitStore.getState().refreshStatus(repo.path); }
-      catch (e) { toast.error('Delete failed', String(e)); }
-    };
-    const handleRemoveFile = async () => {
-      const repo = requireRepo();
-      const f = selectedFile();
-      if (!repo) return;
-      if (!f) { warnNoFile(); return; }
-      try {
-        await api.git.raw(repo.path, ['rm', '--cached', '--', f]);
-        toast.success(`${f} removed from the repository (kept in Working Tree)`);
-        useGitStore.getState().refreshStatus(repo.path);
-      } catch (e) { toast.error('Remove failed', String(e)); }
-    };
-
-    // ===== Resolve submenu ===== (resolveConflict is now a useCallback
-    // declared at the component level so it can also be passed to
-    // ChangesPage as onResolveConflictAction.)
-    const handleConflictSolver = () => {
-      const f = selectedFile();
-      if (!f) { warnNoFile(); return; }
-      setConflictFile(f);
-    };
-
-    // ===== LFS =====
-    const lfsOp = async (op: 'install' | 'lock' | 'unlock') => {
-      const repo = requireRepo();
-      if (!repo) return;
-      try {
-        if (op === 'install') {
-          await api.git.lfsInstall(repo.path);
-          toast.success('Git LFS installed for this repository');
-        } else {
-          const f = selectedFile();
-          if (!f) { warnNoFile(); return; }
-          if (op === 'lock') { await api.git.lfsLock(repo.path, f); toast.success(`Locked ${f}`); }
-          else { await api.git.lfsUnlock(repo.path, f); toast.success(`Unlocked ${f}`); }
-        }
-      } catch (e) { toast.error('LFS operation failed', String(e)); }
-    };
-    const handleLfsTrack = () => {
-      window.location.hash = '#/lfs';
-      toast.info('Use the Track button on the LFS page');
-    };
-
-    // ===== Remote =====
-    const handlePushTo = async () => {
-      const repo = requireRepo();
-      if (!repo) return;
-      const remote = await promptDialog({
-        title: 'Push To...',
-        message: 'Remote to push the current branch to',
-        input: { initialValue: 'origin' },
-      });
-      if (!remote) return;
-      const branch = await api.git.currentBranch(repo.path).catch(() => null);
-      try {
-        await api.git.push(repo.path, remote, branch ?? undefined, true);
-        toast.success(`Pushed ${branch ?? ''} to ${remote}`);
-        useGitStore.getState().refreshStatus(repo.path);
-      } catch (e) { toast.error('Push failed', String(e)); }
-    };
-    const handlePullOptions = () => {
-      const repo = requireRepo();
-      if (!repo) return;
-      window.location.hash = '#/branches';
-      toast.info('Right-click the branch → Pull... for options (merge/rebase/ff-only)');
-    };
-    const handleFetchAll = async () => {
-      const repo = requireRepo();
-      if (!repo) return;
-      try {
-        await api.git.fetchAll(repo.path);
-        toast.success('Fetched all remotes');
-        useGitStore.getState().refreshStatus(repo.path);
-        window.dispatchEvent(new CustomEvent('smartgit:history-refresh'));
-      } catch (e) { toast.error('Fetch all failed', String(e)); }
-    };
-    const handleFetchMore = () => {
-      window.location.hash = '#/branches';
-      toast.info('Right-click a remote → Fetch More... (or Set Depth... for shallow clones)');
-    };
-
-    // ===== Query / Tools =====
-    const handleVerifyDatabase = async () => {
-      const repo = requireRepo();
-      if (!repo) return;
-      try {
-        const report = await api.git.verifyDatabase(repo.path);
-        await infoBox('Verify Database (git fsck --full)', report.trim() || 'No problems found — repository is healthy.');
-      } catch (e) { toast.error('Verify failed', String(e)); }
-    };
-    const handleGarbageCollect = async () => {
-      const repo = requireRepo();
-      if (!repo) return;
-      try {
-        const stats = await api.git.garbageCollect(repo.path);
-        await infoBox('Garbage Collect (git gc)', stats.trim() || 'Done.');
-        useGitStore.getState().refreshStatus(repo.path);
-      } catch (e) { toast.error('GC failed', String(e)); }
-    };
-    const handleOpenTerminal = async () => {
-      const repo = requireRepo();
-      if (!repo) return;
-      const ok = await api.fs.openTerminal(repo.path);
-      if (!ok) toast.error('Could not open a terminal');
-    };
-    const handleOpenInVscode = async () => {
-      const repo = requireRepo();
-      if (!repo) return;
-      try {
-        const res = await api.vscode.open(repo.path);
-        if (res.ok) toast.success(i18nT('toast.vscode.opened'));
-        else toast.error(i18nT('toast.vscode.openFailed'));
-      } catch (e) {
-        toast.error(i18nT('toast.vscode.openFailed'), String(e));
-      }
-    };
-    const handleFormatPatch = async () => {
-      const repo = requireRepo();
-      if (!repo) return;
-      const commit = useSelectionStore.getState().selectedCommitHash;
-      const outDir = await promptDialog({
-        title: 'Format Patch',
-        message: 'Output directory for the .patch file(s)',
-        input: { initialValue: `${repo.path}/patches`, hint: 'Writes the selected commit, or HEAD when nothing is selected' },
-      });
-      if (!outDir) return;
-      try {
-        const files = await api.git.formatPatch(repo.path, { outputDir: outDir, commit: commit || 'HEAD' });
-        await infoBox('Format Patch', `Written:\n${files.join('\n')}`);
-      } catch (e) { toast.error('Format patch failed', String(e)); }
-    };
-
-    // ===== Git-Flow (dialog-driven; flow type preset through initialFlow) =====
-    const gitFlow = (flow?: string) => {
-      if (flow === 'feature' || flow === 'release' || flow === 'hotfix') setGitFlowType(flow);
-      else setGitFlowType(undefined);
-      setShowGitFlow(true);
-    };
-
-    const handleAbortSequence = async () => {
-      const repo = requireRepo();
-      if (!repo) return;
-      const st = useGitStore.getState().status;
-      try {
-        if (st?.isRebasing) await api.git.rebase(repo.path, 'HEAD', { abort: true });
-        else if (st?.isCherryPicking) await api.git.cherryPickAbort(repo.path);
-        else if (st?.isReverting) await api.git.revertAbort(repo.path);
-        else if (st?.isMerging) await api.git.abortMerge(repo.path);
-        else { toast.info('Nothing to abort'); return; }
-        toast.success('Operation aborted — repository restored');
-        useGitStore.getState().refreshStatus(repo.path);
-      } catch (e) { toast.error('Abort failed', String(e)); }
-    };
-    const handleContinueSequence = async () => {
-      const repo = requireRepo();
-      if (!repo) return;
-      const st = useGitStore.getState().status;
-      try {
-        if (st?.isRebasing) await api.git.rebase(repo.path, 'HEAD', { continue: true });
-        else if (st?.isCherryPicking) await api.git.cherryPickContinue(repo.path);
-        else if (st?.isReverting) await api.git.revertContinue(repo.path);
-        else if (st?.isMerging) await api.git.continueMerge(repo.path);
-        else { toast.info('Nothing to continue'); return; }
-        toast.success('Operation continued');
-        useGitStore.getState().refreshStatus(repo.path);
-      } catch (e) { toast.error('Continue failed', String(e)); }
-    };
-    // Skip the current commit in a cherry-pick / revert / rebase sequence.
-    // Used when a commit produces an empty result (changes already applied).
-    const handleSkipSequence = async () => {
-      const repo = requireRepo();
-      if (!repo) return;
-      const st = useGitStore.getState().status;
-      try {
-        if (st?.isRebasing) await api.git.rebase(repo.path, 'HEAD', { skip: true });
-        else if (st?.isCherryPicking) await api.git.cherryPickSkip(repo.path);
-        else if (st?.isReverting) await api.git.revertSkip(repo.path);
-        else { toast.info('Nothing to skip (merge has no skip)'); return; }
-        toast.info('Commit skipped — sequence continues with the next one');
-        useGitStore.getState().refreshStatus(repo.path);
-      } catch (e) { toast.error('Skip failed', String(e)); }
-    };
-
-    const handleWindowStyle = (style: unknown) => {
-      if (style === 'standard' || style === 'log' || style === 'working-tree') {
-        setWindowStyle(style);
-        toast.info(`Window style: ${style}`);
-      }
-    };
-    const handleResetPerspective = async () => {
-      const repo = requireRepo();
-      if (!repo) return;
-      clearProjectPrefs(repo.path);
-      useSelectionStore.getState().clearAll();
-      toast.success('Perspective reset — layout preferences cleared');
-    };
-    const handleNavigate = (path: unknown) => {
-      if (typeof path === 'string' && requireRepo()) navigate(path);
-    };
-
-    // ===== Deep links (View → Go to / Copy Deep Link) — defined below as
-    // useCallbacks so the Command Palette can trigger them too =====
-    const cleanups = [
-      window.smartgit.events.on('menu:openRepository', (path) => handleOpenRepo(path as string)),
-      window.smartgit.events.on('menu:cloneRepository', handleClone),
-      window.smartgit.events.on('menu:initRepository', handleInit),
-      window.smartgit.events.on('menu:commit', handleCommit),
-      window.smartgit.events.on('menu:push', handlePush),
-      window.smartgit.events.on('menu:pull', handlePull),
-      window.smartgit.events.on('menu:fetch', handleFetch),
-      window.smartgit.events.on('menu:toggleTheme', handleToggleTheme),
-      window.smartgit.events.on('menu:gitFlow', () => gitFlow()),
-      window.smartgit.events.on('menu:gitFlowStartFeature', () => gitFlow('feature')),
-      window.smartgit.events.on('menu:gitFlowFinishFeature', () => gitFlow('feature')),
-      window.smartgit.events.on('menu:gitFlowStartRelease', () => gitFlow('release')),
-      window.smartgit.events.on('menu:gitFlowFinishRelease', () => gitFlow('release')),
-      window.smartgit.events.on('menu:gitFlowStartHotfix', () => gitFlow('hotfix')),
-      window.smartgit.events.on('menu:gitFlowFinishHotfix', () => gitFlow('hotfix')),
-      window.smartgit.events.on('menu:gitFlowIntegrateDevelop', () => gitFlow('feature')),
-      window.smartgit.events.on('menu:interactiveRebase', handleIRebase),
-      window.smartgit.events.on('menu:showShortcuts', handleShowShortcuts),
-      window.smartgit.events.on('menu:commandLog', handleToggleCommandLog),
-      // Branch menu
-      window.smartgit.events.on('menu:checkout', handleCheckout),
-      window.smartgit.events.on('menu:merge', handleMerge),
-      window.smartgit.events.on('menu:rebase', handleRebase),
-      window.smartgit.events.on('menu:cherryPick', handleCherryPick),
-      window.smartgit.events.on('menu:revert', handleRevert),
-      window.smartgit.events.on('menu:addTag', handleAddTag),
-      window.smartgit.events.on('menu:setTracked', handleSetTracked),
-      window.smartgit.events.on('menu:stopTracking', handleStopTracking),
-      window.smartgit.events.on('menu:bisectStart', () => bisect('start')),
-      window.smartgit.events.on('menu:bisectBad', () => bisect('bad')),
-      window.smartgit.events.on('menu:bisectGood', () => bisect('good')),
-      window.smartgit.events.on('menu:bisectSkip', () => bisect('skip')),
-      window.smartgit.events.on('menu:bisectReset', () => bisect('reset')),
-      window.smartgit.events.on('menu:bisectLog', () => bisect('log')),
-      window.smartgit.events.on('menu:abortSequence', handleAbortSequence),
-      window.smartgit.events.on('menu:continueSequence', handleContinueSequence),
-      window.smartgit.events.on('menu:skipSequence', handleSkipSequence),
-      // Local menu
-      window.smartgit.events.on('menu:stage', handleStage),
-      window.smartgit.events.on('menu:unstage', handleUnstage),
-      window.smartgit.events.on('menu:stageAll', handleStageAll),
-      window.smartgit.events.on('menu:discard', handleDiscard),
-      window.smartgit.events.on('menu:editLastCommitMessage', handleEditLastCommitMessage),
-      window.smartgit.events.on('menu:editCommitAuthor', handleEditCommitAuthor),
-      window.smartgit.events.on('menu:undoLastCommit', handleUndoLastCommit),
-      window.smartgit.events.on('menu:stash', handleStashSelection),
-      window.smartgit.events.on('menu:stashSelection', handleStashSelection),
-      window.smartgit.events.on('menu:applyStash', handleApplyStash),
-      window.smartgit.events.on('menu:indexEditor', () => { setShowIndexEditor(true); setIndexEditorFile(selectedFile()); }),
-      window.smartgit.events.on('menu:ignore', handleIgnore),
-      window.smartgit.events.on('menu:editIgnoreFile', handleEditIgnoreFile),
-      window.smartgit.events.on('menu:assumeUnchanged', () => handleIndexFlag('assume-unchanged')),
-      window.smartgit.events.on('menu:skipWorktree', () => handleIndexFlag('skip-worktree')),
-      window.smartgit.events.on('menu:moveRename', handleMoveRename),
-      window.smartgit.events.on('menu:deleteFile', handleDeleteFile),
-      window.smartgit.events.on('menu:removeFile', handleRemoveFile),
-      window.smartgit.events.on('menu:conflictSolver', handleConflictSolver),
-      window.smartgit.events.on('menu:resolveOurs', () => resolveConflict('ours')),
-      window.smartgit.events.on('menu:resolveTheirs', () => resolveConflict('theirs')),
-      window.smartgit.events.on('menu:markResolved', () => resolveConflict('resolved')),
-      window.smartgit.events.on('menu:lfsInstall', () => lfsOp('install')),
-      window.smartgit.events.on('menu:lfsTrack', handleLfsTrack),
-      window.smartgit.events.on('menu:lfsLock', () => lfsOp('lock')),
-      window.smartgit.events.on('menu:lfsUnlock', () => lfsOp('unlock')),
-      // Remote menu
-      window.smartgit.events.on('menu:pushTo', handlePushTo),
-      window.smartgit.events.on('menu:pullOptions', handlePullOptions),
-      window.smartgit.events.on('menu:fetchAll', handleFetchAll),
-      window.smartgit.events.on('menu:fetchMore', handleFetchMore),
-      window.smartgit.events.on('menu:remoteAdd', () => handleNavigate('/remotes')),
-      window.smartgit.events.on('menu:remoteRename', () => handleNavigate('/remotes')),
-      window.smartgit.events.on('menu:remoteDelete', () => handleNavigate('/remotes')),
-      window.smartgit.events.on('menu:remoteProperties', () => handleNavigate('/remotes')),
-      window.smartgit.events.on('menu:setDepth', handleFetchMore),
-      // Repository menu
-      window.smartgit.events.on('menu:repoSettings', () => setShowRepoSettings(true)),
-      window.smartgit.events.on('menu:editGitConfig', () => handleNavigate('/settings')),
-      window.smartgit.events.on('menu:openTerminal', handleOpenTerminal),
-      window.smartgit.events.on('menu:openInVscode', handleOpenInVscode),
-      window.smartgit.events.on('menu:preferences', () => handleNavigate('/settings')),
-      // Query / Tools
-      window.smartgit.events.on('menu:navigate', handleNavigate),
-      window.smartgit.events.on('menu:goDeepLink', () => handleGoDeepLink()),
-      window.smartgit.events.on('menu:copyDeepLink', handleCopyDeepLink),
-      window.smartgit.events.on('menu:findObject', handleFind),
-      window.smartgit.events.on('menu:verifyDatabase', handleVerifyDatabase),
-      window.smartgit.events.on('menu:garbageCollect', handleGarbageCollect),
-      window.smartgit.events.on('menu:applyPatch', () => setShowApplyPatch(true)),
-      window.smartgit.events.on('menu:formatPatch', handleFormatPatch),
-      // Window menu
-      window.smartgit.events.on('menu:windowStyle', handleWindowStyle),
-      window.smartgit.events.on('menu:resetPerspective', handleResetPerspective),
-    ];
-    return () => cleanups.forEach((fn) => fn && fn());
-  }, [toast]);
-
-  // Global keyboard shortcuts
-  useEffect(() => {
-    const handleKey = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement;
-      const isInInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
-      // Settings redesign — Zoom shortcuts (Ctrl+= / Ctrl+- / Ctrl+0).
-      // Applies even from inputs (matches VS Code behavior).
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === '=' || e.key === '+')) {
-        e.preventDefault();
-        const cur = useSettingsStore.getState().settings.zoomLevel ?? 100;
-        void useSettingsStore.getState().setSetting('zoomLevel', Math.min(240, cur + 10));
-        return;
-      }
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key === '-') {
-        e.preventDefault();
-        const cur = useSettingsStore.getState().settings.zoomLevel ?? 100;
-        void useSettingsStore.getState().setSetting('zoomLevel', Math.max(60, cur - 10));
-        return;
-      }
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key === '0') {
-        e.preventDefault();
-        void useSettingsStore.getState().setSetting('zoomLevel', 100);
-        return;
-      }
-      // Command palette — works even from inputs (standard UX), toggles
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'k' || e.key === 'p')) {
-        e.preventDefault();
-        setShowPalette((v) => !v);
-        return;
-      }
-      // Global Search — Ctrl+Shift+F. Distinct from the per-page Find
-      // (Ctrl+F) which is for hash lookup only. Global Search searches
-      // across commits/branches/tags/files/stashes/repos.
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'f' || e.key === 'F')) {
-        e.preventDefault();
-        setShowGlobalSearch((v) => !v);
-        return;
-      }
-      // LAR-3 — AI Assistant toggle (Ctrl+Shift+A).
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'a' || e.key === 'A')) {
-        e.preventDefault();
-        setShowAiAssistant((v) => !v);
-        return;
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key === 'f' && !isInInput) {
-        e.preventDefault();
-        setShowFind(true);
-      }
-      // F5 / Ctrl+R — refresh git status (never reload the window)
-      if (e.key === 'F5' || ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'r' || e.key === 'R'))) {
-        e.preventDefault();
-        const repo = useRepositoryStore.getState().currentRepo;
-        if (repo) useGitStore.getState().refreshStatus(repo.path);
-        return;
-      }
-      // '?' — plain question mark opens shortcuts help; Ctrl+?/Ctrl+/ (below)
-      // handles the toggle variant
-      if (e.key === '?' && !e.ctrlKey && !e.metaKey && !isInInput) {
-        e.preventDefault();
-        setShowShortcuts(true);
-        return;
-      }
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'T') {
-        e.preventDefault();
-        useSettingsStore.getState().toggleTheme();
-      }
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'G' && !isInInput) {
-        e.preventDefault();
-        setShowGitFlow(true);
-      }
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'R' && !isInInput) {
-        e.preventDefault();
-        setShowIRebase(true);
-      }
-      // Keyboard shortcuts overlay: Ctrl+? (Shift+/ produces ?) or Ctrl+/
-      // Idempotent OPEN (not toggle): the native menu accelerator
-      // (Keyboard Shortcuts..., Ctrl+/) also opens the dialog — a toggle here
-      // would open+close it in the same keystroke. (Bug class: renderer
-      // keydown duplicated native menu accelerators → double execution.)
-      if ((e.ctrlKey || e.metaKey) && (e.key === '?' || e.key === '/')) {
-        e.preventDefault();
-        setShowShortcuts(true);
-      }
-      // Alt+number navigation: Alt+1=Changes, Alt+2=History, Alt+3=Diff,
-      // Alt+4=Branches, Alt+5=Tags, Alt+6=Stashes, Alt+, =Settings
-      // (read the repo from the store — a closure here would be stale since
-      // this effect has stable deps and runs once)
-      if (e.altKey && !isInInput) {
-        const altMap: Record<string, string> = {
-          '1': '/changes',
-          '2': '/history',
-          '3': '/diff',
-          '4': '/branches',
-          '5': '/tags',
-          '6': '/stashes',
-          ',': '/settings',
-        };
-        const target = altMap[e.key];
-        if (target && useRepositoryStore.getState().currentRepo) {
-          e.preventDefault();
-          navigate(target);
-        }
-      }
-      // NOTE — git-operation shortcuts (Ctrl+Shift+P/L/F/A), window style
-      // (Ctrl+Shift+1/2/3), Clone (Ctrl+Shift+O) and the Output panel
-      // (Ctrl+Shift+U) are handled by the NATIVE application menu
-      // (electron/menu.ts accelerators → menu:* events). Do NOT duplicate them
-      // here: on Windows/Linux Electron does NOT consume the keydown when a
-      // menu accelerator fires, so both handlers ran — e.g. Fetch downloaded
-      // everything TWICE per keystroke (user-reported bug). The menu is the
-      // single owner of these shortcuts.
-      // Ctrl+1..9 — quick page navigation (only with an open repository)
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key >= '1' && e.key <= '9' && !isInInput) {
-        const path = Object.entries(NAV_SHORTCUTS).find(([, sc]) => sc === `Ctrl+${e.key}`)?.[0];
-        if (path && useRepositoryStore.getState().currentRepo) {
-          e.preventDefault();
-          navigate(path);
-        }
-      }
-    };
-    window.addEventListener('keydown', handleKey);
-    return () => window.removeEventListener('keydown', handleKey);
-  }, [navigate]);
-
-  // Shortcuts dialog can be opened from the Command Palette via this event
-  useEffect(() => {
-    const handler = () => setShowShortcuts(true);
-    window.addEventListener('prismgit:show-shortcuts', handler);
-    return () => window.removeEventListener('prismgit:show-shortcuts', handler);
-  }, []);
-
-  // Repository Settings dialog — triggered from Sidebar context menu
-  useEffect(() => {
-    const handler = () => setShowRepoSettings(true);
-    window.addEventListener('prismgit:repo-settings', handler);
-    return () => window.removeEventListener('prismgit:repo-settings', handler);
-  }, []);
-
-  // SmartGit Manual: Command-Line Options
-  // Handle --open / --log / --blame / --investigate / --anchor-commit sent from electron/main.ts
-  useEffect(() => {
-    const cleanupOpen = window.smartgit.events.on('cli:open', (data: unknown) => {
-      const { path } = data as { path: string };
-      useRepositoryStore.getState().openRepository(path).catch((e) => {
-        toast.error(i18nT('toast.git.openRepoFailed'), String(e));
-      });
-    });
-    const cleanupLog = window.smartgit.events.on('cli:log', (data: unknown) => {
-      const { path, anchorCommit } = data as { path: string; anchorCommit?: string };
-      // If path is a directory → open repo + navigate to History
-      // If path is a file → open repo + set path filter + navigate to History
-      useRepositoryStore.getState().openRepository(path).then(() => {
-        if (anchorCommit) useSelectionStore.getState().selectCommit(anchorCommit);
-        navigate('/history');
-      }).catch((e) => toast.error('Failed to open', String(e)));
-    });
-    const cleanupBlame = window.smartgit.events.on('cli:blame', (data: unknown) => {
-      const { path, anchorCommit } = data as { path: string; anchorCommit?: string };
-      useRepositoryStore.getState().openRepository(path).then(() => {
-        if (anchorCommit) useSelectionStore.getState().selectCommit(anchorCommit);
-        navigate('/blame');
-      }).catch((e) => toast.error('Failed to open', String(e)));
-    });
-    const cleanupInvestigate = window.smartgit.events.on('cli:investigate', (data: unknown) => {
-      const { path, anchorCommit } = data as { path: string; anchorCommit?: string };
-      useRepositoryStore.getState().openRepository(path).then(() => {
-        if (anchorCommit) useSelectionStore.getState().selectCommit(anchorCommit);
-        navigate('/history');
-      }).catch((e) => toast.error('Failed to open', String(e)));
-    });
-    return () => { cleanupOpen(); cleanupLog(); cleanupBlame(); cleanupInvestigate(); };
-  }, [navigate, toast]);
-
-  // File watcher: start/stop when repo changes + auto-refresh on changes.
-  // Debounce strategy: leading-rate-limited + TRAILING guaranteed.
-  // Each watcher event schedules a refresh at most MIN_REFRESH_INTERVAL after
-  // the previous one; if events arrive faster, they coalesce into one trailing
-  // refresh — a change is never dropped (the old code silently discarded
-  // events inside the 2s window, so edits could stay invisible indefinitely).
-  const refreshInFlight = useRef<Promise<unknown> | null>(null);
-  const lastRefreshTime = useRef(0);
-  const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    if (!currentRepo) return;
-    const repoPath = currentRepo.path;
-    api.watcher.start(repoPath);
-
-    const doRefresh = () => {
-      lastRefreshTime.current = Date.now();
-      const p = refreshStatus(repoPath).catch(() => { /* status errors shown elsewhere */ });
-      // Chain so a trailing refresh can wait for the in-flight one to settle
-      refreshInFlight.current = p.finally(() => {
-        if (refreshInFlight.current === p) refreshInFlight.current = null;
-      });
-    };
-
-    const scheduleRefresh = () => {
-      if (refreshTimer.current) clearTimeout(refreshTimer.current);
-      const elapsed = Date.now() - lastRefreshTime.current;
-      const delay = Math.max(0, 2000 - elapsed);
-      refreshTimer.current = setTimeout(() => {
-        refreshTimer.current = null;
-        if (refreshInFlight.current) {
-          // A refresh started before the latest change — wait for it, then refresh again
-          void Promise.resolve(refreshInFlight.current).then(() => {
-            if (!refreshTimer.current) doRefresh();
-          });
-        } else {
-          doRefresh();
-        }
-      }, delay);
-    };
-
-    const cleanup = api.watcher.onChanged(() => scheduleRefresh());
-    return () => {
-      if (refreshTimer.current) {
-        clearTimeout(refreshTimer.current);
-        refreshTimer.current = null;
-      }
-      api.watcher.stop(repoPath);
-      cleanup();
-    };
-  }, [currentRepo, refreshStatus]);
-
-  // Navigate when window style changes — only when user explicitly switches
-  const prevStyle = useRef(windowStyle);
-  useEffect(() => {
-    if (!currentRepo) return;
-    // Only navigate if style actually changed (not on first render)
-    if (prevStyle.current !== windowStyle) {
-      prevStyle.current = windowStyle;
-      // Per user request: Changes should always be the default landing page,
-      // even when window style is 'log' (which only affects visual chrome).
-      // Users who want History can navigate there manually.
-      navigate('/changes');
-    }
-  }, [windowStyle, currentRepo, navigate]);
-
-  // Refresh status when repository changes (only once, not on every render)
-  useEffect(() => {
-    if (currentRepo) {
-      refreshStatus(currentRepo.path);
-      setDismissRebase(false);
-      // A cold-start deep link (e.g. '#/history?file=X' before any repo was
-      // open) remembers its target page — land there instead of Changes.
-      const pendingPage = takePendingDeepLinkPage();
-      // Default landing page is Changes (per user request). Even if the user
-      // was on Settings or another page, opening a repo should show it first.
-      navigate(pendingPage || '/changes');
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentRepo?.path]);
-
-  const handleFind = useCallback(() => setShowFind(true), []);
-
-  // ===== Deep links (View → Go to / Copy Deep Link, Command Palette) =====
-  const handleCopyDeepLink = useCallback(() => {
-    if (!useRepositoryStore.getState().currentRepo) return;
-    const link = buildCurrentDeepLink(currentHashPath());
-    const href = `${window.location.href.split('#')[0]}#${link}`;
-    navigator.clipboard.writeText(href)
-      .then(() => toast.success('Deep link copied', link))
-      .catch((e) => toast.error('Copy failed', String(e)));
-  }, [toast]);
-  const handleGoDeepLink = useCallback(async () => {
-    if (!useRepositoryStore.getState().currentRepo) return;
-    const value = await promptDialog({
-      title: 'Go to Deep Link',
-      message: 'Enter a deep-link path — page plus selection params, e.g. '
-        + '/history?file=src/App.tsx, /blame?file=README.md, /history?branch=main&author=Ivan',
-      input: {
-        initialValue: buildCurrentDeepLink(currentHashPath()),
-        placeholder: '/history?file=src/App.tsx',
-      },
-      confirmLabel: 'Go',
-    });
-    if (!value) return;
-    const path = value.trim().replace(/^#+/, '');
-    if (!isValidDeepLinkPath(path)) {
-      toast.error('Invalid deep link', 'Expected a path like /history?file=src/App.tsx');
-      return;
-    }
-    navigate(path);
-  }, [navigate, toast]);
-
-  // Default route is always Changes (per user request — window style only affects chrome)
-  const defaultRoute = '/changes';
-
-  if (!currentRepo) {
-    return (
-      <div className="flex flex-col h-screen">
-        <Toolbar onFind={handleFind} onGlobalSearch={() => setShowGlobalSearch(true)} onGitFlow={() => setShowGitFlow(true)} onInteractiveRebase={() => setShowIRebase(true)} onRepoInfo={() => setShowRepoInfo(true)} onShowShortcuts={() => setShowShortcuts(true)} onShowClone={() => setShowClone(true)} onShowInit={() => setShowInit(true)} onToggleAiAssistant={() => setShowAiAssistant(v => !v)} />
-        <div className="flex flex-1 overflow-hidden">
-          <Sidebar />
-          <div className="flex-1 overflow-hidden flex flex-col">
-            <Suspense fallback={<PageLoader />}>
-              <Routes>
-                <Route path="/settings" element={<SettingsPage />} />
-                <Route path="/ai-chat" element={<AiChatPage />} />
-                <Route path="*" element={<WelcomeScreen onClone={() => setShowClone(true)} onInit={() => setShowInit(true)} />} />
-              </Routes>
-            </Suspense>
-          </div>
-        </div>
-        <StatusBar
-          showCommandLog={showCommandLog}
-          onToggleCommandLog={() => setShowCommandLog(s => !s)}
-        />
-        <ToastContainer />
-        <ConfirmDialogHost />
-        <DragDropHandler />
-        <DeepLinkHandler />
-        <Suspense fallback={null}><CloneModal open={showClone} onClose={() => setShowClone(false)} /></Suspense>
-        <Suspense fallback={null}><InitModal open={showInit} onClose={() => setShowInit(false)} /></Suspense>
-        <Suspense fallback={null}><FindObjectDialog open={showFind} onClose={() => setShowFind(false)} /></Suspense>
-        <Suspense fallback={null}>
-          <CommandPalette
-            open={showPalette}
-            onClose={() => setShowPalette(false)}
-            triggers={{
-              onFind: () => setShowFind(true),
-              onGitFlow: () => setShowGitFlow(true),
-              onInteractiveRebase: () => setShowIRebase(true),
-              onRepoInfo: () => setShowRepoInfo(true),
-              onApplyPatch: () => setShowApplyPatch(true),
-              onClone: () => setShowClone(true),
-              onInit: () => setShowInit(true),
-              onGoDeepLink: handleGoDeepLink,
-              onCopyDeepLink: handleCopyDeepLink,
-            }}
-          />
-        </Suspense>
-        <Suspense fallback={null}><KeyboardShortcutsOverlay open={showShortcuts} onClose={() => setShowShortcuts(false)} /></Suspense>
-        <Suspense fallback={null}>
-          <GlobalSearch
-            open={showGlobalSearch}
-            onClose={() => setShowGlobalSearch(false)}
-          />
-        </Suspense>
-        <Suspense fallback={null}>{showAiAssistant && <AiAssistant onClose={() => setShowAiAssistant(false)} />}</Suspense>
-      </div>
+    // ─── Global error reporting ─────────────────────────────────────────────
+    // The ErrorReportDialog lives OUTSIDE the GlobalErrorBoundary so it can
+    // render even when the rest of the app has crashed. The dialog reads
+    // `errorState` — set by either:
+    //   1. The boundary's onError callback (for React render errors).
+    //   2. The window 'error' / 'unhandledrejection' handlers (for sync
+    //      throws and unhandled promise rejections).
+    //   3. The 'smartgit:watchdog-freeze' CustomEvent (for UI freezes).
+    // On mount, we also load any persisted error from localStorage so the
+    // dialog re-opens after a reload (the user can then copy the trace
+    // before deciding what to do).
+    const [errorState, setErrorState] = useState<CapturedError | null>(() =>
+        loadPersistedError(),
     );
-  }
 
-  return (
-    <div className="flex flex-col h-screen">
-      <Toolbar
-        onFind={handleFind}
-        onGlobalSearch={() => setShowGlobalSearch(true)}
-        onGitFlow={() => setShowGitFlow(true)}
-        onInteractiveRebase={() => setShowIRebase(true)}
-        onRepoInfo={() => setShowRepoInfo(true)}
-        onShowShortcuts={() => setShowShortcuts(true)}
-        onShowClone={() => setShowClone(true)}
-        onShowInit={() => setShowInit(true)}
-        onToggleCommandLog={() => setShowCommandLog(s => !s)}
-        onToggleAiAssistant={() => setShowAiAssistant(v => !v)}
-      />
-      <GitToolbar
-        onGitFlow={() => setShowGitFlow(true)}
-        onInteractiveRebase={() => setShowIRebase(true)}
-      />
-      <div className="flex flex-1 overflow-hidden no-drag">
-        {/* Sidebar always visible — navigation must be accessible */}
-        <Sidebar />
-        <main className="flex-1 overflow-hidden flex flex-col">
-          <HelpBanner />
-          <Suspense fallback={<PageLoader />}>
-            <Routes>
-              <Route path="/" element={<Navigate to={defaultRoute} replace />} />
-              <Route path="/changes" element={<ChangesPage onResolveConflict={(f) => setConflictFile(f)} onResolveConflictAction={(f, mode) => resolveConflict(mode, f)} />} />
-              <Route path="/history" element={<HistoryPage />} />
-              <Route path="/diff" element={<DiffPage />} />
-              {/* Annotate: file-history investigation (SmartGit "Log of file") */}
-              <Route path="/annotate" element={<AnnotatePage />} />
-              {/* Investigate renamed to Search */}
-              <Route path="/investigate" element={<Navigate to="/search" replace />} />
-              <Route path="/search" element={<InvestigatePage />} />
-              <Route path="/blame" element={<BlamePage />} />
-              {/* Journal: reflog-based journal of the current branch activity */}
-              <Route path="/journal" element={<JournalPage />} />
-              <Route path="/gitflow" element={<GitFlowPage />} />
-              <Route path="/pulls" element={<PullRequestsPage />} />
-              <Route path="/reviews" element={<ReviewsPage />} />
-              <Route path="/lfs" element={<LfsPage />} />
-              <Route path="/branches" element={<BranchesPage />} />
-              <Route path="/stashes" element={<StashesPage />} />
-              <Route path="/tags" element={<TagsPage />} />
-              <Route path="/submodules" element={<SubmodulesPage />} />
-              <Route path="/reflog" element={<ReflogPage />} />
-              <Route path="/recyclable" element={<RecyclablePage />} />
-              <Route path="/remotes" element={<RemotesPage />} />
-              <Route path="/bisect" element={<BisectPage />} />
-              <Route path="/settings" element={<SettingsPage />} />
-              <Route path="/ai-chat" element={<AiChatPage />} />
-            </Routes>
-          </Suspense>
-        </main>
-      </div>
-      {showCommandLog && (
-        <>
-          <ResizableSplitter direction="vertical" onResize={(d) => setCommandLogHeight(h => Math.max(100, Math.min(600, h - d)))} />
-          <div style={{ height: commandLogHeight, flexShrink: 0 }}>
-            <Suspense fallback={null}>
-              <CommandLogPanel
-                onClose={() => {
-                  setShowCommandLog(false);
-                  setCommandLogErrorsOnly(false);
-                  // QW-5 — record the manual-close timestamp so the next
-                  // error within 30s does NOT auto-reopen the panel.
-                  useCommandLogStore.getState().markManualClose();
-                }}
-                initialErrorsOnly={commandLogErrorsOnly}
-              />
-            </Suspense>
-          </div>
-        </>
-      )}
-      <StatusBar
-        showCommandLog={showCommandLog}
-        onToggleCommandLog={() => setShowCommandLog(s => !s)}
-      />
-      <ToastContainer />
-      <ConfirmDialogHost />
-      <DragDropHandler />
-      <DeepLinkHandler />
-      <Suspense fallback={null}><CloneModal open={showClone} onClose={() => setShowClone(false)} /></Suspense>
-      <Suspense fallback={null}><InitModal open={showInit} onClose={() => setShowInit(false)} /></Suspense>
-      <Suspense fallback={null}><FindObjectDialog open={showFind} onClose={() => setShowFind(false)} /></Suspense>
-      <Suspense fallback={null}>
-        <GitFlowDialog open={showGitFlow} onClose={() => { setShowGitFlow(false); setGitFlowType(undefined); }} initialFlow={gitFlowType} />
-        <InteractiveRebaseDialog open={showIRebase} onClose={() => setShowIRebase(false)} />
-        <RepoInfoDialog open={showRepoInfo} onClose={() => setShowRepoInfo(false)} />
-        <ApplyPatchModal open={showApplyPatch} onClose={() => setShowApplyPatch(false)} />
-      </Suspense>
-      <Suspense fallback={null}><KeyboardShortcutsOverlay open={showShortcuts} onClose={() => setShowShortcuts(false)} /></Suspense>
-      <Suspense fallback={null}>{refAction && <RefActionDialog action={refAction} onClose={() => setRefAction(null)} />}</Suspense>
-      {showIndexEditor && (
-        <Suspense fallback={null}>
-          <IndexEditorDialog filePath={indexEditorFile} onClose={() => setShowIndexEditor(false)} />
-        </Suspense>
-      )}
-      {showRepoSettings && (
-        <Suspense fallback={null}>
-          <RepoSettingsDialog onClose={() => setShowRepoSettings(false)} />
-        </Suspense>
-      )}
-      {/* Conflict resolution happens IN the Diff tool (ConflictMergeView),
+    const captureError = useCallback(
+        (err: {
+            kind: CapturedError["kind"];
+            message: string;
+            stack: string;
+            componentStack?: string;
+            context?: string;
+        }) => {
+            const captured: CapturedError = {
+                id: `${err.kind}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                timestamp: Date.now(),
+                kind: err.kind,
+                message: err.message,
+                stack: err.stack,
+                componentStack: err.componentStack,
+                context: err.context,
+                ...collectEnvironment(),
+            };
+            persistError(captured);
+            setErrorState(captured);
+        },
+        [],
+    );
+
+    // On mount, also subscribe to the persisted-error channel — if a NEW
+    // error gets persisted from outside the React tree (e.g. from the
+    // window error handlers when React is unmounted), we pick it up here.
+    useEffect(() => {
+        const onStorage = (e: StorageEvent) => {
+            if (e.key === "prismgit-last-error" && e.newValue) {
+                try {
+                    const parsed = JSON.parse(e.newValue);
+                    if (parsed && parsed.id && parsed.stack) {
+                        setErrorState(parsed as CapturedError);
+                    }
+                } catch {
+                    /* ignore */
+                }
+            }
+        };
+        window.addEventListener("storage", onStorage);
+        return () => window.removeEventListener("storage", onStorage);
+    }, []);
+
+    const handleBoundaryError = useCallback((captured: CapturedError) => {
+        setErrorState(captured);
+    }, []);
+
+    const handleCloseErrorDialog = useCallback(() => {
+        clearPersistedError();
+        setErrorState(null);
+    }, []);
+
+    // Watchdog: detect UI freezes (white screen) and surface them. The
+    // watchdog runs in a Web Worker so it can keep ticking even when the
+    // main thread is frozen.
+    useWatchdog();
+
+    // Task 10 — listen for 'prismgit:clone-into-group' custom events
+    // dispatched by Sidebar's group right-click menu. Opens the Clone modal.
+    useEffect(() => {
+        const onCloneIntoGroup = (e: Event) => {
+            const detail = (e as CustomEvent).detail as
+                | { groupId: string; groupName: string }
+                | undefined;
+            if (detail) {
+                sessionStorage.setItem(
+                    "prismgit-clone-target-group",
+                    detail.groupId,
+                );
+            }
+            setShowClone(true);
+        };
+        window.addEventListener("prismgit:clone-into-group", onCloneIntoGroup);
+        // Root context menu 'Clone' → open Clone modal without a target group
+        const onOpenClone = () => setShowClone(true);
+        window.addEventListener("prismgit:open-clone-modal", onOpenClone);
+        // 'prismgit:init-into-group' → open Init modal (create new repo) with
+        // target group preselected so the new repo lands in this group.
+        const onInitIntoGroup = (e: Event) => {
+            const detail = (e as CustomEvent).detail as
+                | { groupId: string; groupName: string }
+                | undefined;
+            if (detail) {
+                sessionStorage.setItem(
+                    "prismgit-clone-target-group",
+                    detail.groupId,
+                );
+            }
+            setShowInit(true);
+        };
+        window.addEventListener("prismgit:init-into-group", onInitIntoGroup);
+        return () => {
+            window.removeEventListener(
+                "prismgit:clone-into-group",
+                onCloneIntoGroup,
+            );
+            window.removeEventListener(
+                "prismgit:open-clone-modal",
+                onOpenClone,
+            );
+            window.removeEventListener(
+                "prismgit:init-into-group",
+                onInitIntoGroup,
+            );
+        };
+    }, []);
+    const [showInit, setShowInit] = useState(false);
+    const [showFind, setShowFind] = useState(false);
+    const [showGitFlow, setShowGitFlow] = useState(false);
+    const [showIRebase, setShowIRebase] = useState(false);
+    const [showRepoInfo, setShowRepoInfo] = useState(false);
+    const [showApplyPatch, setShowApplyPatch] = useState(false);
+    const [showPalette, setShowPalette] = useState(false);
+    // ONB-1 — first-run tour state. Auto-starts on first launch (when
+    // `tourCompleted` is not set in the settings store — also mirrored to
+    // localStorage for the fast synchronous check below), can be re-triggered
+    // via Help menu (Help → Restart Tour — wired in electron/menu.ts via IPC).
+    const [showTour, setShowTour] = useState(false);
+    useEffect(() => {
+        // Auto-start tour on first launch — but ONLY after we've confirmed
+        // via BOTH the sync localStorage check (instant) AND the async
+        // settings store check (authoritative). The sync check prevents the
+        // tour from briefly flashing on screen before the async check
+        // completes. The async check is the source of truth — it survives
+        // localStorage wipes (Tauri webview partition resets, "Clear site
+        // data", cache cleaning) which had been causing the tour to re-show
+        // on every launch despite the user checking "Don't show again".
+        let cancelled = false;
+        const cleanupTimers: Array<() => void> = [];
+        try {
+            // Fast sync check — if localStorage says '1', skip the tour
+            // immediately without waiting for the async settings store call.
+            // This is just an optimization; the async call below is still
+            // the authoritative check (we don't return early here, we just
+            // avoid the 800ms delay if we already know the tour is completed).
+            const localDone =
+                localStorage.getItem("prismgit-tour-completed") === "1";
+
+            void (async () => {
+                if (cancelled) return;
+                // Authoritative check via settings store. Also handles legacy
+                // migration: if localStorage says done but settings store doesn't,
+                // we write it back so future launches aren't dependent on
+                // localStorage survival.
+                let done = localDone;
+                try {
+                    const stored =
+                        await api.settings.get<boolean>("tourCompleted");
+                    if (stored === true) {
+                        done = true;
+                    } else if (localDone) {
+                        // Legacy migration — promote localStorage flag to settings store.
+                        try {
+                            await api.settings.set("tourCompleted", true);
+                        } catch {
+                            /* ignore */
+                        }
+                    }
+                } catch {
+                    /* settings store unavailable — fall back to localDone */
+                }
+
+                if (cancelled || done) return;
+                // Defer until the rest of the UI has mounted so the spotlight
+                // targets exist in the DOM.
+                const t = setTimeout(() => {
+                    if (!cancelled) setShowTour(true);
+                }, 800);
+                cleanupTimers.push(() => clearTimeout(t));
+            })();
+        } catch {
+            /* SSR / test env */
+        }
+
+        return () => {
+            cancelled = true;
+            cleanupTimers.forEach((fn) => fn());
+        };
+    }, []);
+    // Bug fix: safety timeout — if the tour overlay ever gets stuck (e.g.
+    // an error prevents the user from dismissing it, or all spotlight
+    // targets are unreachable), auto-hide after 5 minutes so the user can
+    // keep working. They can re-trigger via Help menu.
+    useEffect(() => {
+        if (!showTour) return;
+        const t = setTimeout(() => {
+            setShowTour(false);
+            try {
+                localStorage.setItem("prismgit-tour-completed", "1");
+            } catch {}
+            try {
+                void api.settings.set("tourCompleted", true);
+            } catch {
+                /* ignore */
+            }
+        }, 5 * 60_000);
+        return () => clearTimeout(t);
+    }, [showTour]);
+    /**
+     * Global Search modal — cross-entity search (commits/branches/tags/files/
+     * stashes/repos). Triggered by Ctrl+Shift+F (or Toolbar button). Distinct
+     * from CommandPalette (which is for actions/commands).
+     */
+    const [showGlobalSearch, setShowGlobalSearch] = useState(false);
+    const [conflictFile, setConflictFile] = useState<string | null>(null);
+    const [dismissRebase, setDismissRebase] = useState(false);
+    const [showShortcuts, setShowShortcuts] = useState(false);
+    // LAR-3 — AI Assistant chat panel visibility (toggle via toolbar button).
+    const [showAiAssistant, setShowAiAssistant] = useState(false);
+    // Listen for 'smartgit:ai-prompt' events (from PRReview's "AI Review"
+    // button). Open the AI panel so the user sees the pre-filled prompt.
+    useEffect(() => {
+        const handler = () => setShowAiAssistant(true);
+        window.addEventListener("smartgit:ai-prompt", handler);
+        return () => window.removeEventListener("smartgit:ai-prompt", handler);
+    }, []);
+    // v2.3.8 — the Command Log visibility moved from a local useState to
+    // uiLayoutStore so the header-corner layout-panel toggle (the middle
+    // button of the VS Code hero row) can drive it, next to the sidebar-left /
+    // detail-right toggles. Same store pattern as v2.3.4.
+    const showCommandLog = useUiLayoutStore((s) => s.commandLogOpen);
+    const setCommandLogOpen = useUiLayoutStore((s) => s.setCommandLogOpen);
+    const toggleCommandLog = useUiLayoutStore((s) => s.toggleCommandLog);
+    const [commandLogHeight, setCommandLogHeight] = useState(260);
+    /**
+     * When the command-log panel is auto-opened by a simple-git error, this
+     * flag tells CommandLogPanel to start with the "Errors only" filter ON
+     * and scroll to the latest failed entry. Reset to false on manual close
+     * or manual toggle so subsequent opens show the full command list.
+     */
+    const [commandLogErrorsOnly, setCommandLogErrorsOnly] = useState(false);
+    /**
+     * Tracks the last errorPulse we've seen — used to detect NEW errors
+     * while the panel is closed so we can auto-open it.
+     */
+    const [lastSeenErrorPulse, setLastSeenErrorPulse] = useState(0);
+    const errorPulse = useCommandLogStore((s) => s.errorPulse);
+    const [refAction, setRefAction] = useState<RefAction | null>(null);
+    const [indexEditorFile, setIndexEditorFile] = useState<
+        string | null | undefined
+    >(undefined);
+    const [showIndexEditor, setShowIndexEditor] = useState(false);
+    const [showRepoSettings, setShowRepoSettings] = useState(false);
+    const [gitFlowType, setGitFlowType] = useState<
+        "feature" | "release" | "hotfix" | undefined
+    >(undefined);
+
+    // v3.2: the old useBackgroundFetch() hook was removed — it duplicated the
+    // sidebar remote poll (same "Perform background Poll or Fetch" remotes,
+    // current repo included in pollRemoteSummaries' target list) AND its
+    // post-fetch refreshStatus re-armed the polling boost, feeding the
+    // fetch storm (see lib/pollingBoost.ts). The refs watcher refreshes the
+    // status after real fetches on its own.
+    // Periodic remote check for the repository list (fetch + ↓/↑ badges)
+    useRemotePolling();
+    // Periodic auto-push to origin for the active repository (Settings → Git →
+    // "Periodically push to origin"). Disabled by default — opt-in only.
+    useAutoPush();
+    // Warm lazily-loaded page/dialog chunks during idle time so every tool and
+    // dialog opens instantly (no first-open chunk fetch/parse penalty).
+    useChunkPreload();
+
+    // Locale sync: notify the main process so the native application menu is
+    // rebuilt in the active UI language (main initializes from the OS locale).
+    const locale = useI18nStore((s) => s.locale);
+    useEffect(() => {
+        window.smartgit?.app?.setLocale?.(locale);
+    }, [locale]);
+
+    // Auto-open the Command Log panel when a NEW git error arrives AND the
+    // panel is currently closed. The errorPulse counter increments in
+    // commandLogStore.append() whenever a failed entry (exitCode !== 0)
+    // arrives from the main-process spawn interceptor. By tracking
+    // lastSeenErrorPulse we only react to NEW errors — not the same error
+    // re-rendering the component.
+    //
+    // When triggered: opens the panel + sets errorsOnly=true ONLY when the
+    // panel was previously closed (so the user's manual filter choice is
+    // preserved while the panel is open).
+    //
+    // QW-5 — snooze: if the user manually closed the panel less than 30s
+    // ago, suppress the auto-open. We still bump lastSeenErrorPulse so the
+    // counter tracks the latest error, but the panel stays hidden. This
+    // stops the "close → next git error pops it right back open" loop
+    // (e.g. when a rebase is producing one error per second).
+    useEffect(() => {
+        if (errorPulse > lastSeenErrorPulse && !showCommandLog) {
+            const sinceClose =
+                Date.now() - useCommandLogStore.getState().lastManualCloseAt;
+            const SNOOZE_MS = 30_000;
+            if (sinceClose >= SNOOZE_MS) {
+                // Auto-open — set errors-only so the user immediately sees the
+                // failed command (not the full command list). This only fires
+                // when the panel was closed, so it never overwrites a filter
+                // the user is actively using.
+                setCommandLogErrorsOnly(true);
+                setCommandLogOpen(true);
+            }
+        }
+        setLastSeenErrorPulse(errorPulse);
+    }, [errorPulse, lastSeenErrorPulse, showCommandLog]);
+
+    // ── Global error handlers ──────────────────────────────────────────────
+    // Catch UNHANDLED Promise rejections so the app NEVER freezes / hangs on
+    // an unexpected git failure (e.g. `git checkout -- .` returns exit 128
+    // when git-lfs is configured but git-lfs is not installed — the LFS
+    // ─── Global error handlers (window.onerror + unhandledrejection) ─────────
+    //
+    // Why this exists: without global handlers, an uncaught throw inside a
+    // setTimeout/setInterval callback (e.g. a polling hook that crashes when
+    // the repo is deleted mid-poll) leaves the renderer in a broken state.
+    // The user sees a frozen UI or a white screen with NO explanation — they
+    // have to open DevTools to find the error.
+    //
+    // With these handlers:
+    //   1. The error is caught and its stack trace is captured.
+    //   2. The error is persisted to localStorage (so it survives a reload).
+    //   3. The ErrorReportDialog opens with the full trace + a "Copy report"
+    //      button so the user can paste it to the developer.
+    //   4. A non-blocking toast is ALSO shown (legacy behaviour) so the user
+    //      gets immediate feedback even if the dialog is dismissed.
+    //
+    // We also listen for 'smartgit:watchdog-freeze' events from the useWatchdog
+    // hook — these fire when the main thread was frozen for too long.
+    useEffect(() => {
+        const onUnhandledRejection = (event: PromiseRejectionEvent) => {
+            // Prevent the default (which logs to console + can crash on Node side).
+            event.preventDefault();
+            const reason = event.reason;
+            const { message, stack } = formatErrorStack(reason);
+            // Persist + open the error dialog with the full trace.
+            captureError({
+                kind: "unhandledrejection",
+                message: message || i18nT("toast.git.unhandledRejection"),
+                stack,
+                context:
+                    "Unhandled promise rejection (window.addEventListener)",
+            });
+            // Also show a non-blocking toast so the user gets immediate feedback
+            // even if they dismiss the dialog.
+            try {
+                toast.error(i18nT("toast.git.unhandledRejection"), message);
+            } catch {
+                /* toast store unavailable (during initial mount?) */
+            }
+            // eslint-disable-next-line no-console
+            console.error("[PrismGit] Unhandled promise rejection:", reason);
+        };
+        const onError = (event: ErrorEvent) => {
+            // Sync errors (throw inside a callback) — same treatment.
+            const err =
+                event.error || new Error(event.message || "Uncaught error");
+            const { message, stack } = formatErrorStack(err);
+            captureError({
+                kind: "uncaught",
+                message: message || i18nT("toast.git.uncaughtError"),
+                stack:
+                    stack || `${event.filename}:${event.lineno}:${event.colno}`,
+                context: `Uncaught error at ${event.filename}:${event.lineno}:${event.colno}`,
+            });
+            try {
+                toast.error(i18nT("toast.git.uncaughtError"), message);
+            } catch {
+                /* ignore */
+            }
+            // eslint-disable-next-line no-console
+            console.error(
+                "[PrismGit] Uncaught error:",
+                event.error || event.message,
+            );
+        };
+        const onWatchdogFreeze = (event: Event) => {
+            const detail = (event as CustomEvent).detail as
+                | { elapsed?: number }
+                | undefined;
+            const elapsed = detail?.elapsed ?? 0;
+            captureError({
+                kind: "watchdog",
+                message: i18nT("errors.watchdogFreeze", {
+                    defaultValue: "UI was frozen (unresponsive)",
+                }),
+                stack: `The main thread was unresponsive for ${elapsed}ms.\nThis usually indicates an infinite loop in a render or a long-running synchronous operation.\nWatchdog detected the freeze and surfaced this dialog so you can copy the trace and reload.`,
+                context: "Watchdog freeze detection (useWatchdog hook)",
+            });
+        };
+        window.addEventListener("unhandledrejection", onUnhandledRejection);
+        window.addEventListener("error", onError);
+        window.addEventListener("smartgit:watchdog-freeze", onWatchdogFreeze);
+        return () => {
+            window.removeEventListener(
+                "unhandledrejection",
+                onUnhandledRejection,
+            );
+            window.removeEventListener("error", onError);
+            window.removeEventListener(
+                "smartgit:watchdog-freeze",
+                onWatchdogFreeze,
+            );
+        };
+    }, [toast, captureError]);
+
+    useEffect(() => {
+        loadRepos();
+        loadMetadata();
+        loadSettings();
+        loadAuth();
+        // Load the saved language from the IPC-backed settings store
+        // (persistent JSON file in userData). Overrides the localStorage
+        // / navigator.language detection if a language was explicitly
+        // chosen by the user in Settings.
+        void initLocaleFromSettings();
+    }, [loadRepos, loadMetadata, loadSettings, loadAuth]);
+
+    // Initialize the IPC listener for operation-log events from main process.
+    // This captures ALL git operations (checkout, merge, cherry-pick, revert,
+    // rebase, stash, tag, clone, etc.) — not just the ones manually logged in
+    // the UI layer — and feeds them into the Operations tab.
+    useEffect(() => {
+        // Static import — operationLogStore is already pulled into the main
+        // bundle by StatusBar/Toolbar/etc., so dynamic import() gained nothing
+        // except a Vite warning. Calling init directly is simpler.
+        const cleanup = initOperationLogIpcListener();
+        return cleanup;
+    }, []);
+
+    // Listen for repo-closed events to clear global selections and free memory
+    useEffect(() => {
+        const handler = () => {
+            useSelectionStore.getState().clearAll();
+            // A pending deep link targets the OLD repo context — drop it
+            clearPendingDeepLinkPage();
+            // Navigate back to welcome screen
+            window.location.hash = "#/";
+        };
+        window.addEventListener("smartgit:repo-closed", handler);
+        return () =>
+            window.removeEventListener("smartgit:repo-closed", handler);
+    }, []);
+
+    // Per-project UI preferences (the user's request: "настройки интерфейса
+    // должны запоминаться на проект"). Two effects:
+    //   1. When a repo opens, load its saved UI prefs into selectionStore.
+    //   2. While a repo is open, subscribe to selectionStore and save the
+    //      preference keys back (debounced) whenever they change.
+    const repoPath = currentRepo?.path ?? null;
+    // Track repo switches: selections (commit/file/branch/tag/stash) belong to a
+    // specific repository — carrying them across repos would make History open a
+    // foreign pathFilter or Notes attach to a foreign commit. View prefs are
+    // per-project (applied right after) and are NOT touched.
+    const lastRepoPathRef = useRef<string | null>(null);
+    useEffect(() => {
+        if (!repoPath) {
+            lastRepoPathRef.current = null;
+            return;
+        }
+        if (
+            lastRepoPathRef.current !== null &&
+            lastRepoPathRef.current !== repoPath
+        ) {
+            useSelectionStore.getState().clearAll();
+        }
+        lastRepoPathRef.current = repoPath;
+        useSelectionStore
+            .getState()
+            .applyProjectPrefs(loadProjectPrefs(repoPath));
+    }, [repoPath]);
+    // v2.3.5 — Back/Forward is PROJECT-scoped: switching the open repository
+    // wipes the navigation stack (user request). ensureScope is a no-op when
+    // the path is unchanged.
+    useEffect(() => {
+        useNavHistoryStore.getState().ensureScope(repoPath);
+    }, [repoPath]);
+    useEffect(() => {
+        if (!repoPath) return;
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const unsub = useSelectionStore.subscribe((state, prev) => {
+            // fileDisplayFlags is NOT persisted — runtime only.
+            const changed =
+                state.fileViewMode !== prev.fileViewMode ||
+                state.commitViewMode !== prev.commitViewMode ||
+                state.compressFilePaths !== prev.compressFilePaths ||
+                state.fileSort !== prev.fileSort ||
+                state.fileFilterRegex !== prev.fileFilterRegex ||
+                state.dirTreeVisible !== prev.dirTreeVisible ||
+                state.colWidths !== prev.colWidths;
+            if (!changed) return;
+            clearTimeout(timer);
+            timer = setTimeout(() => {
+                const s = useSelectionStore.getState();
+                saveProjectPrefs(repoPath, {
+                    fileViewMode: s.fileViewMode,
+                    commitViewMode: s.commitViewMode,
+                    compressFilePaths: s.compressFilePaths,
+                    fileSort: s.fileSort,
+                    fileFilterRegex: s.fileFilterRegex,
+                    dirTreeVisible: s.dirTreeVisible,
+                    colWidths: s.colWidths,
+                });
+            }, 400);
+        });
+        return () => {
+            unsub();
+            clearTimeout(timer);
+        };
+    }, [repoPath]);
+
+    // Resolve conflict — extracted as a useCallback so it can be used both
+    // from the menu event handler (inside the useEffect below) AND from the
+    // JSX (ChangesPage onResolveConflictAction prop). Without this, the handler
+    // was trapped inside the useEffect scope.
+    const resolveConflict = useCallback(
+        async (
+            mode: "ours" | "theirs" | "both" | "resolved",
+            fileOverride?: string,
+        ) => {
+            const repo = useRepositoryStore.getState().currentRepo;
+            const f =
+                fileOverride ?? useSelectionStore.getState().selectedFilePath;
+            if (!repo) return;
+            if (!f) {
+                toast.warning(
+                    i18nT("toast.git.noFileSelected"),
+                    "Select a file in Changes first",
+                );
+                return;
+            }
+            try {
+                if (mode === "both") {
+                    await api.git.raw(repo.path, [
+                        "checkout",
+                        "--ours",
+                        "--",
+                        f,
+                    ]);
+                    const theirs = await api.git
+                        .raw(repo.path, ["show", `:3:${f}`])
+                        .catch(() => "");
+                    if (theirs) {
+                        const fs = await import("fs");
+                        const path = await import("path");
+                        const fullPath = path.join(repo.path, f);
+                        const current = fs.existsSync(fullPath)
+                            ? fs.readFileSync(fullPath, "utf-8")
+                            : "";
+                        fs.writeFileSync(fullPath, current + "\n" + theirs);
+                    }
+                } else if (mode !== "resolved") {
+                    await api.git.raw(repo.path, [
+                        "checkout",
+                        `--${mode}`,
+                        "--",
+                        f,
+                    ]);
+                }
+                await api.git.add(repo.path, [f]);
+                toast.success(
+                    `${f}: ${mode === "resolved" ? "marked resolved" : mode === "both" ? "took both" : `took ${mode}`}`,
+                );
+                useGitStore.getState().refreshStatus(repo.path);
+            } catch (e) {
+                toast.error(i18nT("toast.git.resolveFailed"), String(e));
+            }
+        },
+        [toast],
+    );
+
+    // Listen for menu events
+    useEffect(() => {
+        const handleOpenRepo = (path: string) => {
+            useRepositoryStore
+                .getState()
+                .openRepository(path)
+                .catch((e) => {
+                    toast.error(i18nT("toast.git.openRepoFailed"), String(e));
+                });
+        };
+        const handleClone = () => setShowClone(true);
+        const handleInit = () => setShowInit(true);
+        const handleCommit = () => {
+            window.location.hash = "#/changes";
+        };
+        const handlePush = () => {
+            const repo = useRepositoryStore.getState().currentRepo;
+            if (!repo) return;
+            // Returns the promise so the SSL-bypass retry can await it.
+            return useGitStore
+                .getState()
+                .push(repo.path)
+                .then(() => {
+                    toast.success(i18nT("toast.git.pushSuccess"));
+                    // Notify History page to reload — emits a one-shot event that
+                    // History's useEffect listens to (replaces the old `lastRefresh`
+                    // subscription which caused an infinite refresh loop with the
+                    // file watcher).
+                    window.dispatchEvent(
+                        new CustomEvent("smartgit:history-refresh"),
+                    );
+                })
+                .catch((e) => {
+                    // Menu path now carries the full reaction matrix too:
+                    // remote rejections → PushRejectionDialog, TLS cert → SSL
+                    // bypass dialog, missing/rejected login → credentials
+                    // dialog (the menu used to dead-end in a toast).
+                    if (offerPushRejection(e, { repoPath: repo.path })) return;
+                    if (offerSslBypass(e, { repoPath: repo.path, retry: async () => { await handlePush(); } })) return;
+                    if (offerAuthBypass(e, { repoPath: repo.path, retry: async () => { await handlePush(); } })) return;
+                    toast.error(i18nT("toast.git.pushFailed"), String(e));
+                });
+        };
+        // Menu Remote → Force Push — real `git push --force` on the current
+        // branch. Protected branches are still rejected by the service-level
+        // force-push policy (Preferences → Commands).
+        const handleForcePush = () => {
+            const repo = useRepositoryStore.getState().currentRepo;
+            if (!repo) return;
+            // Returns the promise so the SSL-bypass retry can await it.
+            return useGitStore
+                .getState()
+                .push(
+                    repo.path,
+                    undefined,
+                    undefined,
+                    false,
+                    true,
+                    undefined,
+                    "force",
+                )
+                .then(() => {
+                    toast.success(i18nT("toast.git.pushSuccess"));
+                    window.dispatchEvent(
+                        new CustomEvent("smartgit:history-refresh"),
+                    );
+                })
+                .catch((e) => {
+                    if (offerPushRejection(e, { repoPath: repo.path })) return;
+                    if (offerSslBypass(e, { repoPath: repo.path, retry: async () => { await handleForcePush(); } })) return;
+                    if (offerAuthBypass(e, { repoPath: repo.path, retry: async () => { await handleForcePush(); } })) return;
+                    toast.error(i18nT("toast.git.pushFailed"), String(e));
+                });
+        };
+        const handlePull = () => {
+            const repo = useRepositoryStore.getState().currentRepo;
+            if (!repo) return;
+            // SmartGit Manual: Smart Pull — prevents divergence after remote force-push
+            // Returns the promise so the SSL-bypass retry can await it.
+            return api.git
+                .smartPull(repo.path)
+                .then((result) => {
+                    toast.success(
+                        i18nT("toast.smartPull.success", {
+                            strategy: result.strategy,
+                        }),
+                        result.message,
+                    );
+                    useGitStore.getState().refreshStatus(repo.path);
+                    window.dispatchEvent(
+                        new CustomEvent("smartgit:history-refresh"),
+                    );
+                })
+                .catch(async (e) => {
+                    // smartPull can end mid-rebase ("could not apply …") or mid-merge —
+                    // detect from the repo state and surface the Conflicts UI instead
+                    // of a transient error toast (user-reported "ничего не произошло").
+                    // A TLS certificate rejection is neither — offer the bypass first;
+                    // a required login the app has not stored — ask for it.
+                    if (offerSslBypass(e, { repoPath: repo.path, retry: async () => { await handlePull(); } })) return;
+                    if (offerAuthBypass(e, { repoPath: repo.path, retry: async () => { await handlePull(); } })) return;
+                    const conflicted = await surfaceConflictedState(repo.path);
+                    if (!conflicted)
+                        toast.error(i18nT("toast.git.pullFailed"), String(e));
+                });
+        };
+        const handleFetch = () => {
+            const repo = useRepositoryStore.getState().currentRepo;
+            if (!repo) return;
+            // Returns the promise so the SSL-bypass retry can await it.
+            return useGitStore
+                .getState()
+                .fetch(repo.path)
+                .then(() => {
+                    toast.success(i18nT("toast.git.fetchSuccess"));
+                    window.dispatchEvent(
+                        new CustomEvent("smartgit:history-refresh"),
+                    );
+                })
+                .catch((e) => {
+                    if (offerSslBypass(e, { repoPath: repo.path, retry: async () => { await handleFetch(); } })) return;
+                    if (offerAuthBypass(e, { repoPath: repo.path, retry: async () => { await handleFetch(); } })) return;
+                    toast.error(i18nT("toast.git.fetchFailed"), String(e));
+                });
+        };
+        const handleToggleTheme = () =>
+            useSettingsStore.getState().toggleTheme();
+        const handleGitFlow = () => setShowGitFlow(true);
+        const handleIRebase = () => setShowIRebase(true);
+        const handleShowShortcuts = () => setShowShortcuts(true);
+        const handleToggleCommandLog = () => {
+            // Manual toggle resets the errorsOnly flag — user wants to see the
+            // full command list, not just errors.
+            setCommandLogErrorsOnly(false);
+            toggleCommandLog();
+        };
+
+        // ===== SmartGit-style command helpers =====
+        const requireRepo = () => useRepositoryStore.getState().currentRepo;
+        const selectedFile = () =>
+            useSelectionStore.getState().selectedFilePath;
+        const warnNoFile = () =>
+            toast.warning(
+                i18nT("toast.git.noFileSelected"),
+                "Select a file in Changes first",
+            );
+        const infoBox = (title: string, message: string) =>
+            confirmDialog({
+                title,
+                message: message.slice(0, 3000),
+                confirmLabel: "Close",
+                hideCancel: true,
+            });
+
+        const handleCheckout = () => setRefAction("checkout");
+        const handleMerge = () => setRefAction("merge");
+        const handleRebase = () => setRefAction("rebase");
+        const handleCherryPick = () => setRefAction("cherry-pick");
+        const handleRevert = () => setRefAction("revert");
+
+        const handleAddTag = async () => {
+            const repo = requireRepo();
+            if (!repo) return;
+            const name = await promptDialog({
+                title: "Add Tag",
+                message:
+                    "Tag name (created at the commit selected in History, or HEAD)",
+                input: { placeholder: "v1.0.0" },
+            });
+            if (!name) return;
+            const target = useSelectionStore.getState().selectedCommitHash;
+            try {
+                // Lightweight tag by design (name-only prompt) — annotated=false
+                // EXPLICIT so the backend's annotated default can't turn this into
+                // an annotated tag.
+                await api.git.createTag(
+                    repo.path,
+                    name,
+                    undefined,
+                    target || undefined,
+                    false,
+                    false,
+                );
+                toast.success(
+                    i18nT("toast.tag.created", {
+                        name,
+                        target: target ? ` at ${target.slice(0, 7)}` : "",
+                    }),
+                );
+                useGitStore.getState().refreshStatus(repo.path);
+            } catch (e) {
+                toast.error(i18nT("toast.tag.createFailed"), String(e));
+            }
+        };
+
+        const handleSetTracked = async () => {
+            const repo = requireRepo();
+            if (!repo) return;
+            const branch = await api.git
+                .currentBranch(repo.path)
+                .catch(() => null);
+            if (!branch) {
+                toast.warning(i18nT("toast.git.noLocalBranch"));
+                return;
+            }
+            const remoteBranch = await promptDialog({
+                title: "Set Tracked Branch",
+                message: `Remote branch that "${branch}" should track`,
+                input: { placeholder: "origin/main" },
+            });
+            if (!remoteBranch) return;
+            try {
+                await api.git.raw(repo.path, [
+                    "branch",
+                    "--set-upstream-to",
+                    remoteBranch,
+                    branch,
+                ]);
+                toast.success(`${branch} now tracks ${remoteBranch}`);
+                useGitStore.getState().refreshStatus(repo.path);
+            } catch (e) {
+                toast.error(i18nT("toast.git.setTrackedFailed"), String(e));
+            }
+        };
+
+        const handleStopTracking = async () => {
+            const repo = requireRepo();
+            if (!repo) return;
+            const branch = await api.git
+                .currentBranch(repo.path)
+                .catch(() => null);
+            if (!branch) return;
+            try {
+                await api.git.raw(repo.path, [
+                    "branch",
+                    "--unset-upstream",
+                    branch,
+                ]);
+                toast.success(`${branch} no longer tracks a remote branch`);
+                useGitStore.getState().refreshStatus(repo.path);
+            } catch (e) {
+                toast.error(i18nT("toast.git.stopTrackingFailed"), String(e));
+            }
+        };
+
+        // ===== Bisect =====
+        const bisect = async (
+            op: "start" | "bad" | "good" | "skip" | "reset" | "log",
+        ) => {
+            const repo = requireRepo();
+            if (!repo) return;
+            const g = useGitStore.getState();
+            const refresh = () => g.refreshStatus(repo.path).catch(() => {});
+            try {
+                switch (op) {
+                    case "start":
+                        await api.git.bisectStart(repo.path);
+                        await api.git.bisectBad(repo.path, "HEAD");
+                        toast.info(
+                            i18nT("toast.bisect.started"),
+                            "HEAD marked as bad — now mark a good commit (Branch | Bisect)",
+                        );
+                        break;
+                    case "bad":
+                        await api.git.bisectBad(repo.path);
+                        toast.success(i18nT("toast.bisect.headBad"));
+                        break;
+                    case "good":
+                        await api.git.bisectGood(repo.path);
+                        toast.success(i18nT("toast.bisect.headGood"));
+                        break;
+                    case "skip":
+                        await api.git.bisectSkip(repo.path);
+                        toast.success(i18nT("toast.bisect.skipped"));
+                        break;
+                    case "reset":
+                        await api.git.bisectReset(repo.path);
+                        toast.success(i18nT("toast.bisect.finished"));
+                        break;
+                    case "log": {
+                        const logText = await api.git.bisectLog(repo.path);
+                        await infoBox("Bisect Log", logText);
+                        break;
+                    }
+                }
+                refresh();
+            } catch (e) {
+                toast.error(i18nT("toast.bisect.failed"), String(e));
+            }
+        };
+
+        // ===== Local operations =====
+        const handleStage = async () => {
+            const repo = requireRepo();
+            const f = selectedFile();
+            if (!repo) return;
+            if (!f) {
+                warnNoFile();
+                return;
+            }
+            try {
+                await api.git.add(repo.path, [f]);
+                toast.success(i18nT("toast.git.stageSuccess", { file: f }));
+                useGitStore.getState().refreshStatus(repo.path);
+            } catch (e) {
+                toast.error(i18nT("toast.git.stageFailed"), String(e));
+            }
+        };
+        const handleUnstage = async () => {
+            const repo = requireRepo();
+            const f = selectedFile();
+            if (!repo) return;
+            if (!f) {
+                warnNoFile();
+                return;
+            }
+            try {
+                await api.git.resetFile(repo.path, f);
+                toast.success(i18nT("toast.git.unstageSuccess", { file: f }));
+                useGitStore.getState().refreshStatus(repo.path);
+            } catch (e) {
+                toast.error(i18nT("toast.git.unstageFailed"), String(e));
+            }
+        };
+        const handleStageAll = async () => {
+            const repo = requireRepo();
+            if (!repo) return;
+            try {
+                await useGitStore.getState().stageAll(repo.path);
+                toast.success(i18nT("toast.git.stageAllSuccess"));
+            } catch (e) {
+                toast.error(i18nT("toast.git.stageFailed"), String(e));
+            }
+        };
+        const handleDiscard = async () => {
+            const repo = requireRepo();
+            const f = selectedFile();
+            if (!repo) return;
+            if (!f) {
+                warnNoFile();
+                return;
+            }
+            const ok = await confirmDialog({
+                title: "Discard changes",
+                message: `Discard ALL changes of "\u200b${f}" in the Working Tree?\nThis cannot be undone.`,
+                confirmLabel: "Discard",
+                danger: true,
+            });
+            if (!ok) return;
+            try {
+                await api.git.restore(repo.path, [f]);
+                toast.success(i18nT("toast.git.discardedIn", { file: f }));
+                useGitStore.getState().refreshStatus(repo.path);
+            } catch (e) {
+                toast.error(i18nT("toast.git.discardFailed"), String(e));
+            }
+        };
+        const handleEditLastCommitMessage = async () => {
+            const repo = requireRepo();
+            if (!repo) return;
+            try {
+                const entries = await api.git.log(repo.path, { maxCount: 1 });
+                const current = entries[0]?.message ?? "";
+                const message = await promptDialog({
+                    title: "Edit Last Commit Message",
+                    message: "New commit message for HEAD",
+                    input: { initialValue: current },
+                });
+                if (!message || message === current) return;
+                await api.git.editCommitMessage(repo.path, "HEAD", message);
+                toast.success(i18nT("toast.edit.messageUpdated"));
+                useGitStore.getState().refreshStatus(repo.path);
+            } catch (e) {
+                toast.error(i18nT("toast.edit.messageFailed"), String(e));
+            }
+        };
+        const handleEditCommitAuthor = async () => {
+            const repo = requireRepo();
+            if (!repo) return;
+            const value = await promptDialog({
+                title: "Edit Commit Author",
+                message:
+                    "Author of the commit selected in History (or HEAD): Name <email>",
+                input: { placeholder: "Ada Lovelace <ada@example.com>" },
+            });
+            if (!value) return;
+            const m = value.match(/^([^<]+)<([^>]+)>\s*$/);
+            if (!m) {
+                toast.error(
+                    i18nT("toast.git.invalidFormat"),
+                    "Use: Name <email>",
+                );
+                return;
+            }
+            const target =
+                useSelectionStore.getState().selectedCommitHash || "HEAD";
+            try {
+                await api.git.editCommitAuthor(
+                    repo.path,
+                    target,
+                    m[1].trim(),
+                    m[2].trim(),
+                );
+                toast.success(
+                    `Author of ${target === "HEAD" ? "HEAD" : target.slice(0, 7)} changed to ${m[1].trim()}`,
+                );
+                useGitStore.getState().refreshStatus(repo.path);
+            } catch (e) {
+                toast.error(i18nT("toast.edit.authorFailed"), String(e));
+            }
+        };
+        const handleUndoLastCommit = async () => {
+            const repo = requireRepo();
+            if (!repo) return;
+            const ok = await confirmDialog({
+                title: "Undo Last Commit",
+                message:
+                    "Move the last commit\u2019s changes back into the Index? The commit itself will be removed (soft reset).",
+                confirmLabel: "Undo Commit",
+                danger: true,
+            });
+            if (!ok) return;
+            try {
+                // Capture the commit being undone FIRST — the toast then shows its
+                // hash chip so the user can still reference/copy it after the reset
+                // (Task 29: commit hashes must be visible in commit toasts).
+                const undoneHash = (
+                    await api.git.raw(repo.path, ["rev-parse", "HEAD"])
+                ).trim();
+                await api.git.reset(repo.path, "soft", "HEAD~1");
+                toast.successCommit(
+                    i18nT("toast.app.undoCommitSuccess"),
+                    undoneHash,
+                );
+                useGitStore.getState().refreshStatus(repo.path);
+            } catch (e) {
+                toast.error(i18nT("toast.app.undoCommitFailed"), String(e));
+            }
+        };
+        const handleStashSelection = () => {
+            window.location.hash = "#/changes";
+            // ChangesPage listens and stashes its selected files
+            setTimeout(
+                () =>
+                    window.dispatchEvent(
+                        new CustomEvent("smartgit:stash-selection"),
+                    ),
+                60,
+            );
+        };
+        const handleApplyStash = () => {
+            const repo = requireRepo();
+            if (!repo) return;
+            window.location.hash = "#/stashes";
+            toast.info(i18nT("toast.app.selectStashApply"));
+        };
+
+        const handleIgnore = async () => {
+            const repo = requireRepo();
+            const f = selectedFile();
+            if (!repo) return;
+            if (!f) {
+                warnNoFile();
+                return;
+            }
+            try {
+                await api.git.ignore(repo.path, [f]);
+                toast.success(`${f} added to .gitignore`);
+                useGitStore.getState().refreshStatus(repo.path);
+            } catch (e) {
+                toast.error("Ignore failed", String(e));
+            }
+        };
+        const handleEditIgnoreFile = async () => {
+            const repo = requireRepo();
+            if (!repo) return;
+            try {
+                await api.git.editIgnoreFile(repo.path, "local");
+                toast.success(".gitignore opened in the default editor");
+            } catch (e) {
+                toast.error("Failed to open .gitignore", String(e));
+            }
+        };
+        const handleIndexFlag = async (
+            flag: "assume-unchanged" | "skip-worktree",
+        ) => {
+            const repo = requireRepo();
+            const f = selectedFile();
+            if (!repo) return;
+            if (!f) {
+                warnNoFile();
+                return;
+            }
+            try {
+                const flags = await api.git.getIndexFlags(repo.path, f);
+                const current =
+                    flag === "assume-unchanged"
+                        ? flags.assumeUnchanged
+                        : flags.skipWorktree;
+                await api.git.setIndexFlag(repo.path, f, flag, !current);
+                toast.success(`${f}: ${flag} ${!current ? "ON" : "OFF"}`);
+                useGitStore.getState().refreshStatus(repo.path);
+            } catch (e) {
+                toast.error("Toggle failed", String(e));
+            }
+        };
+        const handleMoveRename = async () => {
+            const repo = requireRepo();
+            const f = selectedFile();
+            if (!repo) return;
+            if (!f) {
+                warnNoFile();
+                return;
+            }
+            const target = await promptDialog({
+                title: "Move or Rename",
+                message:
+                    "New path for the file (git mv — the rename is staged)",
+                input: { initialValue: f },
+            });
+            if (!target || target === f) return;
+            try {
+                await api.git.moveFile(repo.path, f, target);
+                toast.success(`${f} → ${target}`);
+                useGitStore.getState().refreshStatus(repo.path);
+            } catch (e) {
+                toast.error("Move/rename failed", String(e));
+            }
+        };
+        const handleDeleteFile = async () => {
+            const repo = requireRepo();
+            const f = selectedFile();
+            if (!repo) return;
+            if (!f) {
+                warnNoFile();
+                return;
+            }
+            const ok = await confirmDialog({
+                title: "Delete file",
+                message: `Delete "${f}" from the Working Tree AND the repository?\nThis cannot be undone.`,
+                confirmLabel: "Delete",
+                danger: true,
+            });
+            if (!ok) return;
+            try {
+                await api.git.deleteFile(repo.path, f);
+                toast.success(`${f} deleted`);
+                useGitStore.getState().refreshStatus(repo.path);
+            } catch (e) {
+                toast.error("Delete failed", String(e));
+            }
+        };
+        const handleRemoveFile = async () => {
+            const repo = requireRepo();
+            const f = selectedFile();
+            if (!repo) return;
+            if (!f) {
+                warnNoFile();
+                return;
+            }
+            try {
+                await api.git.raw(repo.path, ["rm", "--cached", "--", f]);
+                toast.success(
+                    `${f} removed from the repository (kept in Working Tree)`,
+                );
+                useGitStore.getState().refreshStatus(repo.path);
+            } catch (e) {
+                toast.error("Remove failed", String(e));
+            }
+        };
+
+        // ===== Resolve submenu ===== (resolveConflict is now a useCallback
+        // declared at the component level so it can also be passed to
+        // ChangesPage as onResolveConflictAction.)
+        const handleConflictSolver = () => {
+            const f = selectedFile();
+            if (!f) {
+                warnNoFile();
+                return;
+            }
+            setConflictFile(f);
+        };
+
+        // ===== LFS =====
+        const lfsOp = async (op: "install" | "lock" | "unlock") => {
+            const repo = requireRepo();
+            if (!repo) return;
+            try {
+                if (op === "install") {
+                    await api.git.lfsInstall(repo.path);
+                    toast.success("Git LFS installed for this repository");
+                } else {
+                    const f = selectedFile();
+                    if (!f) {
+                        warnNoFile();
+                        return;
+                    }
+                    if (op === "lock") {
+                        await api.git.lfsLock(repo.path, f);
+                        toast.success(`Locked ${f}`);
+                    } else {
+                        await api.git.lfsUnlock(repo.path, f);
+                        toast.success(`Unlocked ${f}`);
+                    }
+                }
+            } catch (e) {
+                toast.error("LFS operation failed", String(e));
+            }
+        };
+        const handleLfsTrack = () => {
+            window.location.hash = "#/lfs";
+            toast.info(i18nT("toast.app.useTrackButton"));
+        };
+
+        // ===== Remote =====
+        const handlePushTo = async () => {
+            const repo = requireRepo();
+            if (!repo) return;
+            const remote = await promptDialog({
+                title: "Push To...",
+                message: "Remote to push the current branch to",
+                input: { initialValue: "origin" },
+            });
+            if (!remote) return;
+            const branch = await api.git
+                .currentBranch(repo.path)
+                .catch(() => null);
+            try {
+                await api.git.push(
+                    repo.path,
+                    remote,
+                    branch ?? undefined,
+                    true,
+                );
+                toast.success(`Pushed ${branch ?? ""} to ${remote}`);
+                useGitStore.getState().refreshStatus(repo.path);
+            } catch (e) {
+                if (offerPushRejection(e, { repoPath: repo.path, remote })) return;
+                if (offerSslBypass(e, { repoPath: repo.path, retry: () => handlePushTo() })) return;
+                if (offerAuthBypass(e, { repoPath: repo.path, remoteName: remote, retry: () => handlePushTo() })) return;
+                toast.error("Push failed", String(e));
+            }
+        };
+        const handlePullOptions = () => {
+            const repo = requireRepo();
+            if (!repo) return;
+            window.location.hash = "#/branches";
+            toast.info(
+                "Right-click the branch → Pull... for options (merge/rebase/ff-only)",
+            );
+        };
+        const handleFetchAll = async () => {
+            const repo = requireRepo();
+            if (!repo) return;
+            try {
+                await api.git.fetchAll(repo.path);
+                toast.success("Fetched all remotes");
+                useGitStore.getState().refreshStatus(repo.path);
+                window.dispatchEvent(
+                    new CustomEvent("smartgit:history-refresh"),
+                );
+            } catch (e) {
+                if (offerSslBypass(e, { repoPath: repo.path, retry: () => handleFetchAll() })) return;
+                if (offerAuthBypass(e, { repoPath: repo.path, retry: () => handleFetchAll() })) return;
+                toast.error("Fetch all failed", String(e));
+            }
+        };
+        const handleFetchMore = () => {
+            window.location.hash = "#/branches";
+            toast.info(
+                "Right-click a remote → Fetch More... (or Set Depth... for shallow clones)",
+            );
+        };
+
+        // ===== Query / Tools =====
+        const handleVerifyDatabase = async () => {
+            const repo = requireRepo();
+            if (!repo) return;
+            try {
+                const report = await api.git.verifyDatabase(repo.path);
+                await infoBox(
+                    "Verify Database (git fsck --full)",
+                    report.trim() ||
+                        "No problems found — repository is healthy.",
+                );
+            } catch (e) {
+                toast.error("Verify failed", String(e));
+            }
+        };
+        const handleGarbageCollect = async () => {
+            const repo = requireRepo();
+            if (!repo) return;
+            try {
+                const stats = await api.git.garbageCollect(repo.path);
+                await infoBox(
+                    "Garbage Collect (git gc)",
+                    stats.trim() || "Done.",
+                );
+                useGitStore.getState().refreshStatus(repo.path);
+            } catch (e) {
+                toast.error("GC failed", String(e));
+            }
+        };
+        const handleOpenTerminal = async () => {
+            const repo = requireRepo();
+            if (!repo) return;
+            const ok = await api.fs.openTerminal(repo.path);
+            if (!ok) toast.error("Could not open a terminal");
+        };
+        const handleOpenInVscode = async () => {
+            const repo = requireRepo();
+            if (!repo) return;
+            try {
+                const res = await api.vscode.open(repo.path);
+                if (res.ok) toast.success(i18nT("toast.vscode.opened"));
+                else toast.error(i18nT("toast.vscode.openFailed"));
+            } catch (e) {
+                toast.error(i18nT("toast.vscode.openFailed"), String(e));
+            }
+        };
+        const handleFormatPatch = async () => {
+            const repo = requireRepo();
+            if (!repo) return;
+            const commit = useSelectionStore.getState().selectedCommitHash;
+            const outDir = await promptDialog({
+                title: "Format Patch",
+                message: "Output directory for the .patch file(s)",
+                input: {
+                    initialValue: `${repo.path}/patches`,
+                    hint: "Writes the selected commit, or HEAD when nothing is selected",
+                },
+            });
+            if (!outDir) return;
+            try {
+                const files = await api.git.formatPatch(repo.path, {
+                    outputDir: outDir,
+                    commit: commit || "HEAD",
+                });
+                await infoBox("Format Patch", `Written:\n${files.join("\n")}`);
+            } catch (e) {
+                toast.error("Format patch failed", String(e));
+            }
+        };
+
+        // ===== Git-Flow (dialog-driven; flow type preset through initialFlow) =====
+        const gitFlow = (flow?: string) => {
+            if (flow === "feature" || flow === "release" || flow === "hotfix")
+                setGitFlowType(flow);
+            else setGitFlowType(undefined);
+            setShowGitFlow(true);
+        };
+
+        const handleAbortSequence = async () => {
+            const repo = requireRepo();
+            if (!repo) return;
+            const st = useGitStore.getState().status;
+            try {
+                if (st?.isRebasing)
+                    await api.git.rebase(repo.path, "HEAD", { abort: true });
+                else if (st?.isCherryPicking)
+                    await api.git.cherryPickAbort(repo.path);
+                else if (st?.isReverting) await api.git.revertAbort(repo.path);
+                else if (st?.isMerging) await api.git.abortMerge(repo.path);
+                else {
+                    toast.info("Nothing to abort");
+                    return;
+                }
+                toast.success("Operation aborted — repository restored");
+                useGitStore.getState().refreshStatus(repo.path);
+            } catch (e) {
+                toast.error("Abort failed", String(e));
+            }
+        };
+        const handleContinueSequence = async () => {
+            const repo = requireRepo();
+            if (!repo) return;
+            const st = useGitStore.getState().status;
+            try {
+                if (st?.isRebasing)
+                    await api.git.rebase(repo.path, "HEAD", { continue: true });
+                else if (st?.isCherryPicking)
+                    await api.git.cherryPickContinue(repo.path);
+                else if (st?.isReverting)
+                    await api.git.revertContinue(repo.path);
+                else if (st?.isMerging) await api.git.continueMerge(repo.path);
+                else {
+                    toast.info("Nothing to continue");
+                    return;
+                }
+                toast.success("Operation continued");
+                useGitStore.getState().refreshStatus(repo.path);
+            } catch (e) {
+                toast.error("Continue failed", String(e));
+            }
+        };
+        // Skip the current commit in a cherry-pick / revert / rebase sequence.
+        // Used when a commit produces an empty result (changes already applied).
+        const handleSkipSequence = async () => {
+            const repo = requireRepo();
+            if (!repo) return;
+            const st = useGitStore.getState().status;
+            try {
+                if (st?.isRebasing)
+                    await api.git.rebase(repo.path, "HEAD", { skip: true });
+                else if (st?.isCherryPicking)
+                    await api.git.cherryPickSkip(repo.path);
+                else if (st?.isReverting) await api.git.revertSkip(repo.path);
+                else {
+                    toast.info("Nothing to skip (merge has no skip)");
+                    return;
+                }
+                toast.info(
+                    "Commit skipped — sequence continues with the next one",
+                );
+                useGitStore.getState().refreshStatus(repo.path);
+            } catch (e) {
+                toast.error("Skip failed", String(e));
+            }
+        };
+
+        const handleWindowStyle = (style: unknown) => {
+            if (
+                style === "standard" ||
+                style === "log" ||
+                style === "working-tree"
+            ) {
+                setWindowStyle(style);
+                toast.info(`Window style: ${style}`);
+            }
+        };
+        const handleResetPerspective = async () => {
+            const repo = requireRepo();
+            if (!repo) return;
+            clearProjectPrefs(repo.path);
+            useSelectionStore.getState().clearAll();
+            toast.success(i18nT("toast.app.perspectiveReset"));
+        };
+        const handleNavigate = (path: unknown) => {
+            if (typeof path === "string" && requireRepo()) navigate(path);
+        };
+
+        // ===== Deep links (View → Go to / Copy Deep Link) — defined below as
+        // useCallbacks so the Command Palette can trigger them too =====
+        const cleanups = [
+            window.smartgit.events.on("menu:openRepository", (path) =>
+                handleOpenRepo(path as string),
+            ),
+            window.smartgit.events.on("menu:cloneRepository", handleClone),
+            window.smartgit.events.on("menu:initRepository", handleInit),
+            window.smartgit.events.on("menu:commit", handleCommit),
+            window.smartgit.events.on("menu:push", handlePush),
+            window.smartgit.events.on("menu:forcePush", handleForcePush),
+            window.smartgit.events.on("menu:pull", handlePull),
+            window.smartgit.events.on("menu:fetch", handleFetch),
+            window.smartgit.events.on("menu:toggleTheme", handleToggleTheme),
+            window.smartgit.events.on("menu:gitFlow", () => gitFlow()),
+            window.smartgit.events.on("menu:gitFlowStartFeature", () =>
+                gitFlow("feature"),
+            ),
+            window.smartgit.events.on("menu:gitFlowFinishFeature", () =>
+                gitFlow("feature"),
+            ),
+            window.smartgit.events.on("menu:gitFlowStartRelease", () =>
+                gitFlow("release"),
+            ),
+            window.smartgit.events.on("menu:gitFlowFinishRelease", () =>
+                gitFlow("release"),
+            ),
+            window.smartgit.events.on("menu:gitFlowStartHotfix", () =>
+                gitFlow("hotfix"),
+            ),
+            window.smartgit.events.on("menu:gitFlowFinishHotfix", () =>
+                gitFlow("hotfix"),
+            ),
+            window.smartgit.events.on("menu:gitFlowIntegrateDevelop", () =>
+                gitFlow("feature"),
+            ),
+            window.smartgit.events.on("menu:interactiveRebase", handleIRebase),
+            window.smartgit.events.on(
+                "menu:showShortcuts",
+                handleShowShortcuts,
+            ),
+            window.smartgit.events.on(
+                "menu:commandLog",
+                handleToggleCommandLog,
+            ),
+            // Branch menu
+            window.smartgit.events.on("menu:checkout", handleCheckout),
+            window.smartgit.events.on("menu:merge", handleMerge),
+            window.smartgit.events.on("menu:rebase", handleRebase),
+            window.smartgit.events.on("menu:cherryPick", handleCherryPick),
+            window.smartgit.events.on("menu:revert", handleRevert),
+            window.smartgit.events.on("menu:addTag", handleAddTag),
+            window.smartgit.events.on("menu:setTracked", handleSetTracked),
+            window.smartgit.events.on("menu:stopTracking", handleStopTracking),
+            window.smartgit.events.on("menu:bisectStart", () =>
+                bisect("start"),
+            ),
+            window.smartgit.events.on("menu:bisectBad", () => bisect("bad")),
+            window.smartgit.events.on("menu:bisectGood", () => bisect("good")),
+            window.smartgit.events.on("menu:bisectSkip", () => bisect("skip")),
+            window.smartgit.events.on("menu:bisectReset", () =>
+                bisect("reset"),
+            ),
+            window.smartgit.events.on("menu:bisectLog", () => bisect("log")),
+            window.smartgit.events.on(
+                "menu:abortSequence",
+                handleAbortSequence,
+            ),
+            window.smartgit.events.on(
+                "menu:continueSequence",
+                handleContinueSequence,
+            ),
+            window.smartgit.events.on("menu:skipSequence", handleSkipSequence),
+            // Local menu
+            window.smartgit.events.on("menu:stage", handleStage),
+            window.smartgit.events.on("menu:unstage", handleUnstage),
+            window.smartgit.events.on("menu:stageAll", handleStageAll),
+            window.smartgit.events.on("menu:discard", handleDiscard),
+            window.smartgit.events.on(
+                "menu:editLastCommitMessage",
+                handleEditLastCommitMessage,
+            ),
+            window.smartgit.events.on(
+                "menu:editCommitAuthor",
+                handleEditCommitAuthor,
+            ),
+            window.smartgit.events.on(
+                "menu:undoLastCommit",
+                handleUndoLastCommit,
+            ),
+            window.smartgit.events.on("menu:stash", handleStashSelection),
+            window.smartgit.events.on(
+                "menu:stashSelection",
+                handleStashSelection,
+            ),
+            window.smartgit.events.on("menu:applyStash", handleApplyStash),
+            window.smartgit.events.on("menu:indexEditor", () => {
+                setShowIndexEditor(true);
+                setIndexEditorFile(selectedFile());
+            }),
+            window.smartgit.events.on("menu:ignore", handleIgnore),
+            window.smartgit.events.on(
+                "menu:editIgnoreFile",
+                handleEditIgnoreFile,
+            ),
+            window.smartgit.events.on("menu:assumeUnchanged", () =>
+                handleIndexFlag("assume-unchanged"),
+            ),
+            window.smartgit.events.on("menu:skipWorktree", () =>
+                handleIndexFlag("skip-worktree"),
+            ),
+            window.smartgit.events.on("menu:moveRename", handleMoveRename),
+            window.smartgit.events.on("menu:deleteFile", handleDeleteFile),
+            window.smartgit.events.on("menu:removeFile", handleRemoveFile),
+            window.smartgit.events.on(
+                "menu:conflictSolver",
+                handleConflictSolver,
+            ),
+            window.smartgit.events.on("menu:resolveOurs", () =>
+                resolveConflict("ours"),
+            ),
+            window.smartgit.events.on("menu:resolveTheirs", () =>
+                resolveConflict("theirs"),
+            ),
+            window.smartgit.events.on("menu:markResolved", () =>
+                resolveConflict("resolved"),
+            ),
+            window.smartgit.events.on("menu:lfsInstall", () =>
+                lfsOp("install"),
+            ),
+            window.smartgit.events.on("menu:lfsTrack", handleLfsTrack),
+            window.smartgit.events.on("menu:lfsLock", () => lfsOp("lock")),
+            window.smartgit.events.on("menu:lfsUnlock", () => lfsOp("unlock")),
+            // Remote menu — the Remotes TOOL is gone (merged into Branches):
+            // remote management opens the Branches page, the natural home for
+            // remotes now; remoteAdd additionally pops the Add-Remote dialog
+            // via a window event BranchesPage listens for.
+            window.smartgit.events.on("menu:pushTo", handlePushTo),
+            window.smartgit.events.on("menu:pullOptions", handlePullOptions),
+            window.smartgit.events.on("menu:fetchAll", handleFetchAll),
+            window.smartgit.events.on("menu:fetchMore", handleFetchMore),
+            window.smartgit.events.on("menu:remoteAdd", () => {
+                handleNavigate("/branches");
+                window.dispatchEvent(
+                    new CustomEvent("prismgit:branches-add-remote"),
+                );
+            }),
+            window.smartgit.events.on("menu:remoteRename", () =>
+                handleNavigate("/branches"),
+            ),
+            window.smartgit.events.on("menu:remoteDelete", () =>
+                handleNavigate("/branches"),
+            ),
+            window.smartgit.events.on("menu:remoteProperties", () =>
+                handleNavigate("/branches"),
+            ),
+            window.smartgit.events.on("menu:setDepth", handleFetchMore),
+            // Repository menu
+            window.smartgit.events.on("menu:repoSettings", () =>
+                setShowRepoSettings(true),
+            ),
+            window.smartgit.events.on("menu:editGitConfig", () =>
+                handleNavigate("/settings"),
+            ),
+            window.smartgit.events.on("menu:openTerminal", handleOpenTerminal),
+            window.smartgit.events.on("menu:openInVscode", handleOpenInVscode),
+            window.smartgit.events.on("menu:preferences", () =>
+                handleNavigate("/settings"),
+            ),
+            // Query / Tools
+            window.smartgit.events.on("menu:navigate", handleNavigate),
+            window.smartgit.events.on("menu:goDeepLink", () =>
+                handleGoDeepLink(),
+            ),
+            window.smartgit.events.on("menu:copyDeepLink", handleCopyDeepLink),
+            window.smartgit.events.on("menu:findObject", handleFind),
+            window.smartgit.events.on(
+                "menu:verifyDatabase",
+                handleVerifyDatabase,
+            ),
+            window.smartgit.events.on(
+                "menu:garbageCollect",
+                handleGarbageCollect,
+            ),
+            window.smartgit.events.on("menu:applyPatch", () =>
+                setShowApplyPatch(true),
+            ),
+            window.smartgit.events.on("menu:formatPatch", handleFormatPatch),
+            // Window menu
+            window.smartgit.events.on("menu:windowStyle", handleWindowStyle),
+            window.smartgit.events.on(
+                "menu:resetPerspective",
+                handleResetPerspective,
+            ),
+        ];
+        return () => cleanups.forEach((fn) => fn && fn());
+    }, [toast]);
+
+    // Global keyboard shortcuts
+    useEffect(() => {
+        const handleKey = (e: KeyboardEvent) => {
+            const target = e.target as HTMLElement;
+            const isInInput =
+                target.tagName === "INPUT" ||
+                target.tagName === "TEXTAREA" ||
+                target.isContentEditable;
+            // Back/Forward — Alt+Left / Alt+Right (the browser convention; works
+            // from inputs too, like in a real browser).
+            if (
+                e.altKey &&
+                !e.ctrlKey &&
+                !e.metaKey &&
+                (e.key === "ArrowLeft" || e.key === "ArrowRight")
+            ) {
+                e.preventDefault();
+                if (e.key === "ArrowLeft") {
+                    const t = useNavHistoryStore.getState().back();
+                    if (t != null) navigate(t);
+                } else {
+                    const t = useNavHistoryStore.getState().forward();
+                    if (t != null) navigate(t);
+                }
+                return;
+            }
+            // Settings redesign — Zoom shortcuts (Ctrl+= / Ctrl+- / Ctrl+0).
+            // Applies even from inputs (matches VS Code behavior).
+            if (
+                (e.ctrlKey || e.metaKey) &&
+                !e.shiftKey &&
+                !e.altKey &&
+                (e.key === "=" || e.key === "+")
+            ) {
+                e.preventDefault();
+                const cur =
+                    useSettingsStore.getState().settings.zoomLevel ?? 100;
+                void useSettingsStore
+                    .getState()
+                    .setSetting("zoomLevel", Math.min(240, cur + 10));
+                return;
+            }
+            if (
+                (e.ctrlKey || e.metaKey) &&
+                !e.shiftKey &&
+                !e.altKey &&
+                e.key === "-"
+            ) {
+                e.preventDefault();
+                const cur =
+                    useSettingsStore.getState().settings.zoomLevel ?? 100;
+                void useSettingsStore
+                    .getState()
+                    .setSetting("zoomLevel", Math.max(60, cur - 10));
+                return;
+            }
+            if (
+                (e.ctrlKey || e.metaKey) &&
+                !e.shiftKey &&
+                !e.altKey &&
+                e.key === "0"
+            ) {
+                e.preventDefault();
+                void useSettingsStore.getState().setSetting("zoomLevel", 100);
+                return;
+            }
+            // Command palette — works even from inputs (standard UX), toggles
+            if (
+                (e.ctrlKey || e.metaKey) &&
+                !e.shiftKey &&
+                (e.key === "k" || e.key === "p")
+            ) {
+                e.preventDefault();
+                setShowPalette((v) => !v);
+                return;
+            }
+            // Global Search — Ctrl+Shift+F. Distinct from the per-page Find
+            // (Ctrl+F) which is for hash lookup only. Global Search searches
+            // across commits/branches/tags/files/stashes/repos.
+            if (
+                (e.ctrlKey || e.metaKey) &&
+                e.shiftKey &&
+                (e.key === "f" || e.key === "F")
+            ) {
+                e.preventDefault();
+                setShowGlobalSearch((v) => !v);
+                return;
+            }
+            // LAR-3 — AI Assistant toggle (Ctrl+Shift+A).
+            if (
+                (e.ctrlKey || e.metaKey) &&
+                e.shiftKey &&
+                (e.key === "a" || e.key === "A")
+            ) {
+                e.preventDefault();
+                setShowAiAssistant((v) => !v);
+                return;
+            }
+            if ((e.ctrlKey || e.metaKey) && e.key === "f" && !isInInput) {
+                e.preventDefault();
+                setShowFind(true);
+            }
+            // F5 / Ctrl+R — refresh git status (never reload the window)
+            if (
+                e.key === "F5" ||
+                ((e.ctrlKey || e.metaKey) &&
+                    !e.shiftKey &&
+                    (e.key === "r" || e.key === "R"))
+            ) {
+                e.preventDefault();
+                const repo = useRepositoryStore.getState().currentRepo;
+                if (repo) useGitStore.getState().refreshStatus(repo.path);
+                return;
+            }
+            // '?' — plain question mark opens shortcuts help; Ctrl+?/Ctrl+/ (below)
+            // handles the toggle variant
+            if (e.key === "?" && !e.ctrlKey && !e.metaKey && !isInInput) {
+                e.preventDefault();
+                setShowShortcuts(true);
+                return;
+            }
+            if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "T") {
+                e.preventDefault();
+                useSettingsStore.getState().toggleTheme();
+            }
+            if (
+                (e.ctrlKey || e.metaKey) &&
+                e.shiftKey &&
+                e.key === "G" &&
+                !isInInput
+            ) {
+                e.preventDefault();
+                setShowGitFlow(true);
+            }
+            if (
+                (e.ctrlKey || e.metaKey) &&
+                e.shiftKey &&
+                e.key === "R" &&
+                !isInInput
+            ) {
+                e.preventDefault();
+                setShowIRebase(true);
+            }
+            // Keyboard shortcuts overlay: Ctrl+? (Shift+/ produces ?) or Ctrl+/
+            // Idempotent OPEN (not toggle): the native menu accelerator
+            // (Keyboard Shortcuts..., Ctrl+/) also opens the dialog — a toggle here
+            // would open+close it in the same keystroke. (Bug class: renderer
+            // keydown duplicated native menu accelerators → double execution.)
+            if ((e.ctrlKey || e.metaKey) && (e.key === "?" || e.key === "/")) {
+                e.preventDefault();
+                setShowShortcuts(true);
+            }
+            // Alt+, = Settings (kept as-is — not a tool slot)
+            if (e.altKey && !isInInput && e.key === ",") {
+                e.preventDefault();
+                navigate("/settings");
+                return;
+            }
+            // Tool hotkeys — Ctrl+N / Alt+N over the EFFECTIVE map (defaults +
+            // user overrides from Settings → Interface → Sidebar & Navigation).
+            // Every sidebar tool has exactly one combo: Ctrl+1..9 daily drivers,
+            // Alt+1..8 the rest (the old Alt+1..6 duplicated Ctrl+1..6 — wasted).
+            // Work FROM INPUTS too (browser-like: Ctrl+number never types a digit
+            // — the e2e proved the guard dead-ended navigation after landing on a
+            // page that auto-focuses its filter, e.g. Search).
+            // (read the stores from getState — a closure here would be stale since
+            // this effect has stable deps and runs once)
+            if (
+                !e.shiftKey &&
+                e.key >= "1" &&
+                e.key <= "9" &&
+                (e.ctrlKey || e.metaKey) !== e.altKey // exactly one of ctrl/alt
+            ) {
+                const combo = e.altKey ? `Alt+${e.key}` : `Ctrl+${e.key}`;
+                const overrides = (
+                    useSettingsStore.getState().settings as {
+                        navHotkeys?: Record<string, string>;
+                    }
+                ).navHotkeys;
+                const hotkeys = effectiveNavHotkeys(overrides);
+                const path = Object.entries(hotkeys).find(
+                    ([, sc]) => sc === combo,
+                )?.[0];
+                if (path && useRepositoryStore.getState().currentRepo) {
+                    e.preventDefault();
+                    navigate(path);
+                }
+                return;
+            }
+            // NOTE — git-operation shortcuts (Ctrl+Shift+P/L/F/A), window style
+            // (Ctrl+Shift+1/2/3), Clone (Ctrl+Shift+O) and the Output panel
+            // (Ctrl+Shift+U) are handled by the NATIVE application menu
+            // (electron/menu.ts accelerators → menu:* events). Do NOT duplicate them
+            // here: on Windows/Linux Electron does NOT consume the keydown when a
+            // menu accelerator fires, so both handlers ran — e.g. Fetch downloaded
+            // everything TWICE per keystroke (user-reported bug). The menu is the
+            // single owner of these shortcuts.
+        };
+        window.addEventListener("keydown", handleKey);
+        return () => window.removeEventListener("keydown", handleKey);
+    }, [navigate]);
+
+    // Shortcuts dialog can be opened from the Command Palette via this event
+    useEffect(() => {
+        const handler = () => setShowShortcuts(true);
+        window.addEventListener("prismgit:show-shortcuts", handler);
+        return () =>
+            window.removeEventListener("prismgit:show-shortcuts", handler);
+    }, []);
+
+    // Repository Settings dialog — triggered from Sidebar context menu
+    useEffect(() => {
+        const handler = () => setShowRepoSettings(true);
+        window.addEventListener("prismgit:repo-settings", handler);
+        return () =>
+            window.removeEventListener("prismgit:repo-settings", handler);
+    }, []);
+
+    // Repository info dialog — triggered from Sidebar context menu
+    useEffect(() => {
+        const handler = () => setShowRepoInfo(true);
+        window.addEventListener("prismgit:repo-info", handler);
+        return () => window.removeEventListener("prismgit:repo-info", handler);
+    }, []);
+
+    // SmartGit Manual: Command-Line Options
+    // Handle --open / --log / --blame / --investigate / --anchor-commit sent from electron/main.ts
+    useEffect(() => {
+        const cleanupOpen = window.smartgit.events.on(
+            "cli:open",
+            (data: unknown) => {
+                const { path } = data as { path: string };
+                useRepositoryStore
+                    .getState()
+                    .openRepository(path)
+                    .catch((e) => {
+                        toast.error(
+                            i18nT("toast.git.openRepoFailed"),
+                            String(e),
+                        );
+                    });
+            },
+        );
+        const cleanupLog = window.smartgit.events.on(
+            "cli:log",
+            (data: unknown) => {
+                const { path, anchorCommit } = data as {
+                    path: string;
+                    anchorCommit?: string;
+                };
+                // If path is a directory → open repo + navigate to History
+                // If path is a file → open repo + set path filter + navigate to History
+                useRepositoryStore
+                    .getState()
+                    .openRepository(path)
+                    .then(() => {
+                        if (anchorCommit)
+                            useSelectionStore
+                                .getState()
+                                .selectCommit(anchorCommit);
+                        navigate("/history");
+                    })
+                    .catch((e) => toast.error("Failed to open", String(e)));
+            },
+        );
+        const cleanupBlame = window.smartgit.events.on(
+            "cli:blame",
+            (data: unknown) => {
+                const { path, anchorCommit } = data as {
+                    path: string;
+                    anchorCommit?: string;
+                };
+                useRepositoryStore
+                    .getState()
+                    .openRepository(path)
+                    .then(() => {
+                        if (anchorCommit)
+                            useSelectionStore
+                                .getState()
+                                .selectCommit(anchorCommit);
+                        navigate("/blame");
+                    })
+                    .catch((e) => toast.error("Failed to open", String(e)));
+            },
+        );
+        const cleanupInvestigate = window.smartgit.events.on(
+            "cli:investigate",
+            (data: unknown) => {
+                const { path, anchorCommit } = data as {
+                    path: string;
+                    anchorCommit?: string;
+                };
+                useRepositoryStore
+                    .getState()
+                    .openRepository(path)
+                    .then(() => {
+                        if (anchorCommit)
+                            useSelectionStore
+                                .getState()
+                                .selectCommit(anchorCommit);
+                        navigate("/history");
+                    })
+                    .catch((e) => toast.error("Failed to open", String(e)));
+            },
+        );
+        return () => {
+            cleanupOpen();
+            cleanupLog();
+            cleanupBlame();
+            cleanupInvestigate();
+        };
+    }, [navigate, toast]);
+
+    // File watcher: start/stop when repo changes + auto-refresh on changes.
+    // Debounce strategy: leading-rate-limited + TRAILING guaranteed.
+    // Each watcher event schedules a refresh at most MIN_REFRESH_INTERVAL after
+    // the previous one; if events arrive faster, they coalesce into one trailing
+    // refresh — a change is never dropped (the old code silently discarded
+    // events inside the 2s window, so edits could stay invisible indefinitely).
+    const refreshInFlight = useRef<Promise<unknown> | null>(null);
+    const lastRefreshTime = useRef(0);
+    const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    useEffect(() => {
+        if (!currentRepo) return;
+        const repoPath = currentRepo.path;
+        api.watcher.start(repoPath);
+
+        const doRefresh = () => {
+            lastRefreshTime.current = Date.now();
+            // Background transport: the watcher fired because of external churn
+            // (IDE auto-save, build, another git client) — nobody is actively
+            // waiting for THIS refresh, so it must never compete with foreground
+            // git work: the identical status computation runs in the dedicated
+            // git worker process (v3.5), off the main event loop.
+            const p = refreshStatus(repoPath, { background: true }).catch(
+                () => {
+                    /* status errors shown elsewhere */
+                },
+            );
+            // Chain so a trailing refresh can wait for the in-flight one to settle
+            refreshInFlight.current = p.finally(() => {
+                if (refreshInFlight.current === p)
+                    refreshInFlight.current = null;
+            });
+        };
+
+        const scheduleRefresh = () => {
+            if (refreshTimer.current) clearTimeout(refreshTimer.current);
+            const elapsed = Date.now() - lastRefreshTime.current;
+            // Increased from 2000ms to 5000ms. The file watcher fires on EVERY
+            // .git/index change (every commit, every stage, every stash, every
+            // checkout). With 2s debounce, a busy repo could trigger 30+
+            // `git status` subprocess spawns per minute — and on a repo with LFS,
+            // each `git status` takes 1-5 seconds. 5s is a better balance:
+            // still responsive to user actions, but doesn't hammer git when
+            // the repo is being modified by an external tool (IDE auto-save,
+            // build system, etc.).
+            const delay = Math.max(0, 5000 - elapsed);
+            refreshTimer.current = setTimeout(() => {
+                refreshTimer.current = null;
+                if (refreshInFlight.current) {
+                    // A refresh started before the latest change — wait for it, then refresh again
+                    void Promise.resolve(refreshInFlight.current).then(() => {
+                        if (!refreshTimer.current) doRefresh();
+                    });
+                } else {
+                    doRefresh();
+                }
+            }, delay);
+        };
+
+        const cleanup = api.watcher.onChanged(() => scheduleRefresh());
+        return () => {
+            if (refreshTimer.current) {
+                clearTimeout(refreshTimer.current);
+                refreshTimer.current = null;
+            }
+            api.watcher.stop(repoPath);
+            cleanup();
+        };
+    }, [currentRepo, refreshStatus]);
+
+    // Navigate when window style changes — only when user explicitly switches
+    const prevStyle = useRef(windowStyle);
+    useEffect(() => {
+        if (!currentRepo) return;
+        // Only navigate if style actually changed (not on first render)
+        if (prevStyle.current !== windowStyle) {
+            prevStyle.current = windowStyle;
+            // Per user request: Changes should always be the default landing page,
+            // even when window style is 'log' (which only affects visual chrome).
+            // Users who want History can navigate there manually.
+            navigate("/changes");
+        }
+    }, [windowStyle, currentRepo, navigate]);
+
+    // Refresh status when repository changes (only once, not on every render)
+    useEffect(() => {
+        if (currentRepo) {
+            // ── Clear the previous repo's git status FIRST ────────────────────
+            // Without this, the UI keeps the OLD `status.current` (HEAD branch
+            // name from the previous repo) until the new `git status` resolves.
+            // On large/LFS repos that can take 1-5s — during which the Toolbar
+            // / Sidebar / History page show the previous repo's branch name
+            // attached to the new repo. The user reported this as "после
+            // переключения репозитория теряется информация о текущей HEAD ветке".
+            // Clearing status to null makes the UI show an empty/loading state
+            // until the new status arrives, instead of a stale branch name.
+            useGitStore.getState().clearStatus();
+
+            // Don't await — fire-and-forget. The UI shows immediately with the
+            // previous status (or empty), then updates when the status resolves.
+            // Previously this was also fire-and-forget but the loadMetadata() call
+            // in openRepository was BLOCKING the repo from appearing in the UI.
+            //
+            // v3.6 (repo-switch freeze): the switch refresh now runs in the
+            // DEDICATED git worker process (background transport) instead of the
+            // main loop. On big repos the foreground `git status` + its porcelain
+            // parse compete with every other repo-open spawn (numstat, ls-files -v,
+            // dir tree, metadata stats) on the MAIN event loop — measured as
+            // 40-60ms IPC latency spikes per switch even on a 2.5k-file repo,
+            // scaling into seconds on real ones. The worker computes the identical
+            // runStatusJob result off the main loop; the renderer's
+            // refreshInFlight map still dedupes concurrent refreshes, and the
+            // worker-failure fallback path lands in the same in-process run.
+            void refreshStatus(currentRepo.path, { background: true });
+            setDismissRebase(false);
+            const pendingPage = takePendingDeepLinkPage();
+            navigate(pendingPage || "/changes");
+            // LFS health check — deferred to next tick so it doesn't block the
+            // initial render. The check spawns git subprocesses that can take
+            // 3-5s on repos with LFS configured.
+            setTimeout(() => {
+                void checkLfsHealth(currentRepo.path);
+            }, 100);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [currentRepo?.path]);
+
+    const handleFind = useCallback(() => setShowFind(true), []);
+
+    /**
+     * LFS health check — runs when a repository is opened.
+     *
+     * Detects: .gitattributes has LFS filter rules + git-lfs is NOT installed.
+     * If so, shows a dialog offering 3 choices:
+     *   1. "Open git-lfs.com" — opens the download page in the browser
+     *   2. "Remove LFS filter" — removes all filter=lfs/diff=lfs/merge=lfs
+     *      lines from .gitattributes (user should commit the change)
+     *   3. "Skip" — continues silently (GIT_LFS_SKIP_SMUDGE=1 is already set
+     *      globally, so LFS-tracked files show pointer content)
+     *
+     * The check runs ONCE per repo open — not on every status refresh.
+     */
+    const checkLfsHealth = useCallback(
+        async (repoPath: string) => {
+            try {
+                const [configured, installed] = await Promise.all([
+                    api.git.detectLfsConfigured(repoPath),
+                    api.git.isLfsInstalled(repoPath),
+                ]);
+                if (!configured || installed) return; // no problem
+                // LFS configured but not installed → ask the user
+                const action = await confirmDialog({
+                    title: i18nT("lfs.healthCheckTitle"),
+                    message: i18nT("lfs.healthCheckMessage"),
+                    confirmLabel: i18nT("lfs.removeFilter"),
+                    cancelLabel: i18nT("lfs.skip"),
+                });
+                if (action) {
+                    const removed = await api.git.removeLfsFilter(repoPath);
+                    if (removed > 0) {
+                        toast.success(
+                            i18nT("lfs.filterRemoved", { count: removed }),
+                        );
+                        await refreshStatus(repoPath);
+                    } else {
+                        toast.info(i18nT("lfs.noFilterFound"));
+                    }
+                } else {
+                    // User chose "Skip" — open the download page anyway as a hint.
+                    toast.info(
+                        i18nT("lfs.skipHint"),
+                        i18nT("toast.git.lfsNotInstalled"),
+                    );
+                }
+            } catch {
+                // LFS check failed — not critical, continue silently.
+                // GIT_LFS_SKIP_SMUDGE=1 is already set, so the app won't crash.
+            }
+        },
+        [toast, refreshStatus],
+    );
+
+    // ===== Deep links (View → Go to / Copy Deep Link, Command Palette) =====
+    const handleCopyDeepLink = useCallback(() => {
+        if (!useRepositoryStore.getState().currentRepo) return;
+        const link = buildCurrentDeepLink(currentHashPath());
+        const href = `${window.location.href.split("#")[0]}#${link}`;
+        navigator.clipboard
+            .writeText(href)
+            .then(() => toast.success("Deep link copied", link))
+            .catch((e) => toast.error("Copy failed", String(e)));
+    }, [toast]);
+    const handleGoDeepLink = useCallback(async () => {
+        if (!useRepositoryStore.getState().currentRepo) return;
+        const value = await promptDialog({
+            title: "Go to Deep Link",
+            message:
+                "Enter a deep-link path — page plus selection params, e.g. " +
+                "/history?file=src/App.tsx, /blame?file=README.md, /history?branch=main&author=Ivan",
+            input: {
+                initialValue: buildCurrentDeepLink(currentHashPath()),
+                placeholder: "/history?file=src/App.tsx",
+            },
+            confirmLabel: "Go",
+        });
+        if (!value) return;
+        const path = value.trim().replace(/^#+/, "");
+        if (!isValidDeepLinkPath(path)) {
+            toast.error(
+                "Invalid deep link",
+                "Expected a path like /history?file=src/App.tsx",
+            );
+            return;
+        }
+        navigate(path);
+    }, [navigate, toast]);
+
+    // Default route is always Changes (per user request — window style only affects chrome)
+    const defaultRoute = "/changes";
+
+    if (!currentRepo) {
+        return (
+            <GlobalErrorBoundary onError={handleBoundaryError}>
+                <div className="flex flex-col h-screen">
+                    <Toolbar
+                        onFind={handleFind}
+                        onGlobalSearch={() => setShowGlobalSearch(true)}
+                        onGitFlow={() => setShowGitFlow(true)}
+                        onInteractiveRebase={() => setShowIRebase(true)}
+                        onRepoInfo={() => setShowRepoInfo(true)}
+                        onShowShortcuts={() => setShowShortcuts(true)}
+                        onShowClone={() => setShowClone(true)}
+                        onShowInit={() => setShowInit(true)}
+                        onToggleAiAssistant={() =>
+                            setShowAiAssistant((v) => !v)
+                        }
+                    />
+                    <div className="flex flex-1 overflow-hidden">
+                        <Sidebar />
+                        <div className="flex-1 overflow-hidden flex flex-col">
+                            <Suspense fallback={<PageLoader />}>
+                                <Routes>
+                                    <Route
+                                        path="/settings"
+                                        element={<SettingsPage />}
+                                    />
+                                    <Route
+                                        path="/ai-chat"
+                                        element={<AiChatPage />}
+                                    />
+                                    <Route
+                                        path="*"
+                                        element={
+                                            <WelcomeScreen
+                                                onClone={() =>
+                                                    setShowClone(true)
+                                                }
+                                                onInit={() => setShowInit(true)}
+                                            />
+                                        }
+                                    />
+                                </Routes>
+                            </Suspense>
+                        </div>
+                    </div>
+                    <StatusBar
+                        showCommandLog={showCommandLog}
+                        onToggleCommandLog={toggleCommandLog}
+                    />
+                    <ToastContainer />
+                    <ConfirmDialogHost />
+                    <DragDropHandler />
+                    <DeepLinkHandler />
+                    <Suspense fallback={null}>
+                        <CloneModal
+                            open={showClone}
+                            onClose={() => setShowClone(false)}
+                        />
+                    </Suspense>
+                    <Suspense fallback={null}>
+                        <InitModal
+                            open={showInit}
+                            onClose={() => setShowInit(false)}
+                        />
+                    </Suspense>
+                    <Suspense fallback={null}>
+                        <FindObjectDialog
+                            open={showFind}
+                            onClose={() => setShowFind(false)}
+                        />
+                    </Suspense>
+                    <Suspense fallback={null}>
+                        <CommandPalette
+                            open={showPalette}
+                            onClose={() => setShowPalette(false)}
+                            triggers={{
+                                onFind: () => setShowFind(true),
+                                onGitFlow: () => setShowGitFlow(true),
+                                onInteractiveRebase: () => setShowIRebase(true),
+                                onRepoInfo: () => setShowRepoInfo(true),
+                                onApplyPatch: () => setShowApplyPatch(true),
+                                onClone: () => setShowClone(true),
+                                onInit: () => setShowInit(true),
+                                onGoDeepLink: handleGoDeepLink,
+                                onCopyDeepLink: handleCopyDeepLink,
+                            }}
+                        />
+                    </Suspense>
+                    <Suspense fallback={null}>
+                        <KeyboardShortcutsOverlay
+                            open={showShortcuts}
+                            onClose={() => setShowShortcuts(false)}
+                        />
+                    </Suspense>
+                    <Suspense fallback={null}>
+                        <GlobalSearch
+                            open={showGlobalSearch}
+                            onClose={() => setShowGlobalSearch(false)}
+                        />
+                    </Suspense>
+                    <Suspense fallback={null}>
+                        {showAiAssistant && (
+                            <AiAssistant
+                                onClose={() => setShowAiAssistant(false)}
+                            />
+                        )}
+                    </Suspense>
+                    {/* Global error report dialog — also shown on the welcome screen. */}
+                    <ErrorReportDialog
+                        error={errorState}
+                        onClose={handleCloseErrorDialog}
+                    />
+                </div>
+            </GlobalErrorBoundary>
+        );
+    }
+
+    return (
+        <GlobalErrorBoundary onError={handleBoundaryError}>
+            <div className="flex flex-col h-screen">
+                <Toolbar
+                    onFind={handleFind}
+                    onGlobalSearch={() => setShowGlobalSearch(true)}
+                    onGitFlow={() => setShowGitFlow(true)}
+                    onInteractiveRebase={() => setShowIRebase(true)}
+                    onRepoInfo={() => setShowRepoInfo(true)}
+                    onShowShortcuts={() => setShowShortcuts(true)}
+                    onShowClone={() => setShowClone(true)}
+                    onShowInit={() => setShowInit(true)}
+                    onToggleCommandLog={toggleCommandLog}
+                    onToggleAiAssistant={() => setShowAiAssistant((v) => !v)}
+                />
+                <GitToolbar
+                    onGitFlow={() => setShowGitFlow(true)}
+                    onInteractiveRebase={() => setShowIRebase(true)}
+                />
+                <div className="flex flex-1 overflow-hidden no-drag">
+                    {/* Sidebar always visible — navigation must be accessible */}
+                    <Sidebar />
+                    <main className="flex-1 overflow-hidden flex flex-col">
+                        <HelpBanner />
+                        <Suspense fallback={<PageLoader />}>
+                            <Routes>
+                                <Route
+                                    path="/"
+                                    element={
+                                        <Navigate to={defaultRoute} replace />
+                                    }
+                                />
+                                <Route
+                                    path="/changes"
+                                    element={
+                                        <ChangesPage
+                                            onResolveConflict={(f) =>
+                                                setConflictFile(f)
+                                            }
+                                            onResolveConflictAction={(
+                                                f,
+                                                mode,
+                                            ) => resolveConflict(mode, f)}
+                                        />
+                                    }
+                                />
+                                <Route
+                                    path="/history"
+                                    element={<HistoryPage />}
+                                />
+                                <Route path="/diff" element={<DiffPage />} />
+                                {/* Annotate: file-history investigation (SmartGit "Log of file") */}
+                                <Route
+                                    path="/annotate"
+                                    element={<AnnotatePage />}
+                                />
+                                {/* Investigate renamed to Search */}
+                                <Route
+                                    path="/investigate"
+                                    element={<Navigate to="/search" replace />}
+                                />
+                                <Route
+                                    path="/search"
+                                    element={<InvestigatePage />}
+                                />
+                                <Route path="/blame" element={<BlamePage />} />
+                                {/* Journal: reflog-based journal of the current branch activity */}
+                                <Route
+                                    path="/journal"
+                                    element={<JournalPage />}
+                                />
+                                <Route
+                                    path="/gitflow"
+                                    element={<GitFlowPage />}
+                                />
+                                <Route
+                                    path="/pulls"
+                                    element={<PullRequestsPage />}
+                                />
+                                <Route
+                                    path="/reviews"
+                                    element={<ReviewsPage />}
+                                />
+                                <Route path="/lfs" element={<LfsPage />} />
+                                <Route
+                                    path="/branches"
+                                    element={<BranchesPage />}
+                                />
+                                <Route
+                                    path="/stashes"
+                                    element={<StashesPage />}
+                                />
+                                <Route path="/tags" element={<TagsPage />} />
+                                <Route
+                                    path="/submodules"
+                                    element={<SubmodulesPage />}
+                                />
+                                <Route
+                                    path="/reflog"
+                                    element={<ReflogPage />}
+                                />
+                                <Route
+                                    path="/recyclable"
+                                    element={<RecyclablePage />}
+                                />
+                                <Route
+                                    path="/bisect"
+                                    element={<BisectPage />}
+                                />
+                                <Route
+                                    path="/settings"
+                                    element={<SettingsPage />}
+                                />
+                                <Route
+                                    path="/ai-chat"
+                                    element={<AiChatPage />}
+                                />
+                            </Routes>
+                        </Suspense>
+                    </main>
+                </div>
+                {showCommandLog && (
+                    <>
+                        <ResizableSplitter
+                            direction="vertical"
+                            onResize={(d) =>
+                                setCommandLogHeight((h) =>
+                                    Math.max(100, Math.min(600, h - d)),
+                                )
+                            }
+                        />
+                        <div
+                            style={{ height: commandLogHeight, flexShrink: 0 }}
+                        >
+                            <Suspense fallback={null}>
+                                <CommandLogPanel
+                                    onClose={() => {
+                                        setCommandLogOpen(false);
+                                        setCommandLogErrorsOnly(false);
+                                        // QW-5 — record the manual-close timestamp so the next
+                                        // error within 30s does NOT auto-reopen the panel.
+                                        useCommandLogStore
+                                            .getState()
+                                            .markManualClose();
+                                    }}
+                                    initialErrorsOnly={commandLogErrorsOnly}
+                                />
+                            </Suspense>
+                        </div>
+                    </>
+                )}
+                <StatusBar
+                    showCommandLog={showCommandLog}
+                    onToggleCommandLog={toggleCommandLog}
+                />
+                <ToastContainer />
+                <ConfirmDialogHost />
+                <Suspense fallback={null}>
+                    <ErrorDialogHost />
+                </Suspense>
+                <DragDropHandler />
+                <DeepLinkHandler />
+                <Suspense fallback={null}>
+                    <CloneModal
+                        open={showClone}
+                        onClose={() => setShowClone(false)}
+                    />
+                </Suspense>
+                <Suspense fallback={null}>
+                    <InitModal
+                        open={showInit}
+                        onClose={() => setShowInit(false)}
+                    />
+                </Suspense>
+                <Suspense fallback={null}>
+                    <FindObjectDialog
+                        open={showFind}
+                        onClose={() => setShowFind(false)}
+                    />
+                </Suspense>
+                <Suspense fallback={null}>
+                    <GitFlowDialog
+                        open={showGitFlow}
+                        onClose={() => {
+                            setShowGitFlow(false);
+                            setGitFlowType(undefined);
+                        }}
+                        initialFlow={gitFlowType}
+                    />
+                    <InteractiveRebaseDialog
+                        open={showIRebase}
+                        onClose={() => setShowIRebase(false)}
+                    />
+                    <RepoInfoDialog
+                        open={showRepoInfo}
+                        onClose={() => setShowRepoInfo(false)}
+                    />
+                    <ApplyPatchModal
+                        open={showApplyPatch}
+                        onClose={() => setShowApplyPatch(false)}
+                    />
+                    <PushRejectionDialog />
+                    <SslBypassDialog />
+                    <RemoteAuthDialog />
+                </Suspense>
+                <Suspense fallback={null}>
+                    <KeyboardShortcutsOverlay
+                        open={showShortcuts}
+                        onClose={() => setShowShortcuts(false)}
+                    />
+                </Suspense>
+                <Suspense fallback={null}>
+                    {refAction && (
+                        <RefActionDialog
+                            action={refAction}
+                            onClose={() => setRefAction(null)}
+                        />
+                    )}
+                </Suspense>
+                {showIndexEditor && (
+                    <Suspense fallback={null}>
+                        <IndexEditorDialog
+                            filePath={indexEditorFile}
+                            onClose={() => setShowIndexEditor(false)}
+                        />
+                    </Suspense>
+                )}
+                {showRepoSettings && (
+                    <Suspense fallback={null}>
+                        <RepoSettingsDialog
+                            onClose={() => setShowRepoSettings(false)}
+                        />
+                    </Suspense>
+                )}
+                {/* Conflict resolution happens IN the Diff tool (ConflictMergeView),
           NOT in a modal popup. When onResolveConflict fires from ChangesPage,
           we select the file globally and navigate to #/diff. */}
-      {conflictFile && (
-        <ConflictRedirect file={conflictFile} onDone={() => setConflictFile(null)} />
-      )}
-      <Suspense fallback={null}>
-        <CommandPalette
-          open={showPalette}
-          onClose={() => setShowPalette(false)}
-          triggers={{
-            onFind: () => setShowFind(true),
-            onGitFlow: () => setShowGitFlow(true),
-            onInteractiveRebase: () => setShowIRebase(true),
-            onRepoInfo: () => setShowRepoInfo(true),
-            onApplyPatch: () => setShowApplyPatch(true),
-            onClone: () => setShowClone(true),
-            onInit: () => setShowInit(true),
-            onGoDeepLink: handleGoDeepLink,
-            onCopyDeepLink: handleCopyDeepLink,
-          }}
-        />
-      </Suspense>
-      <Suspense fallback={null}>
-        <GlobalSearch
-          open={showGlobalSearch}
-          onClose={() => setShowGlobalSearch(false)}
-        />
-      </Suspense>
-      {/* ONB-1 — first-run tour overlay (spotlight + popover) */}
-      <Suspense fallback={null}>{showTour && <TourOverlay onClose={() => setShowTour(false)} />}</Suspense>
-      {/* LAR-3 — AI Assistant chat panel (floating, bottom-right). */}
-      <Suspense fallback={null}>{showAiAssistant && <AiAssistant onClose={() => setShowAiAssistant(false)} />}</Suspense>
-    </div>
-  );
+                {conflictFile && (
+                    <ConflictRedirect
+                        file={conflictFile}
+                        onDone={() => setConflictFile(null)}
+                    />
+                )}
+                <Suspense fallback={null}>
+                    <CommandPalette
+                        open={showPalette}
+                        onClose={() => setShowPalette(false)}
+                        triggers={{
+                            onFind: () => setShowFind(true),
+                            onGitFlow: () => setShowGitFlow(true),
+                            onInteractiveRebase: () => setShowIRebase(true),
+                            onRepoInfo: () => setShowRepoInfo(true),
+                            onApplyPatch: () => setShowApplyPatch(true),
+                            onClone: () => setShowClone(true),
+                            onInit: () => setShowInit(true),
+                            onGoDeepLink: handleGoDeepLink,
+                            onCopyDeepLink: handleCopyDeepLink,
+                        }}
+                    />
+                </Suspense>
+                <Suspense fallback={null}>
+                    <GlobalSearch
+                        open={showGlobalSearch}
+                        onClose={() => setShowGlobalSearch(false)}
+                    />
+                </Suspense>
+                {/* ONB-1 — first-run tour overlay (spotlight + popover) */}
+                <Suspense fallback={null}>
+                    {showTour && (
+                        <TourOverlay onClose={() => setShowTour(false)} />
+                    )}
+                </Suspense>
+                {/* LAR-3 — AI Assistant chat panel (floating, bottom-right). */}
+                <Suspense fallback={null}>
+                    {showAiAssistant && (
+                        <AiAssistant
+                            onClose={() => setShowAiAssistant(false)}
+                        />
+                    )}
+                </Suspense>
+                {/* Global error report dialog — rendered OUTSIDE the GlobalErrorBoundary
+          so it can show even when the rest of the app has crashed. */}
+                <ErrorReportDialog
+                    error={errorState}
+                    onClose={handleCloseErrorDialog}
+                />
+            </div>
+        </GlobalErrorBoundary>
+    );
 }

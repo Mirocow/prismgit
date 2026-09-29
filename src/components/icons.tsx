@@ -148,6 +148,145 @@ export const ChevronLeft = (p: IconProps) => (
   </Icon>
 );
 
+// VS Code-style sidebar panel icons: collapse (panel with the left half
+// folded) / expand (panel with the left half shown).
+export const PanelLeftClose = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <line x1="9" y1="4" x2="9" y2="20" />
+    <polyline points="16 15 13 12 16 9" />
+  </Icon>
+);
+
+export const PanelLeftOpen = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <line x1="9" y1="4" x2="9" y2="20" />
+    <polyline points="13 9 16 12 13 15" />
+  </Icon>
+);
+
+export const PanelRightClose = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <line x1="15" y1="4" x2="15" y2="20" />
+    <polyline points="8 9 11 12 8 15" />
+  </Icon>
+);
+
+export const PanelRightOpen = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <line x1="15" y1="4" x2="15" y2="20" />
+    <polyline points="11 15 8 12 11 9" />
+  </Icon>
+);
+
+export const PanelBottomClose = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <line x1="3" y1="15" x2="21" y2="15" />
+    <polyline points="9 9 12 12 15 9" />
+  </Icon>
+);
+
+// ── VS Code layout-toggle icons (codicons, 16×16 FILL) ─────────────────────
+// v2.3.7 — the header-corner sidebar toggles now match the VS Code reference
+// (code.visualstudio.com/docs/editing/userinterface hero): a rounded box
+// where the panel's strip is FILLED while the panel is open and a hollow
+// divider-only variant while it is collapsed. Exact paths from
+// microsoft/vscode-codicons (layout-sidebar-left / -off / -right / -off).
+// These are FILL icons (not stroke) — they deliberately bypass the 24×24
+// stroke-based <Icon> wrapper and render their own <svg>.
+type FillIconProps = IconProps;
+
+function FillIcon({ size = 16, d, ...props }: FillIconProps & { d: string }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="currentColor"
+      aria-hidden="true"
+      {...props}
+    >
+      <path d={d} fillRule="evenodd" clipRule="evenodd" />
+    </svg>
+  );
+}
+
+/** Toggle Primary Side Bar — box with the LEFT strip filled (panel open). */
+export const LayoutSidebarLeft = (p: FillIconProps) => (
+  <FillIcon
+    {...p}
+    d="M12.5 1C13.881 1 15 2.119 15 3.5V12.5C15 13.881 13.881 15 12.5 15H3.5C2.119 15 1 13.881 1 12.5V3.5C1 2.119 2.119 1 3.5 1H12.5ZM12.5 14C13.328 14 14 13.328 14 12.5V3.5C14 2.672 13.328 2 12.5 2H7V14H12.5Z"
+  />
+);
+
+/** Primary Side Bar hidden — box outline + divider, left strip hollow. */
+export const LayoutSidebarLeftOff = (p: FillIconProps) => (
+  <FillIcon
+    {...p}
+    d="M1 3.5V12.5C1 13.879 2.122 15 3.5 15H12.5C13.878 15 15 13.879 15 12.5V3.5C15 2.122 13.878 1 12.5 1H3.5C2.122 1 1 2.122 1 3.5ZM12.5 14H7V2H12.5C13.327 2 14 2.673 14 3.5V12.5C14 13.327 13.327 14 12.5 14ZM2 3.5C2 2.673 2.673 2 3.5 2H6V14H3.5C2.673 14 2 13.327 2 12.5V3.5Z"
+  />
+);
+
+/** Toggle Secondary Side Bar — box with the RIGHT strip filled (panel open). */
+export const LayoutSidebarRight = (p: FillIconProps) => (
+  <FillIcon
+    {...p}
+    d="M12.5 1C13.881 1 15 2.119 15 3.5V12.5C15 13.881 13.881 15 12.5 15H3.5C2.119 15 1 13.881 1 12.5V3.5C1 2.119 2.119 1 3.5 1H12.5ZM9 14V2H3.5C2.672 2 2 2.672 2 3.5V12.5C2 13.328 2.672 14 3.5 14H9Z"
+  />
+);
+
+/** Secondary Side Bar hidden — box outline + divider, right strip hollow. */
+export const LayoutSidebarRightOff = (p: FillIconProps) => (
+  <FillIcon
+    {...p}
+    d="M12.5 1H3.5C2.122 1 1 2.122 1 3.5V12.5C1 13.879 2.122 15 3.5 15H12.5C13.878 15 15 13.879 15 12.5V3.5C15 2.122 13.878 1 12.5 1ZM2 12.5V3.5C2 2.673 2.673 2 3.5 2H9V14H3.5C2.673 14 2 13.327 2 12.5ZM14 12.5C14 13.327 13.327 14 12.5 14H10V2H12.5C13.327 2 14 2.673 14 3.5V12.5Z"
+  />
+);
+
+// v2.3.8 — the bottom-panel (Command Log) toggle of the header corner group.
+// Same hero row in VS Code: layout-sidebar-left / layout-panel /
+// layout-sidebar-right — exact upstream path data (microsoft/vscode-codicons).
+/** Toggle Panel — box with the BOTTOM strip filled (panel open). */
+export const LayoutPanel = (p: FillIconProps) => (
+  <FillIcon
+    {...p}
+    d="M15 12.5C15 13.881 13.881 15 12.5 15H3.5C2.119 15 1 13.881 1 12.5V3.5C1 2.119 2.119 1 3.5 1H12.5C13.881 1 15 2.119 15 3.5V12.5ZM2 10H14V3.5C14 2.672 13.328 2 12.5 2H3.5C2.672 2 2 2.672 2 3.5V10Z"
+  />
+);
+
+/** Panel hidden — box outline + divider, bottom strip hollow. */
+export const LayoutPanelOff = (p: FillIconProps) => (
+  <FillIcon
+    {...p}
+    d="M12.5 1H3.5C2.122 1 1 2.121 1 3.5V12.5C1 13.879 2.122 15 3.5 15H12.5C13.878 15 15 13.879 15 12.5V3.5C15 2.121 13.878 1 12.5 1ZM14 12.5C14 13.327 13.327 14 12.5 14H3.5C2.673 14 2 13.327 2 12.5V11H14V12.5ZM14 10H2V3.5C2 2.673 2.673 2 3.5 2H12.5C13.327 2 14 2.673 14 3.5V10Z"
+  />
+);
+
+export const PanelBottomOpen = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <line x1="3" y1="15" x2="21" y2="15" />
+    <polyline points="9 12 12 9 15 12" />
+  </Icon>
+);
+
+export const Pause = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="6" y="4" width="4" height="16" rx="1" />
+    <rect x="14" y="4" width="4" height="16" rx="1" />
+  </Icon>
+);
+
+export const Play = (p: IconProps) => (
+  <Icon {...p}>
+    <polygon points="6 3 20 12 6 21 6 3" />
+  </Icon>
+);
+
 export const ChevronUp = (p: IconProps) => (
   <Icon {...p}>
     <polyline points="18 15 12 9 6 15" />
@@ -457,6 +596,18 @@ export const Upload = (p: IconProps) => (
     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
     <polyline points="17 8 12 3 7 8" />
     <line x1="12" y1="3" x2="12" y2="15" />
+  </Icon>
+);
+
+/** StashPop — a box with an upward arrow coming out of it. Distinct from
+ *  Upload (which is just an arrow) and from CloudUpload (which is a cloud).
+ *  Used for the "Pop stash" toolbar button: communicates "lift changes
+ *  back out of the stash into the working tree". */
+export const StashPop = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+    <polyline points="9 11 12 8 15 11" />
+    <line x1="12" y1="8" x2="12" y2="14" />
   </Icon>
 );
 
@@ -780,5 +931,20 @@ export const Send = (p: IconProps) => (
   <Icon {...p}>
     <line x1="22" y1="2" x2="11" y2="13" />
     <polygon points="22 2 15 22 11 13 2 9 22 2" />
+  </Icon>
+);
+
+export const MessageSquare = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+  </Icon>
+);
+
+/** Three horizontal dots — "More" menu trigger. */
+export const MoreHorizontal = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="12" cy="12" r="1" />
+    <circle cx="19" cy="12" r="1" />
+    <circle cx="5" cy="12" r="1" />
   </Icon>
 );

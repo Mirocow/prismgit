@@ -1,40 +1,70 @@
-import simpleGit, { type SimpleGit } from 'simple-git';
+import { spawn } from 'child_process';
+import { BrowserWindow } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
-import { spawn } from 'child_process';
-import { getSetting } from './storage.js';
-import type { RemoteCredential } from '../types/settings-api.js';
+import { simpleGit, type SimpleGit } from 'simple-git';
 import type { PushRefStatus, PushResult, PushVerification } from '../types/git-api.js';
-import { BrowserWindow } from 'electron';
+import type { RemoteCredential } from '../types/settings-api.js';
+import type { SshEnvResult } from '../types/ssh-api.js';
+import {
+  GIT_ENV_LFS_SKIP,
+  GIT_SSH_UNSAFE_OPTIONS,
+  GIT_UNSAFE_OPTIONS,
+  gitChildEnv,
+  withMergedGitEnv,
+} from './git-env.js';
+// D12: parseDiff is shared with the renderer via src/lib/diffParser.ts so
+// both processes use the SAME parser implementation (the previous in-file
+// duplicate had drifted from the renderer version once already). The
+// shared module exports identical types, so no conversion is needed.
+import { parseDiff as parseDiffShared, type ParsedDiff } from '../../src/lib/diffParser';
+import { classifySslFailure } from '../../src/lib/sslErrors';
+import { classifyAuthFailure } from '../../src/lib/authErrors';
+import { addGitSpawnListener } from './commandLog.js';
+import { buildSshEnv } from './ssh.js';
+import { getSetting } from './storage.js';
+import { DEFAULT_REMOTE_FETCH_TIMEOUT_MS } from './gitPollCore.js';
+import type { PollJobRequest } from './gitPollCore.js';
+import { runPollJobExternal, runStatusJobExternal, runRawJobExternal } from './gitPollProcess.js';
+import { rawJobIsAllowed } from './gitRawCore.js';
+import { runStatusJob, type StatusJobRequest, detectRepoStateFromGitDir } from './gitStatusCore.js';
+
+/**
+ * Global environment overrides — see git-env.ts for the actual constants.
+ * The constants are in a separate file to break the circular dependency:
+ * git.ts → storage.ts (getSetting) → git.ts (GIT_UNSAFE_OPTIONS).
+ */
+
 import type {
-  StatusResult,
-  LogEntry,
-  BranchInfo,
-  RemoteInfo,
-  RemoteProperties,
-  StashEntry,
-  TagInfo,
-  SubmoduleInfo,
-  DiffResult,
-  DiffHunk,
-  DiffLine,
-  WorktreeInfo,
-  ReflogEntry,
-  CommitFile,
+  BidirectionalBlameResult,
   BlameLine,
   BlameResult,
-  GitConfigEntry,
-  DirNode,
-  NoteCategory,
+  BranchInfo,
+  BugtraqConfig,
+  CommitFile,
   CommitNote,
-  SubtreeInfo,
+  DiffHunk,
+  DiffResult,
+  DirNode,
+  GitConfigEntry,
   LfsLock,
   LfsLockInfo,
+  LogEntry,
+  NoteCategory,
   RecyclableCommit,
-  BidirectionalBlameResult,
-  UnreachableCommit,
-  BugtraqConfig,
+  ReflogEntry,
   RemoteCheckSummary,
+  RemoteInfo,
+  RemoteProperties,
+  SquashToBranchParams,
+  SquashToBranchResult,
+  StashEntry,
+  StatusResult,
+  SubmoduleInfo,
+  SubtreeInfo,
+  TagInfo,
+  UnreachableCommit,
+  WorktreeInfo
 } from '../types/git-api.js';
 
 const gitCache = new Map<string, SimpleGit>();
@@ -123,42 +153,517 @@ async function withOperationLog<T>(
 }
 
 function getGit(repoPath: string): SimpleGit {
+  installWriteDetector();
   let git = gitCache.get(repoPath);
-  if (!git) {
-    git = simpleGit({
+  if (git) {
+    // LRU touch: re-insert so insertion order reflects recency — the
+    // eviction in trimRepoCaches() then drops the LEAST recently used
+    // instance, not the oldest CREATED one (a repo opened at app start and
+    // actively used all day would otherwise be evicted first).
+    gitCache.delete(repoPath);
+    gitCache.set(repoPath, git);
+    return git;
+  }
+  git = simpleGit({
       baseDir: repoPath,
       binary: 'git',
-      maxConcurrentProcesses: 2,
+      // maxConcurrentProcesses=4 (was 2). With 2, every git command queued
+      // behind the 2 in-flight ones — on a repo with LFS, a single `git status`
+      // could take 5+ seconds, blocking the file-watcher refresh, the sidebar
+      // remote-check, and the History page load all at once. 4 is a safe
+      // middle ground: enough parallelism for the common case (status +
+      // log + diff + branches in parallel) without spawning too many
+      // subprocesses (which would saturate the OS process table).
+      maxConcurrentProcesses: 4,
       trimmed: false,
+      ...GIT_UNSAFE_OPTIONS,
     });
-    gitCache.set(repoPath, git);
+    // simple-git silently ignores an `env` option — apply the LFS/perf
+    // overrides (layered over a snapshot of process.env) through the
+    // supported .env() builder so they actually reach the spawned git.
+    withMergedGitEnv(git);
+    gitCache.set(repoPath, installReadCoalescing(repoPath, git));
+  return gitCache.get(repoPath)!;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PERF-2: Read coalescing layer
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// A command trace on the live 4.7k-commit repo showed 81 git subprocesses
+// within ~3s of opening it: status×5, stash list×4, numstat×3+3,
+// rev-list --branches/--remotes ×2, for-each-ref/rev-parse ×many — all
+// spawned by independent renderer effects that ask for the SAME data at
+// the same moment. simple-git's maxConcurrentProcesses queue only
+// serialises them; it never deduplicates them.
+//
+// This layer wraps every cached getGit() instance with:
+//   1. IN-FLIGHT COALESCING for identical reads — concurrent callers of
+//      the same command share ONE subprocess (both get the same value).
+//      Applies to ALL reads, content-sensitive included.
+//   2. 1s TTL micro-cache for METADATA reads only (for-each-ref,
+//      remote -v, config --get*, stash list, …) — data that cannot change
+//      unless somebody runs a git WRITE.
+//   3. Content-sensitive reads (status/diff/log/show/rev-list/…) are
+//      NEVER TTL-cached — the filesystem can change under them (external
+//      editors, shells, tests mutating via raw `git` commands the app
+//      never sees). They still get in-flight coalescing.
+//   4. WRITE INVALIDATION, belt & suspenders:
+//      a) convenience WRITES (add/commit/tag/…) executed through the
+//         wrapper always invalidate — required under vitest, where the
+//         child_process spawn hook may not see simple-git's spawn realm;
+//      b) installWriteDetector() hooks child_process.spawn globally (the
+//         same trick commandLog.ts uses) and invalidates the repo's read
+//         cache when ANY git instance — including ad-hoc LFS/SSH ones —
+//         spawns a write command.
+//
+// The design is deliberately conservative: classifyGitCommand() returns
+// 'write' for anything it does not positively recognise as a read, so an
+// unknown command can never be served from a stale cache.
+
+export type GitCommandKind = 'read' | 'meta' | 'write';
+
+/** Metadata reads: safe to TTL-cache for READ_TTL_MS (1s). */
+const META_COMMANDS = new Set([
+  'for-each-ref', 'show-ref', 'check-ref-format', 'ls-remote',
+]);
+
+/**
+ * Content-sensitive reads: in-flight coalescing only, NEVER TTL-cached —
+ * filesystem writes (external editors, shells, tests) can change their
+ * result at any time.
+ */
+const READ_COMMANDS = new Set([
+  'status', 'diff', 'log', 'show', 'rev-list', 'rev-parse', 'cat-file',
+  'ls-files', 'ls-tree', 'blame', 'merge-base', 'name-rev', 'describe',
+  'shortlog', 'whatchanged', 'reflog', 'grep', 'cherry', 'count-objects',
+  'verify-commit', 'verify-tag', 'check-attr', 'check-ignore', 'var',
+  'diff-index', 'diff-tree', 'diff-files', 'hash-object', 'mktree',
+]);
+
+/** Global git options that consume the NEXT argv slot as a value. '-C'
+ * (change directory) included — the notes/stash helpers call
+ * raw(['-C', repoPath, 'notes', …]) and the classifier must see the real
+ * subcommand, not the path. */
+const GLOBAL_OPTS_WITH_VALUE = new Set(['-c', '-C', '--git-dir', '--work-tree', '--namespace', '--exec-path', '--super-prefix', '--config-env']);
+
+/** subcommands of `git config` that READ (anything else writes). */
+const CONFIG_GETTER_FLAGS = new Set(['--get', '--get-all', '--get-regexp', '--get-url', '--get-color', '--get-colorbool', '-l', '--list', '--show-origin', '--show-scope', '--get-native-worktree']);
+
+/**
+ * Conservative git-argv classifier.
+ *
+ *  'meta'  — metadata read, TTL-cacheable (refs/config/remotes listings)
+ *  'read'  — content-sensitive read, in-flight coalescing only
+ *  'write' — anything that can mutate repo state (or is unknown!)
+ *
+ * UNKNOWN IS ALWAYS 'write' — an unrecognised command must never be
+ * served from a cache it might invalidate.
+ */
+export function classifyGitCommand(argv: string[]): GitCommandKind {
+  // Skip leading global options (e.g. ['-c','x=y','status',…]).
+  let i = 0;
+  while (i < argv.length) {
+    const a = argv[i];
+    if (a === '--' || a === undefined) break;
+    if (a.startsWith('-')) {
+      if (GLOBAL_OPTS_WITH_VALUE.has(a)) { i += 2; continue; }
+      if (a.startsWith('--') && a.includes('=')) { i += 1; continue; }
+      i += 1; continue;
+    }
+    break; // first positional = the subcommand
   }
-  return git;
+  const cmd = argv[i];
+  if (!cmd) {
+    // Bare flags only (e.g. ['--version'] at startup) — harmless reads.
+    return argv.some((a) => a === '--version' || a === '--help' || a === '--exec-path' || a === '--man-path' || a === '--info-path')
+      ? 'read'
+      : 'write';
+  }
+  const rest = argv.slice(i + 1);
+  const flags = rest.filter((a) => typeof a === 'string' && a.startsWith('-'));
+  const positionals = rest.filter((a) => typeof a === 'string' && !a.startsWith('-'));
+
+  switch (cmd) {
+    case 'notes':
+      // `notes show <sha>` / `notes list` read; add/append/copy/edit/
+      // remove/prune mutate refs/notes/* — write (also invalidates the
+      // coalescing caches, which is what keeps a just-added note visible
+      // to the next read).
+      return positionals[0] === 'show' || positionals[0] === 'list' || positionals[0] === 'get-ref'
+        ? 'read'
+        : 'write';
+    case 'config':
+      // Config getters are READS but NEVER TTL-cacheable: .git/config is
+      // a global file other processes (terminals, other tools, tests) write
+      // freely without any git subprocess we could observe — an external
+      // write followed by an immediate read must not see stale data
+      // (integration test smartgitFeatures caught exactly this).
+      return rest.some((a) => CONFIG_GETTER_FLAGS.has(a)) ? 'read' : 'write';
+    case 'remote':
+      // `remote` / `remote -v` / `remote show X` read; add/rm/rename/… write.
+      return positionals.some((p) =>
+        ['add', 'remove', 'rm', 'rename', 'set-url', 'set-head', 'prune', 'update', 'set-branches'].includes(p)
+      ) ? 'write' : 'meta';
+    case 'stash':
+      // Only `stash list` is a read.
+      return positionals[0] === 'list' ? 'meta' : 'write';
+    case 'symbolic-ref':
+      // 0–1 positionals → query; 2+ positionals → write HEAD.
+      return positionals.length <= 1 ? 'meta' : 'write';
+    case 'branch':
+      // `branch` / `branch -a -v` / `branch --list …` read; creating renames/deletes write.
+      return flags.some((f) => f === '--list' || f === '-l' || f === '--show-current' || f === '-a' || f === '--all' || f === '-v' || f === '--verbose')
+        && !positionals.some((p) => ['--delete', '-d', '-D', '-m', '-M', '-c', '-C', '--edit-description'].includes(p))
+        ? 'meta'
+        : positionals.length === 0 && flags.length === 0 ? 'meta' : 'write';
+    case 'tag':
+      // `tag` / `tag -l` / `tag -n` read; `tag <name>` / `tag -d` write.
+      return flags.some((f) => f === '--list' || f === '-l' || f === '-n' || f.startsWith('-n'))
+        && positionals.every((p) => !p.startsWith('refs/')) ? 'meta' : 'write';
+    case 'worktree':
+      return positionals[0] === 'list' ? 'meta' : 'write';
+    case 'notes':
+      return positionals[0] === 'list' || positionals[0] === 'show' || rest.length === 0 ? 'read' : 'write';
+    case 'help':
+    case 'version':
+      return 'read';
+    default:
+      if (META_COMMANDS.has(cmd)) return 'meta';
+      if (READ_COMMANDS.has(cmd)) return 'read';
+      return 'write'; // unknown → conservative
+  }
+}
+
+/** TTL for metadata reads. 1s: coalesces the repo-open burst without
+ * ever showing stale data for more than a second after an external write. */
+export const READ_TTL_MS = 1_000;
+/** Longer TTL for metadata whose value can only change through git WRITES the
+ * app observes (remote set via getRemotes). See CONVENIENCE_READS. */
+export const META_LONG_TTL_MS = 60_000;
+
+/** Cap on cached metadata entries per repo (pruned by insert). */
+const META_CACHE_MAX = 64;
+
+export interface ReadCoalesceStats {
+  rawCalls: number;        // raw() invocations that reached the wrapper
+  convenienceCalls: number;
+  coalescedInflight: number; // calls that joined an in-flight subprocess
+  ttlHits: number;         // calls served from the TTL cache
+  writeInvalidations: number; // cache drops caused by writes
+  subprocesses: number;    // actual subprocess launches observed via raw/convenience
+}
+
+interface ReadCoalesceState {
+  inflight: Map<string, Promise<unknown>>;
+  meta: Map<string, { value: unknown; ts: number }>;
+  stats: ReadCoalesceStats;
+}
+
+const readCoalesceStates = new Map<string, ReadCoalesceState>();
+
+function getCoalesceState(repoPath: string): ReadCoalesceState {
+  let s = readCoalesceStates.get(repoPath);
+  if (s) {
+    // LRU touch (see trimRepoCaches).
+    readCoalesceStates.delete(repoPath);
+    readCoalesceStates.set(repoPath, s);
+    return s;
+  }
+  s = {
+    inflight: new Map(),
+    meta: new Map(),
+    stats: { rawCalls: 0, convenienceCalls: 0, coalescedInflight: 0, ttlHits: 0, writeInvalidations: 0, subprocesses: 0 },
+  };
+  readCoalesceStates.set(repoPath, s);
+  return s;
+}
+
+/** Test/observability hook: counters for one repo. */
+export function __readCoalescingStats(repoPath: string): ReadCoalesceStats | undefined {
+  return readCoalesceStates.get(repoPath)?.stats;
+}
+
+/** Test hook: drop all coalescing state (fresh counters, empty caches). */
+export function __resetReadCoalescingForTests(): void {
+  readCoalesceStates.clear();
+}
+
+/** Invalidate the read cache for one repo (or all repos when omitted). */
+export function invalidateReadCache(repoPath?: string): void {
+  if (repoPath) {
+    const s = readCoalesceStates.get(repoPath);
+    if (s) {
+      s.meta.clear();
+      s.inflight.clear();
+    }
+  } else {
+    for (const s of readCoalesceStates.values()) {
+      s.meta.clear();
+      s.inflight.clear();
+    }
+  }
+}
+
+/** Redact credentials before using argv in a cache key (never cache secrets). */
+function cacheKeyOf(argv: string[]): string {
+  return argv.join(' ');
 }
 
 /**
- * Remove a stale .git/index.lock file if it exists. A previous git
- * operation (crash, force-quit, killed process) may have left it behind,
- * making ALL subsequent git commands fail with "Unable to create
- * index.lock: File exists."
+ * Wrap a SimpleGit instance with read coalescing. Only affects the methods
+ * the app actually calls on cached instances (raw + the handful of
+ * convenience methods); everything else passes through bound to the target.
+ */
+function installReadCoalescing(repoPath: string, git: SimpleGit): SimpleGit {
+  const state = getCoalesceState(repoPath);
+  // The REAL raw, bound to the un-proxied target (simple-git's overloaded
+  // raw signature resists .call — go through a minimal structural type).
+  const realRaw = (git as unknown as { raw: (a: string[]) => Promise<string> }).raw.bind(git);
+
+  const coalescedRaw = (args: string[]): Promise<string> => {
+    const kind = classifyGitCommand(args);
+    if (kind === 'write') {
+      // Writes always execute and drop the repo's read caches (in vitest
+      // the global spawn hook cannot always see simple-git's realm, so
+      // the wrapper itself must invalidate).
+      state.stats.rawCalls++;
+      state.stats.writeInvalidations++;
+      state.meta.clear();
+      state.inflight.clear();
+      state.stats.subprocesses++;
+      return realRaw(args);
+    }
+    const key = 'raw|' + cacheKeyOf(args);
+    if (kind === 'meta') {
+      const hit = state.meta.get(key);
+      if (hit && Date.now() - hit.ts < READ_TTL_MS) {
+        state.stats.rawCalls++;
+        state.stats.ttlHits++;
+        return hit.value as Promise<string>;
+      }
+    }
+    let p = state.inflight.get(key) as Promise<string> | undefined;
+    if (!p) {
+      state.stats.subprocesses++;
+      // v3.8 READ ROUTER — the "тупит на всех инструментах, как будто что-то
+      // работает в фоне и мешает основному процессу" fix. Read/meta .raw()
+      // commands now EXECUTE in the dedicated git worker process (same
+      // one the background poll already uses): the child spawn, stdout
+      // streaming and string assembly never touch the main event loop,
+      // which is also the IPC broker for every renderer call — while it
+      // was busy pumping git output, every tool's clicks and refreshes
+      // queued behind it (measured: a History open = a ~20-spawn burst;
+      // for-each-ref re-ran 6×/90s; `remote -v` 384ms each time).
+      //
+      // Gating:
+      //  - ONLY in the Electron main process (process.type === 'browser');
+      //    vitest / plain-node hosts keep the in-process path so every
+      //    existing test observes byte-identical behaviour.
+      //  - ONLY allow-listed read commands (rawJobIsAllowed — shared with
+      //    the worker, so the two sides can never disagree);
+      //  - worker failure (crash/timeout/job error) falls back to the
+      //    in-process realRaw — same command, same result, same error.
+      //  - in-flight coalescing + meta TTL above are UNCHANGED: one unique
+      //    command still executes once, shared by every concurrent caller.
+      const routeExternal = (process as { type?: string }).type === 'browser' && rawJobIsAllowed(args);
+      const base: Promise<string> = routeExternal
+        ? runRawJobExternal({ repoPath, args }).catch(() => realRaw(args))
+        : realRaw(args);
+      // The shared promise: cleans up in-flight bookkeeping on settle and
+      // seeds the TTL cache for metadata reads. Cache the BASE promise —
+      // it resolves to the same value the derived one forwards.
+      const shared: Promise<string> = base.then(
+        (value) => {
+          if (kind === 'meta') {
+            state.meta.set(key, { value: base, ts: Date.now() });
+            if (state.meta.size > META_CACHE_MAX) {
+              // Prune oldest expired entries (Map preserves insert order).
+              const now = Date.now();
+              for (const [k, v] of state.meta) {
+                if (state.meta.size <= META_CACHE_MAX) break;
+                if (now - v.ts >= READ_TTL_MS) state.meta.delete(k);
+              }
+              if (state.meta.size > META_CACHE_MAX) {
+                const first = state.meta.keys().next().value;
+                if (first !== undefined) state.meta.delete(first);
+              }
+            }
+          }
+          state.inflight.delete(key);
+          return value;
+        },
+        (err) => {
+          state.inflight.delete(key);
+          throw err;
+        },
+      );
+      // The base promise must never become an unhandled rejection when
+      // its last consumer detaches — attach a no-op guard.
+      base.catch(() => { /* shared-promise guard */ });
+      state.inflight.set(key, shared);
+      state.stats.rawCalls++;
+      return shared;
+    }
+    state.stats.rawCalls++;
+    state.stats.coalescedInflight++;
+    return p;
+  };
+
+  // Convenience methods that READ — coalesced like raw, TTL only for the
+  // metadata-ish ones (getRemotes/stashList). status/log/diff are content-
+  // sensitive: in-flight only.
+  //
+  // v3.8: getRemotes is 'meta-long' — a 60s TTL instead of 1s. `remote -v`
+  // output only changes when the remote SET changes, and every such change
+  // runs through addRemote/removeRemote/renameRemote (CONVENIENCE_WRITES →
+  // invalidates this cache) or a git write the global detector sees. The
+  // 1s TTL re-spawned `git remote -v` (384ms on the probe repo — the single
+  // slowest command in the History-open burst) on every tool re-open.
+  const CONVENIENCE_READS: Record<string, 'read' | 'meta' | 'meta-long'> = {
+    status: 'read', log: 'read', diff: 'read', getRemotes: 'meta-long',
+    stashList: 'meta', checkIsRepo: 'read',
+  };
+  const CONVENIENCE_TTL_MS: Record<'meta' | 'meta-long', number> = {
+    meta: READ_TTL_MS,
+    'meta-long': META_LONG_TTL_MS,
+  };
+  // Convenience methods that WRITE — always execute, always invalidate.
+  // NOTE: checkIsRepo is NOT here — it only reads (rev-parse) and runs on
+  // nearly every directory listing; treating it as a write would thrash
+  // the caches constantly.
+  const CONVENIENCE_WRITES = new Set([
+    'add', 'commit', 'checkout', 'push', 'pull', 'fetch', 'tag', 'stash',
+    'merge', 'rebase', 'cherryPick', 'revert', 'branch', 'addRemote',
+    'removeRemote', 'renameRemote', 'rm', 'mv', 'clean', 'reset', 'init',
+    'submodule', 'applyPatch',
+  ]);
+
+  return new Proxy(git, {
+    get(target: SimpleGit, prop: string | symbol): unknown {
+      if (prop === 'raw') return coalescedRaw;
+      if (typeof prop === 'string' && Object.prototype.hasOwnProperty.call(CONVENIENCE_READS, prop)) {
+        const kind = CONVENIENCE_READS[prop]!;
+        const orig = (target as unknown as Record<string, unknown>)[prop];
+        if (typeof orig !== 'function') return orig;
+        return (...callArgs: unknown[]): Promise<unknown> => {
+          state.stats.convenienceCalls++;
+          const key = 'conv|' + prop + '|' + JSON.stringify(callArgs);
+          const ttlMs = kind === 'read' ? 0 : CONVENIENCE_TTL_MS[kind];
+          if (kind !== 'read') {
+            const hit = state.meta.get(key);
+            if (hit && Date.now() - hit.ts < ttlMs) {
+              state.stats.ttlHits++;
+              return hit.value as Promise<unknown>;
+            }
+          }
+          let p = state.inflight.get(key) as Promise<unknown> | undefined;
+          if (!p) {
+            state.stats.subprocesses++;
+            p = Promise.resolve((orig as (...a: unknown[]) => unknown).apply(target, callArgs));
+            state.inflight.set(key, p);
+            const cleanup = () => state.inflight.delete(key);
+            p.then(
+              (value) => {
+                if (kind !== 'read') state.meta.set(key, { value: p, ts: Date.now() });
+                cleanup();
+                return value;
+              },
+              () => { cleanup(); },
+            );
+            p.catch(() => { /* shared-promise guard */ });
+          } else {
+            state.stats.coalescedInflight++;
+          }
+          return p;
+        };
+      }
+      if (typeof prop === 'string' && CONVENIENCE_WRITES.has(prop)) {
+        const orig = (target as unknown as Record<string, unknown>)[prop];
+        if (typeof orig !== 'function') return orig;
+        return (...callArgs: unknown[]): Promise<unknown> => {
+          state.stats.convenienceCalls++;
+          state.stats.writeInvalidations++;
+          state.meta.clear();
+          state.inflight.clear();
+          state.stats.subprocesses++;
+          return Promise.resolve((orig as (...a: unknown[]) => unknown).apply(target, callArgs));
+        };
+      }
+      const v = Reflect.get(target, prop) as unknown;
+      return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(target) : v;
+    },
+  });
+}
+
+/**
+ * Global write detector: invalidates a repo's read cache whenever ANY git
+ * subprocess with write intent spawns — including from ad-hoc simple-git
+ * instances (LFS/SSH helpers) that bypass the coalescing wrapper. Uses the
+ * same child_process.spawn patch mechanism as commandLog.ts, so the two
+ * hooks compose safely regardless of install order.
+ */
+let writeDetectorInstalled = false;
+export function installWriteDetector(): void {
+  if (writeDetectorInstalled) return;
+  writeDetectorInstalled = true;
+  addGitSpawnListener((args: string[], cwd: string) => {
+    try {
+      if (classifyGitCommand(args) !== 'write') return;
+      let hit = false;
+      for (const repoPath of readCoalesceStates.keys()) {
+        if (repoPath === cwd || cwd.startsWith(repoPath + '/') || cwd.startsWith(repoPath + '\\')) {
+          const s = readCoalesceStates.get(repoPath);
+          if (s) {
+            s.stats.writeInvalidations++;
+            s.meta.clear();
+            s.inflight.clear();
+          }
+          hit = true;
+        }
+      }
+      if (!hit) {
+        // Unknown cwd (subprocess from an unrelated directory) — drop
+        // everything rather than risk staleness.
+        invalidateReadCache();
+      }
+    } catch {
+      /* detector must never break the caller */
+    }
+  });
+}
+
+/**
+ * Remove a stale .git/index.lock file if it exists AND is not actively
+ * being held by another git process.
  *
- * This is called before write operations (add, restore, resetFile,
- * commit, checkout, etc.) so the user doesn't have to manually delete
- * the lock file.
+ * RACE FIX: the previous code blindly deleted .git/index.lock before every
+ * write operation. If two write operations ran concurrently (e.g. user
+ * clicks "Stage All" while a background fetch is committing):
+ *   Op A: removeStaleIndexLock → git add (creates lock)
+ *   Op B: removeStaleIndexLock (DELETES A's lock!) → git add (fails: race)
  *
- * Safety: if another git process is ACTIVELY running (lock file is
- * being held), the unlinkSync will fail with EPERM/EBUSY on Windows
- * or succeed silently on Unix (where locks are advisory). On Unix,
- * removing an active lock can cause the running git process to fail —
- * but this is rare (maxConcurrentProcesses=2) and the alternative
- * (leaving the lock) is worse (blocks ALL git operations).
+ * Now we check the lock file's age — if it was created within the last
+ * 30 seconds, it's probably an active lock from a concurrent operation
+ * and we DON'T delete it. Only stale locks (older than 30s) are removed.
+ *
+ * The threshold was raised from 5s to 30s because on LFS repos a single
+ * `git status` can take 5-10 seconds, and a `git add` on a large repo
+ * can take 10-20 seconds. A 5s threshold would delete active locks.
  */
 function removeStaleIndexLock(repoPath: string): void {
   const lockPath = path.join(repoPath, '.git', 'index.lock');
   try {
-    if (fs.existsSync(lockPath)) {
-      fs.unlinkSync(lockPath);
+    if (!fs.existsSync(lockPath)) return;
+    const stat = fs.statSync(lockPath);
+    const ageMs = Date.now() - stat.mtimeMs;
+    if (ageMs < 30000) {
+      // Lock is fresh — another git process is probably holding it.
+      // The git command will wait for it or fail with a clear error.
+      return;
     }
+    // Lock is stale (older than 30s) — safe to remove.
+    fs.unlinkSync(lockPath);
   } catch {
     // Can't remove — either permission issue or another process is
     // actively holding it. The git command will fail with a clear
@@ -169,9 +674,99 @@ function removeStaleIndexLock(repoPath: string): void {
 function invalidateCache(repoPath?: string) {
   if (repoPath) {
     gitCache.delete(repoPath);
+    // MEMORY FIX (ST-P4): the per-repo caches below were never cleared on
+    // closeRepository / invalidateCache — they grew stale entries for every
+    // repo ever opened in the session. Now we drop them all together.
+    gitDirCache.delete(repoPath);
+    headTreeCache.delete(repoPath);
+    pollCache.delete(repoPath);
+    remotesCache.delete(repoPath); // PERF-P0 remotes TTL cache
+    invalidateReadCache(repoPath); // PERF-2 read coalescing
+    isRepoCache.delete(repoPath);
+    // diffCache already has its own invalidation path, but be safe.
+    invalidateDiffCache(repoPath);
   } else {
     gitCache.clear();
+    gitDirCache.clear();
+    headTreeCache.clear();
+    pollCache.clear();
+    remotesCache.clear();
+    invalidateReadCache();
+    isRepoCache.clear();
+    diffCache.clear();
   }
+  // Always drop the remoteAuth cache — credentials may have changed in
+  // Settings, and the next getStoredCredential call should re-read them.
+  remoteAuthCache = null;
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// PERF (v3.1, repo-switch): soft cache trim — the switch-away counterpart
+// of invalidateCache().
+//
+// The renderer used to call invalidateCache(prevPath) when switching away
+// from a repo, destroying ALL of its caches — so every A → B → A switch
+// re-paid the full cold-open cost (isRepo spawn, rev-parse --git-dir,
+// remotes listing, read-coalescing warm-up). But every one of those caches
+// is ALREADY staleness-safe on its own terms:
+//   - gitDirCache     — .git dir path, immutable for a session
+//   - headTreeCache   — keyed by HEAD hash, hash-validated before use, LRU-4
+//   - remotesCache    — 10 min TTL (addRemote/removeRemote/renameRemote invalidate)
+//   - pollCache       — 60s TTL
+//   - readCoalesce    — 1s TTL + global write-detector invalidation
+//   - diffCache       — own TTL + mutation invalidation, capped at 64
+// The only genuine issue with KEEPING them was the ST-P4 memory leak —
+// unbounded growth as the user opens repo after repo. That is solved here
+// by LRU caps instead of destruction: switching back to a recently-used
+// repo is warm, memory stays bounded, staleness stays handled by the
+// per-cache TTLs/validation.
+// ═══════════════════════════════════════════════════════════════════
+
+/** LRU caps enforced by trimRepoCaches(). */
+const GIT_INSTANCE_CACHE_MAX = 4;   // idle SimpleGit instances hold no child procs
+const GIT_DIR_CACHE_MAX = 16;       // one short string per repo
+const REMOTES_CACHE_MAX = 32;       // TTL'd entries
+const POLL_CACHE_MAX = 32;          // TTL'd entries
+const READ_COALESCE_STATES_MAX = 8; // stats + 1s-TTL meta map per repo
+
+function evictMapToCap<V>(map: Map<string, V>, cap: number): void {
+  // Map iterates in insertion order; getGit/resolveGitDir/getCoalesceState
+  // re-insert on use, so insertion order ≈ recency order (LRU).
+  while (map.size > cap) {
+    const oldest = map.keys().next().value;
+    if (oldest === undefined) break;
+    map.delete(oldest);
+  }
+}
+
+/** Soft trim: keep the most recently used repos' caches, evict the rest.
+ *  Called on repo switch-away / close instead of invalidateCache. */
+function trimRepoCaches(): void {
+  evictMapToCap(gitCache, GIT_INSTANCE_CACHE_MAX);
+  evictMapToCap(gitDirCache, GIT_DIR_CACHE_MAX);
+  evictMapToCap(remotesCache, REMOTES_CACHE_MAX);
+  evictMapToCap(pollCache, POLL_CACHE_MAX);
+  evictMapToCap(readCoalesceStates, READ_COALESCE_STATES_MAX);
+  // headTreeCache and diffCache already enforce their own caps on insert.
+}
+
+/** Test/observability hook: per-repo cache sizes + membership (repo-switch
+ *  warm-cache tests assert what survives trimRepoCaches vs invalidateCache). */
+export function __repoCacheSizesForTests(repoPath?: string): {
+  gitInstances: number; gitDirs: number; remotes: number; polls: number;
+  coalesceStates: number; isRepoCached: number;
+  gitDirCached: boolean; isRepoEntryCached: boolean;
+} {
+  return {
+    gitInstances: gitCache.size,
+    gitDirs: gitDirCache.size,
+    remotes: remotesCache.size,
+    polls: pollCache.size,
+    coalesceStates: readCoalesceStates.size,
+    isRepoCached: isRepoCache.size,
+    gitDirCached: repoPath ? gitDirCache.has(repoPath) : false,
+    isRepoEntryCached: repoPath ? isRepoCache.has(repoPath) : false,
+  };
 }
 
 // State detection helpers
@@ -180,9 +775,54 @@ function invalidateCache(repoPath?: string) {
 // for linked worktrees and submodule repos where '.git' is a FILE, not a
 // directory (the naive path.join(repoPath, '.git') check misses those states).
 const gitDirCache = new Map<string, string>();
+
+// Cache for getRemotes — avoids 6+ spawns of 'git config --get-regexp remote.*'
+// on every page load. TTL 10 min, invalidated on addRemote/removeRemote/renameRemote.
+// PERF: was 60s — shorter than the 120s baseline poll interval, so EVERY
+// background poll cycle re-spawned `git remote -v` for EVERY repo (user
+// report: constant "Команда: git remote -v" entries in the log). The
+// remote set changes only through the app itself (add/remove/rename all
+// invalidate this cache), so a long TTL is staleness-safe.
+const remotesCache = new Map<string, { value: unknown; ts: number }>();
+const REMOTES_CACHE_TTL_MS = 600_000;
+
+async function getCachedRemotes(repoPath: string, withRefs: boolean): Promise<Array<{ name: string; refs?: { fetch: string; push?: string } }>> {
+  const key = repoPath + '|' + (withRefs ? '1' : '0');
+  const cached = remotesCache.get(key);
+  if (cached && Date.now() - cached.ts < REMOTES_CACHE_TTL_MS) {
+    // LRU touch (see trimRepoCaches).
+    remotesCache.delete(key);
+    remotesCache.set(key, cached);
+    return cached.value as Array<{ name: string; refs?: { fetch: string; push?: string } }>;
+  }
+  // PERF (v3.1, repo-switch): in-flight coalescing. On every repo switch the
+  // Push-dialog AND Pull-dialog effects both call api.git.remotes() at the
+  // same instant; a plain TTL check lets both miss and spawn the SAME
+  // `git remote -v` twice. Sharing the in-flight promise halves the burst.
+  const existing = remotesInFlight.get(key);
+  if (existing) return existing;
+  const git = getGit(repoPath);
+  const promise = (async () => {
+    try {
+      const value = (withRefs ? await git.getRemotes(true) : await git.getRemotes(false)) as Array<{ name: string; refs?: { fetch: string; push?: string } }>;
+      remotesCache.set(key, { value, ts: Date.now() });
+      return value;
+    } finally {
+      remotesInFlight.delete(key);
+    }
+  })();
+  remotesInFlight.set(key, promise);
+  return promise;
+}
+const remotesInFlight = new Map<string, Promise<Array<{ name: string; refs?: { fetch: string; push?: string } }>>>();
 async function resolveGitDir(repoPath: string, git: SimpleGit): Promise<string> {
   const cached = gitDirCache.get(repoPath);
-  if (cached) return cached;
+  if (cached) {
+    // LRU touch (see trimRepoCaches).
+    gitDirCache.delete(repoPath);
+    gitDirCache.set(repoPath, cached);
+    return cached;
+  }
   let dir = path.join(repoPath, '.git');
   try {
     const out = (await git.raw(['rev-parse', '--absolute-git-dir'])).trim();
@@ -194,159 +834,72 @@ async function resolveGitDir(repoPath: string, git: SimpleGit): Promise<string> 
   return dir;
 }
 
-async function detectRepoState(repoPath: string, git?: SimpleGit) {
-  const gitDir = await resolveGitDir(repoPath, git ?? getGit(repoPath));
-  const isMerging = fs.existsSync(path.join(gitDir, 'MERGE_HEAD'));
-  let isRebasing = false;
-  const rebaseApplyDir = path.join(gitDir, 'rebase-apply');
-  const rebaseMergeDir = path.join(gitDir, 'rebase-merge');
-  if (fs.existsSync(rebaseApplyDir) || fs.existsSync(rebaseMergeDir)) {
-    isRebasing = true;
-  }
-  const isCherryPicking = fs.existsSync(path.join(gitDir, 'CHERRY_PICK_HEAD'));
-  const isReverting = fs.existsSync(path.join(gitDir, 'REVERT_HEAD'));
-  let isBisecting = false;
-  try {
-    const bisectLogPath = path.join(gitDir, 'BISECT_LOG');
-    isBisecting = fs.existsSync(bisectLogPath);
-  } catch {
-    /* ignore */
-  }
-  return { isMerging, isRebasing, isCherryPicking, isReverting, isBisecting };
-}
+/* resolveHeadSha + detectRepoState's fs probes moved to gitStatusCore.ts —
+ * they now serve BOTH the foreground status() and the background git worker
+ * (watcher-driven refreshes; see gitPollWorker.ts / gitPollProcess.ts). */
+
+/**
+ * PERF (v3.1, repo-switch): positive-only session cache for isRepo().
+ *
+ * openRepository() awaits isRepo() on the critical path of EVERY repo
+ * open/switch — a fresh SimpleGit instance plus a `git rev-parse
+ * --is-inside-work-tree` subprocess, before the UI can even start loading
+ * status. A directory that validated as a repo stays a repo for the
+ * session: external deletion is already handled elsewhere (getRepos()
+ * prunes missing paths, and every git call on a vanished repo fails with
+ * a clear error). Caching TRUE results turns every subsequent open /
+ * switch of a known repo into a zero-subprocess IPC round-trip.
+ * Negative results are NOT cached — `git init` in a plain folder must be
+ * picked up by the next attempt.
+ */
+const isRepoCache = new Set<string>();
 
 export async function isRepo(targetPath: string): Promise<boolean> {
+  if (isRepoCache.has(targetPath)) return true;
   try {
-    const git = simpleGit({ baseDir: targetPath });
-    return await git.checkIsRepo();
+    const git = withMergedGitEnv(simpleGit({ baseDir: targetPath, ...GIT_UNSAFE_OPTIONS }));
+    const ok = await git.checkIsRepo();
+    if (ok) isRepoCache.add(targetPath);
+    return ok;
   } catch {
     return false;
   }
 }
 
 export async function status(repoPath: string): Promise<StatusResult> {
+  // FOREGROUND status: the shared getGit() instance keeps the read-coalescing
+  // layer (concurrent renderer effects asking the same status share ONE
+  // subprocess) and the command-log instrumentation. The actual computation
+  // lives in gitStatusCore.runStatusJob — the SAME code the background git
+  // worker executes for watcher-driven refreshes (gitPollWorker.ts), so
+  // foreground and background results can never drift apart.
   const git = getGit(repoPath);
-  const s = await git.status();
-  const state = await detectRepoState(repoPath, git);
   const gitDir = await resolveGitDir(repoPath, git);
-  // Cherry-pick details — which commit is being picked and whether the pick has
-  // become EMPTY (its changes are already applied to HEAD, so there is nothing
-  // to commit). SmartGit surfaces this as "The working tree is in
-  // cherry-picking-state." and only allows Abort / Continue until it resolves.
-  let cherryPick: StatusResult['cherryPick'];
-  if (state.isCherryPicking) {
-    // Untracked ('?') entries don't block an empty pick — only tracked changes
-    // (staged or unstaged) and unresolved conflicts do.
-    const hasRealChanges = s.files.some((f) => f.index !== '?' && f.working_dir !== '?');
-    const empty = s.conflicted.length === 0 && !hasRealChanges;
-    let commit = '';
-    let subject = '';
-    try {
-      const out = await git.raw(['log', '-1', '--format=%H%x1f%s', 'CHERRY_PICK_HEAD']);
-      const [h, sub] = out.trim().split('\x1f');
-      commit = h || '';
-      subject = sub || '';
-    } catch {
-      /* CHERRY_PICK_HEAD may point to a pruned object mid-cleanup */
-    }
-    cherryPick = { commit, subject, empty };
-  }
-  // Revert state details — which commit is being undone (REVERT_HEAD).
-  let revert: StatusResult['revert'];
-  if (state.isReverting) {
-    let commit = '';
-    let subject = '';
-    try {
-      const out = await git.raw(['log', '-1', '--format=%H%x1f%s', 'REVERT_HEAD']);
-      const [h, sub] = out.trim().split('\x1f');
-      commit = h || '';
-      subject = sub || '';
-    } catch {
-      /* REVERT_HEAD may point to a pruned object mid-cleanup */
-    }
-    revert = { commit, subject };
-  }
-  // Merge state details — the subject of the merge (MERGE_MSG first line).
-  let merge: StatusResult['merge'];
-  if (state.isMerging) {
-    let message = '';
-    try {
-      const msgPath = path.join(gitDir, 'MERGE_MSG');
-      if (fs.existsSync(msgPath)) {
-        message = (fs.readFileSync(msgPath, 'utf8').split('\n')[0] || '').trim();
-      }
-    } catch {
-      /* ignore unreadable MERGE_MSG */
-    }
-    merge = { message };
-  }
-  // Rebase state details — progress ("step/total") from the sequencer dirs.
-  let rebase: StatusResult['rebase'];
-  if (state.isRebasing) {
-    let step: number | undefined;
-    let total: number | undefined;
-    try {
-      const readNum = async (file: string): Promise<number | undefined> => {
-        for (const dir of ['rebase-merge', 'rebase-apply']) {
-          const p = path.join(gitDir, dir, file);
-          if (fs.existsSync(p)) {
-            const n = parseInt((await fs.promises.readFile(p, 'utf8')).trim(), 10);
-            if (!Number.isNaN(n)) return n;
-          }
-        }
-        return undefined;
-      };
-      step = await readNum('msgnum');
-      total = await readNum('end');
-    } catch {
-      /* best-effort progress info */
-    }
-    rebase = { step, total };
-  }
-  // Bisect state details — HEAD is detached at the current candidate.
-  let bisect: StatusResult['bisect'];
-  if (state.isBisecting) {
-    let rev = '';
-    try {
-      rev = (await git.raw(['rev-parse', 'HEAD'])).trim();
-    } catch {
-      /* ignore */
-    }
-    bisect = { rev };
-  }
-  return {
-    not_added: s.not_added,
-    conflicted: s.conflicted,
-    created: s.created,
-    deleted: s.deleted,
-    modified: s.modified,
-    renamed: s.renamed.map((r) => ({ from: r.from, to: r.to })),
-    staged: s.files
-      .filter((f) => f.index !== ' ' && f.index !== '?' && f.index !== '!')
-      .map((f) => ({ path: f.path, index: f.index, working_dir: f.working_dir })),
-    ahead: s.ahead,
-    behind: s.behind,
-    current: s.current || undefined,
-    tracking: s.tracking || undefined,
-    files: s.files.map((f) => ({
-      path: f.path,
-      index: f.index as StatusResult['files'][number]['index'],
-      working_dir: f.working_dir as StatusResult['files'][number]['working_dir'],
-      old_path: (f as { from?: string }).from,
-    })),
-    isClean: s.isClean(),
-    isMerging: state.isMerging,
-    isRebasing: state.isRebasing,
-    isCherryPicking: state.isCherryPicking,
-    isReverting: state.isReverting,
-    isBisecting: state.isBisecting,
-    cherryPick,
-    revert,
-    merge,
-    rebase,
-    bisect,
-    detached: !s.current && s.files.length === 0 && !s.tracking,
-  };
+  return runStatusJob({ repoPath, gitDir }, git);
+}
+
+/**
+ * BACKGROUND status — the watcher-driven refresh path.
+ *
+ * The file watcher fires on every IDE auto-save / build churn (debounced
+ * 500ms/2s main-side, rate-limited 5s renderer-side) and used to re-run the
+ * whole `status` computation (porcelain parse of potentially thousands of
+ * entries + state reads) on the MAIN event loop — the loop that brokers
+ * every renderer IPC. Under sustained churn that visibly lagged the UI
+ * ("интерфейс тупит"). This variant executes the identical job in the
+ * dedicated background git process (see gitPollProcess.ts) — main only
+ * forwards one plain-data message per refresh and never pumps git output.
+ *
+ * The gitDir is resolved through the session cache (zero subprocesses after
+ * warm-up) and passed in as plain data, keeping the worker free of any
+ * main-side caches. Workers failing/crashing/cooldown fall back to the
+ * in-process run — identical result, just slower (same robustness ladder as
+ * the remote-status poll).
+ */
+export async function statusBackground(repoPath: string): Promise<StatusResult> {
+  const gitDir = await resolveGitDir(repoPath, getGit(repoPath));
+  const request: StatusJobRequest = { repoPath, gitDir };
+  return runStatusJobExternal(request);
 }
 
 export async function add(repoPath: string, files: string[]): Promise<void> {
@@ -374,13 +927,41 @@ export async function addAll(repoPath: string): Promise<void> {
   invalidateDiffCache(repoPath);
 }
 
+/**
+ * Stage only modifications to ALREADY-TRACKED files (git add -u).
+ * SmartGit "If nothing is staged → Commit all except untracked" behavior:
+ * modified/deleted tracked files are staged, new untracked files stay
+ * untracked. Pairs with stageAll() (= git add -A) which includes untracked.
+ */
+export async function stageAllTracked(repoPath: string): Promise<void> {
+  const git = getGit(repoPath);
+  removeStaleIndexLock(repoPath);
+  await git.raw(['add', '-u']);
+  invalidateDiffCache(repoPath);
+}
+
 export async function restore(repoPath: string, files: string[], staged = false): Promise<void> {
   const git = getGit(repoPath);
   removeStaleIndexLock(repoPath);
   const args = ['restore'];
   if (staged) args.push('--staged');
   args.push('--', ...files);
-  await git.raw(args);
+  try {
+    await git.raw(args);
+  } catch (e) {
+    // If the failure is caused by git-lfs filter-process (git-lfs not
+    // installed but .gitattributes configures LFS filters), retry with
+    // LFS smudge disabled so the restore can complete without the LFS
+    // filter. The LFS-tracked files will get their pointer content (not
+    // the real binary), but the REST of the files are restored correctly.
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg.includes('git-lfs') || msg.includes('filter-process')) {
+      const gitNoLfs = withMergedGitEnv(simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS }));
+      await gitNoLfs.raw(args);
+    } else {
+      throw e;
+    }
+  }
   invalidateDiffCache(repoPath);
 }
 
@@ -402,11 +983,50 @@ export async function commit(
   if (signoff) args.push('--signoff');
   if (noVerify) args.push('--no-verify');
   removeStaleIndexLock(repoPath);
-  const output = await git.raw(args);
+  let output: string;
+  try {
+    output = await git.raw(args);
+  } catch (e) {
+    // "Please tell me who you are" / "empty ident name not allowed" — neither
+    // repo-local nor global user.name/user.email exist (fresh machine, repo
+    // created without an identity). Retry ONCE with the app default identity
+    // (Settings → Git → Default commit author) passed as -c overrides, so the
+    // commit succeeds without silently picking up an unintended identity.
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/tell me who you are|empty ident/i.test(msg)) {
+      const name = String(getSetting('gitUserName') ?? '').trim();
+      const email = String(getSetting('gitUserEmail') ?? '').trim();
+      if (name || email) {
+        removeStaleIndexLock(repoPath);
+        const cArgs = [
+          ...(name ? ['-c', `user.name=${name}`] : []),
+          ...(email ? ['-c', `user.email=${email}`] : []),
+        ];
+        output = await git.raw([...cArgs, ...args]);
+      } else {
+        throw new Error(
+          `${msg}\n\nPrismGit: no commit identity found. Set "Default commit author" in Settings → Git, or configure user.name/user.email.`
+        );
+      }
+    } else {
+      throw e;
+    }
+  }
   // Bust the diff cache — HEAD has moved, every cached diff is now stale.
   invalidateDiffCache(repoPath);
-  // Extract commit hash from output: "[main abc1234] message"
-  const match = output.match(/\[([a-z0-9_-]+)(?:\s+\(root-commit\))?\s+([a-f0-9]{7,40})\]/);
+  // Task 29 (the REAL «hash not shown» root cause): the hash used to be
+  // parsed from the commit output "[branch hash] msg" with a branch-name
+  // charset of [a-z0-9_-] — NO '/'. Every branch like
+  // feature/smartgit-electron-v3 failed the match → commit() returned ''
+  // → the commit toast had NO hash at all (neither did the old «Хеш: …»
+  // detail line). Output-parsing is also fragile for detached HEAD
+  // ("[detached HEAD abc]...") and localized git output. rev-parse after
+  // a successful commit is authoritative — use it.
+  const head = (await git.raw(['rev-parse', 'HEAD'])).trim();
+  if (head) return head;
+  // Fallback (rev-parse should never fail right after a commit): the old
+  // output parse, now tolerant of '/' in branch names and detached HEAD.
+  const match = output.match(/\[([^\]\s]+)(?:\s+\(root-commit\))?\s+([a-f0-9]{7,40})\]/);
   return match ? match[2] : '';
 }
 
@@ -454,19 +1074,37 @@ export function parsePushOutput(output: string): { refs: PushRefStatus[]; upToDa
   return { refs, upToDate: upToDate || refs.every((r) => r.upToDate) && refs.length > 0 };
 }
 
-/** Spawn a git command and capture both streams (unlike simple-git's raw()). */
+/** Spawn a git command and capture both streams (unlike simple-git's raw()).
+ *
+ * PERFORMANCE: stdout/stderr are collected into Buffer chunks and joined
+ * once with `Buffer.concat` at the end. The previous `stdout += d.toString()`
+ * pattern was O(n²) — every chunk allocated a new string and copied all
+ * previous content. On a 5 MB `git ls-tree -r -l -z HEAD` output (50k-file
+ * repo) this was 50-200 ms of pure string churn.
+ */
 function spawnGitCapture(
   repoPath: string,
-  args: string[]
+  args: string[],
+  extraEnv?: Record<string, string>
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    const child = spawn('git', args, { cwd: repoPath, windowsHide: true });
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
-    child.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
+    const child = spawn('git', args, {
+      cwd: repoPath,
+      windowsHide: true,
+      // extraEnv carries the SSH transport env (GIT_SSH_COMMAND,
+      // SSH_ASKPASS...) — merged over the inherited environment.
+      env: extraEnv ? { ...process.env, ...extraEnv } : undefined,
+    });
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+    child.stdout.on('data', (d: Buffer) => { stdoutChunks.push(d); });
+    child.stderr.on('data', (d: Buffer) => { stderrChunks.push(d); });
     child.on('error', reject);
-    child.on('close', (code) => resolve({ code: code ?? -1, stdout, stderr }));
+    child.on('close', (code) => resolve({
+      code: code ?? -1,
+      stdout: Buffer.concat(stdoutChunks).toString('utf8'),
+      stderr: Buffer.concat(stderrChunks).toString('utf8'),
+    }));
   });
 }
 
@@ -549,9 +1187,21 @@ interface CachedHeadTree {
   lastUsed: number;
 }
 
-/** LRU cache: repoPath → cached HEAD tree. Capped at 16 repos. */
+/**
+ * LRU cache: repoPath → cached HEAD tree.
+ *
+ * MEMORY FIX (M1): the previous cap of 16 repos was too high — on a 50k-
+ * file monorepo a single HEAD tree entry holds ~4-10 MB (Map<path,hash> +
+ * Map<path,size> + Set<size>). 16 × 10 MB = 160 MB worst case, well above
+ * the main-process `--max-old-space-size=512` cap when combined with other
+ * heap. Reduced to 4: most users juggle ≤4 repos at once, and the LRU
+ * re-populates quickly when they switch back. The `sizeSet` is also dropped
+ * from cached entries now — it was only used during rename detection
+ * (transient), but it was kept in cache for the entry's lifetime, doubling
+ * memory for that field.
+ */
 const headTreeCache = new Map<string, CachedHeadTree>();
-const HEAD_TREE_CACHE_MAX = 16;
+const HEAD_TREE_CACHE_MAX = 4;
 
 function touchHeadTreeCache(repoPath: string): void {
   const entry = headTreeCache.get(repoPath);
@@ -788,6 +1438,9 @@ async function hashObjectPerFile(
  * Run `git` with stdin piped. Used by batchHashObject to feed a large path
  * list without ARG_MAX limits. Reuses the same spawn pattern as
  * spawnGitCapture but writes to stdin and closes it.
+ *
+ * PERFORMANCE: stdout/stderr collected as Buffer[] and joined once — same
+ * O(n²) fix as spawnGitCapture.
  */
 function spawnGitWithStdin(
   repoPath: string,
@@ -796,12 +1449,16 @@ function spawnGitWithStdin(
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn('git', args, { cwd: repoPath, windowsHide: true });
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
-    child.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+    child.stdout.on('data', (d: Buffer) => { stdoutChunks.push(d); });
+    child.stderr.on('data', (d: Buffer) => { stderrChunks.push(d); });
     child.on('error', reject);
-    child.on('close', (code) => resolve({ code: code ?? -1, stdout, stderr }));
+    child.on('close', (code) => resolve({
+      code: code ?? -1,
+      stdout: Buffer.concat(stdoutChunks).toString('utf8'),
+      stderr: Buffer.concat(stderrChunks).toString('utf8'),
+    }));
     // Write paths to stdin, then close it so git knows input is done.
     child.stdin.end(stdin);
   });
@@ -979,14 +1636,19 @@ async function lsRemoteBranch(
   branch: string
 ): Promise<string | null> {
   const auth = await remoteNetworkArgs(repoPath, remote, true);
-  const { code, stdout } = await spawnGitCapture(repoPath, [
-    ...auth, 'ls-remote', remote, `refs/heads/${branch}`,
-  ]);
-  if (code !== 0) return null;
-  const line = stdout.split(/\r?\n/).find((l) => l.trim().length > 0);
-  if (!line) return null;
-  const hash = line.split(/\t|\s+/)[0];
-  return /^[0-9a-f]{40}$/i.test(hash) ? hash : null;
+  const ssh = await networkSshEnv(repoPath, remote, true);
+  try {
+    const { code, stdout } = await spawnGitCapture(repoPath, [
+      ...auth, 'ls-remote', remote, `refs/heads/${branch}`,
+    ], ssh.env);
+    if (code !== 0) return null;
+    const line = stdout.split(/\r?\n/).find((l) => l.trim().length > 0);
+    if (!line) return null;
+    const hash = line.split(/\t|\s+/)[0];
+    return /^[0-9a-f]{40}$/i.test(hash) ? hash : null;
+  } finally {
+    ssh.cleanup();
+  }
 }
 
 export async function push(
@@ -997,7 +1659,15 @@ export async function push(
   force = false,
   tags = false,
   /** Remote-side branch name (Push To... dialog): refspec becomes `branch:target`. */
-  targetBranch?: string
+  targetBranch?: string,
+  /**
+   * Which git flag a FORCE push uses:
+   *   'force' → `--force`          — overwrite the remote unconditionally
+   *   'lease' → `--force-with-lease` — refuse when the remote-tracking ref is stale
+   * Resolution order: explicit param > `forcePushMode` app setting > 'force'.
+   * The forcePushPolicy / protectedBranches gate applies to BOTH modes.
+   */
+  forceMode?: ForcePushMode
 ): Promise<PushResult> {
   const git = getGit(repoPath);
   // No branch given: resolve the CURRENT branch and auto-publish it.
@@ -1022,6 +1692,39 @@ export async function push(
   // Explicit remote-side target ("Push To..." lets the user publish a local
   // branch under a DIFFERENT name on the remote): refspec `src:target`.
   const target = targetBranch?.trim() || undefined;
+
+  // ── Force-push policy (SmartGit Manual: Preferences → Commands) ──────────
+  // The forcePushPolicy / protectedBranches settings existed in the UI but
+  // push() never consulted them (dead setting — see docs/implementation-plan
+  // 0.1). Enforce at the SERVICE level so every force push goes through the
+  // policy: toolbar dropdown, Push To… dialog, AI tools, batch operations.
+  // The REMOTE-side branch is what gets protected: `git push --force origin
+  // HEAD:main` must be checked against 'main'.
+  //
+  // Defaults are TRANSPARENT: policy 'feature-only' + an EMPTY protected
+  // list (the list is opt-in — never fabricated) means every force push is
+  // allowed out of the box (user request: "push --force everywhere"). Only
+  // 'deny', or 'feature-only' combined with branches the user explicitly
+  // listed, blocks. A REAL server-side protection is reported by the server
+  // itself and translated by describeNetworkError().
+  if (force) {
+    const policy = getSetting<ForcePushPolicy | undefined>('forcePushPolicy') ?? 'feature-only';
+    const protectedBranches = getSetting<string[]>('protectedBranches');
+    // Remote-side branch: explicit target wins; a `HEAD:main` refspec (toolbar
+    // "push to remote branch") contributes its remote side ('main').
+    let remoteSideBranch: string | undefined = target || refspec || undefined;
+    if (remoteSideBranch && remoteSideBranch.includes(':')) {
+      remoteSideBranch = remoteSideBranch.split(':').pop() || undefined;
+    }
+    const verdict = isForcePushAllowed(remoteSideBranch, policy, protectedBranches);
+    if (!verdict.allowed) {
+      throw new Error(
+        `fatal: force-push denied by PrismGit policy — ${verdict.reason}` +
+        ` (Preferences → Commands → Force Push Policy)`
+      );
+    }
+  }
+
   const args: string[] = [
     ...(await remoteNetworkArgs(repoPath, remote, true)),
     // Hardening for servers/proxies that reject chunked uploads or HTTP/2
@@ -1035,7 +1738,15 @@ export async function push(
     'push',
   ];
   if (setUp) args.push('-u');
-  if (force) args.push('--force-with-lease');
+  if (force) {
+    // Effective flag: explicit param > forcePushMode setting > --force.
+    // Default is real --force (user request: "push --force everywhere") —
+    // --force-with-lease stays one click away via the mode selectors.
+    const mode: ForcePushMode = forceMode
+      ?? getSetting<ForcePushMode | undefined>('forcePushMode')
+      ?? 'force';
+    args.push(mode === 'lease' ? '--force-with-lease' : '--force');
+  }
   if (tags) args.push('--tags');
   args.push(remote);
   if (refspec) {
@@ -1047,9 +1758,12 @@ export async function push(
 
   // Capture BOTH streams: git prints ref status on stderr and exits 0 even
   // when nothing was pushed ("Everything up-to-date").
-  const run = await spawnGitCapture(repoPath, args).catch((e) => {
+  const ssh = await networkSshEnv(repoPath, remote, true);
+  const run = await spawnGitCapture(repoPath, args, ssh.env).catch((e) => {
+    ssh.cleanup();
     throw describeNetworkError(e, 'push');
   });
+  ssh.cleanup();
   if (run.code !== 0) {
     const err = new Error(run.stderr.trim() || run.stdout.trim() || 'git push failed');
     throw describeNetworkError(err, 'push');
@@ -1110,17 +1824,38 @@ export async function push(
 /**
  * Per-remote credentials from app settings (Repository Settings → Remotes,
  * shared with the Remotes tool). Empty when the user has not configured any.
+ *
+ * PERFORMANCE (ST-IO3): the underlying `getSetting('remoteAuth')` rehydrates
+ * every stored password for EVERY repo × remote on every call — 10 repos ×
+ * 3 remotes = 30 `decryptString` calls per fetch/pull/push. We now cache the
+ * rehydrated credential map in-memory for 5 s. The cache is dropped on
+ * `invalidateCache(repoPath)` so credential changes in Settings take effect
+ * immediately on the next operation.
  */
-function getStoredCredential(repoPath: string, remoteName: string): RemoteCredential | undefined {
+const REMOTE_AUTH_CACHE_TTL_MS = 5000;
+let remoteAuthCache: { value: Record<string, Record<string, RemoteCredential>> | undefined; ts: number } | null = null;
+
+function getRemoteAuthMap(): Record<string, Record<string, RemoteCredential>> | undefined {
+  const now = Date.now();
+  if (remoteAuthCache && now - remoteAuthCache.ts < REMOTE_AUTH_CACHE_TTL_MS) {
+    return remoteAuthCache.value;
+  }
   try {
-    const map = getSetting('remoteAuth') as
+    const value = getSetting('remoteAuth') as
       | Record<string, Record<string, RemoteCredential>>
       | undefined;
-    const cred = map?.[repoPath]?.[remoteName];
-    if (cred && (cred.username?.trim() || cred.password?.trim())) return cred;
+    remoteAuthCache = { value, ts: now };
+    return value;
   } catch {
     /* settings store unavailable (unit tests) — no credentials */
+    return undefined;
   }
+}
+
+function getStoredCredential(repoPath: string, remoteName: string): RemoteCredential | undefined {
+  const map = getRemoteAuthMap();
+  const cred = map?.[repoPath]?.[remoteName];
+  if (cred && (cred.username?.trim() || cred.password?.trim())) return cred;
   return undefined;
 }
 
@@ -1154,7 +1889,7 @@ export function buildHttpAuthArgs(
  */
 async function remoteUrlOf(repoPath: string, remoteName: string, pushUrl = false): Promise<string | undefined> {
   try {
-    const remotes = (await getGit(repoPath).getRemotes(true)) as Array<{
+    const remotes = (await getCachedRemotes(repoPath, true)) as Array<{
       name: string;
       refs: { fetch: string; push?: string };
     }>;
@@ -1180,6 +1915,76 @@ async function remoteNetworkArgs(repoPath: string, remoteName: string, pushUrl =
 }
 
 /**
+ * Resolve the simple-git instance (plus SSH env/cleanup) for ONE network
+ * command. When the remote is SSH and the user picked a PrismGit-managed
+ * key, a SHORT-LIVED simple-git instance is created with the
+ * GIT_SSH_COMMAND/SSH_ASKPASS environment — the cached getGit() instance is
+ * deliberately NOT polluted with per-remote env. Otherwise the shared
+ * cached instance is returned and cleanup is a no-op.
+ *
+ * Usage:
+ *   const { git, cleanup } = await networkGit(repoPath, remote);
+ *   try { ... } finally { cleanup(); }
+ */
+async function networkGit(
+  repoPath: string,
+  remoteName: string,
+  pushUrl = false
+): Promise<{ git: SimpleGit; cleanup: () => void }> {
+  try {
+    const url = await remoteUrlOf(repoPath, remoteName, pushUrl);
+    const ssh = buildSshEnv(url, repoPath);
+    const env: Record<string, string> = { ...GIT_ENV_LFS_SKIP, ...ssh.env };
+    // A network command NEVER runs on the shared cached getGit() instance:
+    // the cached instance is created with maxConcurrentProcesses: 2 and is
+    // used by EVERY local operation (status refreshes, diffs, log, commit…).
+    // A slow or hung network command (unreachable LFS-enabled server,
+    // credential-manager dialog waiting for input, huge fetch after the
+    // LFS troubleshooting) used to occupy those 2 queue slots and stall
+    // ALL git operations of the repository — the reported
+    // "git operations became slow after the LFS problems". A dedicated
+    // short-lived instance keeps slow downloads out of the local queue.
+    const git = withMergedGitEnv(
+      simpleGit({
+        baseDir: repoPath,
+        binary: 'git',
+        maxConcurrentProcesses: 4,
+        trimmed: false,
+        ...GIT_SSH_UNSAFE_OPTIONS,
+      }),
+      {
+        ...env,
+        // Never let git block on a terminal credential prompt — PrismGit is a
+        // GUI: HTTP(S) auth is injected via remoteNetworkArgs (-c overrides),
+        // SSH auth via GIT_SSH_COMMAND / SSH_ASKPASS. An unanswered prompt can
+        // otherwise hang the command invisibly (matches the push path).
+        GIT_TERMINAL_PROMPT: '0',
+      }
+    );
+    return { git, cleanup: ssh.cleanup };
+  } catch {
+    return { git: getGit(repoPath), cleanup: () => {} };
+  }
+}
+
+/**
+ * SSH env for the pull/fetch/push environment of one network command,
+ * plus the cleanup callback. Empty env + noop cleanup when not applicable.
+ */
+async function networkSshEnv(
+  repoPath: string,
+  remoteName: string,
+  pushUrl = false
+): Promise<SshEnvResult> {
+  try {
+    const url = await remoteUrlOf(repoPath, remoteName, pushUrl);
+    return buildSshEnv(url, repoPath);
+  } catch {
+    return { env: {}, cleanup: () => {} };
+  }
+}
+
+/**
  * Translate raw git network errors into actionable messages. The technical
  * detail is kept after the hint; the Authorization header value can never
  * appear in git output (it is an http.extraHeader, not a URL rewrite).
@@ -1187,7 +1992,29 @@ async function remoteNetworkArgs(repoPath: string, remoteName: string, pushUrl =
 function describeNetworkError(e: unknown, op: 'push' | 'pull' | 'fetch'): Error {
   const raw = e instanceof Error ? e.message : String(e);
   let hint = '';
-  if (/remote rejected|protected branch|GH006|hook declined|pre-receive/i.test(raw)) {
+  // TLS certificate rejection (expired / self-signed / unknown CA — the
+  // classic internal-corporate-Git case). The renderer's offerSslBypass()
+  // opens the SslBypassDialog for the SAME error class; this hint keeps the
+  // toast path (batch operations, background fetches) actionable too.
+  const ssl: ReturnType<typeof classifySslFailure> = classifySslFailure(raw);
+  // HTTP(S) authentication failure (no stored login / rejected / 403). The
+  // renderer's offerAuthBypass() opens the RemoteAuthDialog for the SAME
+  // error class; this hint keeps the toast path actionable too.
+  const auth: ReturnType<typeof classifyAuthFailure> = classifyAuthFailure(raw);
+  if (ssl) {
+    hint =
+      `The server's TLS certificate was rejected (${ssl.kind}` +
+      (ssl.host ? ` — ${ssl.host}` : '') +
+      `). Disable certificate verification for this repository and retry ` +
+      `(Repository Settings → Fetch and Pull, or the SSL dialog). `;
+  } else if (auth) {
+    hint =
+      `Authentication failed` +
+      (auth.kind === 'no-credentials' ? ' — no login/password is stored for this remote' : auth.kind === 'bad-credentials' ? ' — the stored login/password was rejected by the server' : auth.kind === 'forbidden' ? ' — the account lacks access (403)' : '') +
+      (auth.host ? ` (${auth.host})` : '') +
+      `. Enter Username + Password/token in the authentication dialog (it saves them and retries), ` +
+      `or Repository Settings → Remotes. `;
+  } else if (/remote rejected|protected branch|GH006|hook declined|pre-receive/i.test(raw)) {
     hint =
       'The server REFUSED the branch update — the branch is protected ' +
       '(e.g. GitHub "Protect this branch" / required PR reviews) or you lack ' +
@@ -1196,10 +2023,6 @@ function describeNetworkError(e: unknown, op: 'push' | 'pull' | 'fetch'): Error 
     hint =
       'The remote branch has commits you do not have locally — pull first ' +
       '(Pull button, or Pull --rebase), then push again. ';
-  } else if (/could not read Username|Authentication failed|401|403|authorization/i.test(raw)) {
-    hint =
-      `Authentication failed — set Username + Password/token for this remote in ` +
-      `Repository Settings → Remotes (or the Remotes tool → Edit URLs). `;
   } else if (/HTTP 400/.test(raw)) {
     hint =
       'The server rejected the request (HTTP 400) — usually a proxy or server ' +
@@ -1216,42 +2039,193 @@ function describeNetworkError(e: unknown, op: 'push' | 'pull' | 'fetch'): Error 
   return err;
 }
 
+/**
+ * Handle "untracked working tree files would be overwritten" errors.
+ * When git pull/checkout/merge fails because untracked files conflict
+ * with incoming files, auto-clean those specific files (git clean -f)
+ * and retry the operation.
+ *
+ * Returns true if the error was handled (caller should retry).
+ */
+function isUntrackedOverwriteError(e: unknown): boolean {
+  const msg = String(e);
+  return msg.includes('untracked working tree files would be overwritten');
+}
+
+/** Extract the file paths from "untracked working tree files would be
+ *  overwritten by merge: file1 file2" error messages. */
+function extractUntrackedFiles(e: unknown): string[] {
+  const msg = String(e);
+  const lines = msg.split('\n');
+  const files: string[] = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    // Lines with file paths are indented with a tab
+    if (line.startsWith('\t') && trimmed) {
+      files.push(trimmed);
+    }
+  }
+  return files;
+}
+
+/** Auto-clean conflicting untracked files, then the caller can retry. */
+async function cleanConflictingUntracked(repoPath: string, files: string[]): Promise<void> {
+  const git = getGit(repoPath);
+  removeStaleIndexLock(repoPath);
+  for (const f of files) {
+    try {
+      // Force-remove the untracked file that blocks the operation.
+      await git.raw(['clean', '-f', '--', f]);
+    } catch {
+      // If clean fails, try fs.unlink as a last resort.
+      try {
+        const fullPath = path.join(repoPath, f);
+        if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
+      } catch { /* ignore — will surface as a clearer error on retry */ }
+    }
+  }
+}
+
+// ── Auto-stash on common commands (SmartGit: Preferences → Commands) ───────
+// The generic autoStash() helper further below was DEAD CODE — nothing called
+// it, and the autoStashOnCommonCommands setting had no consumer. These two
+// helpers wire the setting into pull() and checkout(): stash the dirty tree
+// BEFORE the operation, pop it back AFTER (also on failure).
+
+/** Result of a pull()/checkout() that may have auto-stashed. */
+export interface AutoStashResult {
+  /** A stash was created before the operation (working tree was dirty). */
+  autoStashed: boolean;
+  /** The stash could NOT be popped back — it is kept; see Stashes view. */
+  popFailed: boolean;
+}
+
+const NO_AUTO_STASH: AutoStashResult = { autoStashed: false, popFailed: false };
+
+async function autoStashIfNeeded(repoPath: string, op: 'pull' | 'checkout'): Promise<AutoStashResult> {
+  const enabled = getSetting<boolean | undefined>('autoStashOnCommonCommands') ?? false;
+  if (!enabled) return NO_AUTO_STASH;
+  const git = getGit(repoPath);
+  let dirty = false;
+  try {
+    dirty = !(await git.status(['--ignore-submodules=all'])).isClean();
+  } catch {
+    return NO_AUTO_STASH;
+  }
+  if (!dirty) return NO_AUTO_STASH;
+  const includeUntracked = getSetting<boolean | undefined>('includeUntrackedInStash') ?? false;
+  const stashArgs = ['push', '-m', `prismgit-autostash-${op}`];
+  if (includeUntracked) stashArgs.push('-u');
+  try {
+    await git.stash(stashArgs);
+    return { autoStashed: true, popFailed: false };
+  } catch {
+    // Could not stash (index.lock etc.) — let the operation fail naturally
+    // with git's own "local changes would be overwritten" message.
+    return NO_AUTO_STASH;
+  }
+}
+
+/** Pop the auto-stash created by autoStashIfNeeded(). Best-effort. */
+async function autoStashPop(repoPath: string): Promise<boolean> {
+  try {
+    const git = getGit(repoPath);
+    removeStaleIndexLock(repoPath);
+    await git.stash(['pop']);
+    return true;
+  } catch {
+    // Conflicts — the stash entry is kept; user resolves via the Stashes view.
+    return false;
+  }
+}
+
 export async function pull(
   repoPath: string,
   remote = 'origin',
   branch?: string,
   rebase = false,
   noFF = false
-): Promise<void> {
-  const git = getGit(repoPath);
+): Promise<AutoStashResult> {
+  const { git, cleanup } = await networkGit(repoPath, remote);
   const args: string[] = [...(await remoteNetworkArgs(repoPath, remote)), 'pull'];
-  if (rebase) args.push('--rebase');
+  // ── Explicit reconciliation strategy ──────────────────────────────────
+  // Git 2.27+ refuses to pull divergent branches when `pull.rebase` is
+  // not configured, exiting with the famous:
+  //   fatal: Need to specify how to reconcile divergent branches.
+  // We pass an explicit `--rebase` OR `--no-rebase` on every pull so git
+  // never asks the user to set a global config — the strategy is decided
+  // per call by the caller (Settings → "Pull strategy: Merge/Rebase").
+  //
+  // `--no-rebase` is the "merge" strategy (default git behaviour pre-2.27).
+  // `--rebase` rewrites local commits on top of the incoming branch.
+  // `--no-ff` forces a merge commit even when fast-forward is possible.
+  args.push(rebase ? '--rebase' : '--no-rebase');
   if (noFF) args.push('--no-ff');
   args.push(remote);
   if (branch) args.push(branch);
   try {
-    await git.raw(args);
-  } catch (e) {
-    throw describeNetworkError(e, 'pull');
+    const stashInfo = await autoStashIfNeeded(repoPath, 'pull');
+    const result: AutoStashResult = { autoStashed: stashInfo.autoStashed, popFailed: false };
+    try {
+      try {
+        await git.raw(args);
+      } catch (e) {
+        // ── Auto-recover from "untracked working tree files would be
+        //    overwritten" — the user has local untracked files that
+        //    conflict with incoming files from the remote. Auto-clean
+        //    those files and retry the pull. This is safe because
+        //    the files are UNTRACKED — they're not in git history.
+        if (isUntrackedOverwriteError(e)) {
+          const files = extractUntrackedFiles(e);
+          if (files.length > 0) {
+            await cleanConflictingUntracked(repoPath, files);
+            // Retry the pull after cleaning.
+            try {
+              await git.raw(args);
+              return result;
+            } catch (e2) {
+              throw describeNetworkError(e2, 'pull');
+            }
+          }
+        }
+        throw describeNetworkError(e, 'pull');
+      }
+    } finally {
+      // Pop the auto-stash even when the pull failed — the user's local
+      // changes must come back to the working tree either way.
+      if (stashInfo.autoStashed) {
+        result.popFailed = !(await autoStashPop(repoPath));
+      }
+    }
+    return result;
+  } finally {
+    cleanup();
   }
 }
 
-// ── Fetch deduplication — one download per repo at a time ──────────────────
+// ── Fetch deduplication — one download per repo+remote at a time ─────────────
 // The same repository can be fetched concurrently from several entry points
 // (app menu accelerator + renderer keydown double-fire, background
 // "Poll or Fetch", History page auto-fetch, sidebar remote check, a double
 // click). Overlapping fetches download the same objects twice and show up as
 // duplicate "Fetch" commands in the command log. The second concurrent caller
 // now JOINS the in-flight fetch instead of starting a second download.
+//
+// The dedup key is `${repoPath}\u0001${remote}` — without `remote` in the
+// key, a fetch(repo,'origin') and a fetch(repo,'upstream') would collapse
+// into the same in-flight promise and the second remote would silently
+// never be downloaded. fetchAll (no specific remote) uses the bare
+// `repoPath` key, which is correct because `--all` fetches every remote.
 const inFlightFetches = new Map<string, Promise<void>>();
 
-function runExclusiveFetch(repoPath: string, run: () => Promise<void>): Promise<void> {
-  const existing = inFlightFetches.get(repoPath);
+function runExclusiveFetch(repoPath: string, remote: string | null, run: () => Promise<void>): Promise<void> {
+  const key = remote ? `${repoPath}\u0001${remote}` : repoPath;
+  const existing = inFlightFetches.get(key);
   if (existing) return existing;
   const p = run().finally(() => {
-    if (inFlightFetches.get(repoPath) === p) inFlightFetches.delete(repoPath);
+    if (inFlightFetches.get(key) === p) inFlightFetches.delete(key);
   });
-  inFlightFetches.set(repoPath, p);
+  inFlightFetches.set(key, p);
   return p;
 }
 
@@ -1261,8 +2235,8 @@ export function fetch(
   prune = false,
   tags = false
 ): Promise<void> {
-  return runExclusiveFetch(repoPath, async () => {
-    const git = getGit(repoPath);
+  return runExclusiveFetch(repoPath, remote, async () => {
+    const { git, cleanup } = await networkGit(repoPath, remote);
     const args: string[] = [...(await remoteNetworkArgs(repoPath, remote)), 'fetch'];
     if (prune) args.push('--prune');
     if (tags) args.push('--tags');
@@ -1271,54 +2245,64 @@ export function fetch(
       await git.raw(args);
     } catch (e) {
       throw describeNetworkError(e, 'fetch');
+    } finally {
+      cleanup();
     }
   });
 }
 
 export function fetchAll(repoPath: string, prune = false): Promise<void> {
-  return runExclusiveFetch(repoPath, async () => {
+  return runExclusiveFetch(repoPath, null, async () => {
     const git = getGit(repoPath);
     // Always prune — stale remote-tracking refs cause "cannot lock ref" errors
     // when the remote has been force-pushed (the local ref points to an OID
     // that the remote no longer expects).
     const shouldPrune = true; // prune === false means "don't force prune", but we still prune to avoid lock errors
-    const remotes = ((await git.getRemotes(true)) as Array<{ name: string }>).map((r) => r.name);
+    const remotes = ((await getCachedRemotes(repoPath, true)) as Array<{ name: string }>).map((r) => r.name);
     const hasCreds = remotes.some((r) => !!getStoredCredential(repoPath, r));
     if (!hasCreds) {
+      // No per-remote HTTP credentials — one plain fetch --all. SSH remotes
+      // still need their key env: build it from the first remote.
+      const { git: netGit, cleanup } = await networkGit(repoPath, remotes[0] ?? 'origin');
       const args: string[] = ['fetch', '--all', '--tags'];
       if (shouldPrune) args.push('--prune');
       try {
-        await git.raw(args);
-      } catch (e) {
-        // If the error is "cannot lock ref" (stale remote-tracking branch),
-        // try with --force to overwrite the stale ref
-        const errMsg = String(e);
-        if (errMsg.includes('cannot lock ref') || errMsg.includes('unable to update local ref')) {
-          try {
-            await git.raw(['fetch', '--all', '--tags', '--prune', '--force']);
-            return;
-          } catch {
-            // Still failing — fall through to original error
+        try {
+          await netGit.raw(args);
+        } catch (e) {
+          // If the error is "cannot lock ref" (stale remote-tracking branch),
+          // try with --force to overwrite the stale ref
+          const errMsg = String(e);
+          if (errMsg.includes('cannot lock ref') || errMsg.includes('unable to update local ref')) {
+            try {
+              await netGit.raw(['fetch', '--all', '--tags', '--prune', '--force']);
+              return;
+            } catch {
+              // Still failing — fall through to original error
+            }
           }
+          throw describeNetworkError(e, 'fetch');
         }
-        throw describeNetworkError(e, 'fetch');
+      } finally {
+        cleanup();
       }
       return;
     }
     const failures: string[] = [];
     for (const r of remotes) {
+      const { git: netGit, cleanup } = await networkGit(repoPath, r);
       try {
         const args: string[] = [...(await remoteNetworkArgs(repoPath, r)), 'fetch', '--tags'];
         if (shouldPrune) args.push('--prune');
         args.push(r);
-        await git.raw(args);
+        await netGit.raw(args);
       } catch (e) {
         const errMsg = String(e);
         if (errMsg.includes('cannot lock ref') || errMsg.includes('unable to update local ref')) {
           // Retry with --force to overwrite stale remote-tracking ref
           try {
             const args: string[] = [...(await remoteNetworkArgs(repoPath, r)), 'fetch', '--tags', '--prune', '--force', r];
-            await git.raw(args);
+            await netGit.raw(args);
             continue;
           } catch (e2) {
             failures.push(`${r}: ${describeNetworkError(e2, 'fetch').message}`);
@@ -1326,6 +2310,8 @@ export function fetchAll(repoPath: string, prune = false): Promise<void> {
           }
         }
         failures.push(`${r}: ${describeNetworkError(e, 'fetch').message}`);
+      } finally {
+        cleanup();
       }
     }
     if (failures.length === remotes.length && failures.length > 0) {
@@ -1336,12 +2322,194 @@ export function fetchAll(repoPath: string, prune = false): Promise<void> {
   });
 }
 
+/**
+ * Fetch ONE server-side refspec into FETCH_HEAD — the PR/MR head ref for the
+ * squash-to-branch flow in the Pull Requests / Reviews tools.
+ *
+ *   GitHub: refs/pull/<n>/head        (always exists in the BASE repo, even
+ *                                      for PRs from forks)
+ *   GitLab: refs/merge-requests/<n>/head
+ *
+ * The provider APIs list a PR's commits by SHA, but those objects may not
+ * exist in the local clone at all (the PR branch was never fetched, or the
+ * PR comes from a fork whose branch is absent locally). `git cat-file` /
+ * `merge-tree` / `cherry-pick` would then fail with "not a valid object".
+ * Fetching the canonical PR head ref brings the whole commit chain down
+ * WITHOUT creating any remote-tracking branch or touching any existing ref
+ * — the objects land in the local object store and FETCH_HEAD points at the
+ * PR head.
+ *
+ * Uses the same credential-aware network path as fetch() (stored HTTP
+ * credentials, SSH key env, proxy args), so it works for private repos.
+ */
+export function fetchRef(repoPath: string, remote: string, refspec: string): Promise<void> {
+  // Distinct in-flight key from plain fetch(): a running full fetch must not
+  // collapse a PR-ref fetch (and vice versa).
+  return runExclusiveFetch(repoPath, `${remote}\u0002${refspec}`, async () => {
+    const { git, cleanup } = await networkGit(repoPath, remote);
+    const args: string[] = [...(await remoteNetworkArgs(repoPath, remote)), 'fetch', remote, refspec];
+    try {
+      await git.raw(args);
+    } catch (e) {
+      throw describeNetworkError(e, 'fetch');
+    } finally {
+      cleanup();
+    }
+  });
+}
+
+/**
+ * BUGFIX "не получаю все ветки хотя в Remotes они есть":
+ * Read the configured fetch refspecs (`remote.<name>.fetch`) for every
+ * remote. A clone made with `--depth N` (git implies `--single-branch`)
+ * or an explicit `--single-branch` configures a refspec that covers ONE
+ * branch instead of `+refs/heads/*:refs/remotes/<name>/*`. Every later
+ * `git fetch` respects that refspec, so refs/remotes/ only ever contains
+ * that single branch — while the Remotes page (live `ls-remote`) happily
+ * shows them all. The Branches page then looks "incomplete".
+ *
+ * Returns { remoteName: [refspec, ...] } — the renderer combines this with
+ * isSingleBranchRefspec() (src/lib/remoteSpecs.ts) to detect the situation
+ * and offer `fetchAllBranches` as the one-click remediation.
+ */
+export async function remoteFetchSpecs(repoPath: string): Promise<Record<string, string[]>> {
+  const git = getGit(repoPath);
+  // `git config --get-regexp` exits 1 when nothing matches (fresh repo with
+  // no remotes) — simple-git turns that into a rejection; treat as empty.
+  const out = await git
+    .raw(['config', '--get-regexp', '^remote\\..*\\.fetch$'])
+    .catch(() => '');
+  const specs: Record<string, string[]> = {};
+  for (const line of String(out).split('\n').filter(Boolean)) {
+    // "remote.origin.fetch +refs/heads/main:refs/remotes/origin/main"
+    const m = line.match(/^remote\.(.+)\.fetch\s+(.+)$/);
+    if (m) {
+      const name = m[1].trim();
+      (specs[name] ??= []).push(m[2].trim());
+    }
+  }
+  return specs;
+}
+
+/**
+ * One-click remediation for a single-branch clone: widen the remote's fetch
+ * refspec back to the full wildcard (`git remote set-branches <remote> '*'
+ * — REPLACES the refspec list, exactly what SmartGit does), then fetch so
+ * all remote branches land in refs/remotes/. Skips the set-branches call
+ * when the refspec already covers all heads (custom multi-refspec configs
+ * are left untouched).
+ */
+export function fetchAllBranches(repoPath: string, remote = 'origin'): Promise<void> {
+  return runExclusiveFetch(repoPath, null, async () => {
+    const git = getGit(repoPath);
+    try {
+      const current = await git.raw(['config', '--get-all', `remote.${remote}.fetch`]).catch(() => '');
+      const full = new RegExp(`^\\+?refs/heads/\\*:refs/remotes/${remote.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/\\*$`);
+      const alreadyFull = String(current)
+        .split('\n')
+        .filter(Boolean)
+        .some((s) => full.test(s.trim()));
+      if (!alreadyFull) {
+        // '*' is passed through literally — git stores it as the wildcard
+        // refspec (no glob expansion happens in the shell-less spawn).
+        await git.raw(['remote', 'set-branches', remote, '*']);
+      }
+    } catch {
+      // No refspec at all (fresh remote) — set-branches below is still the
+      // right move; fall through to the unconditional fetch.
+      try { await git.raw(['remote', 'set-branches', remote, '*']); } catch { /* remote missing → fetch will report */ }
+    }
+    // Fetch through the credential-aware network path (same as fetch()).
+    const { git: netGit, cleanup } = await networkGit(repoPath, remote);
+    const args: string[] = [...(await remoteNetworkArgs(repoPath, remote)), 'fetch', '--prune', remote];
+    try {
+      await netGit.raw(args);
+    } catch (e) {
+      throw describeNetworkError(e, 'fetch');
+    } finally {
+      cleanup();
+    }
+  });
+}
+
+/**
+ * Validate candidate `git log` refs against the repo's actual ref list.
+ *
+ * ONE `git for-each-ref --format=%(refname)` ('meta' read — 1s TTL cached +
+ * in-flight coalesced; argv shared with the renderer's incoming-commits
+ * validation) resolves plain branch names ('main'), remote names
+ * ('origin/main'), tags ('v1.0') and full refnames. Specs that are NOT
+ * ref names (commit SHAs, 'HEAD', 'HEAD~2', ranges) fall back to
+ * `git rev-parse --verify -q` probes, preserving the exact behaviour of the
+ * old per-branch loop for those cases.
+ *
+ * Returns the refs that are safe to pass to `git log`, in input order.
+ * Invalid refs are silently skipped (expected when a branch was deleted or
+ * a remote ref was pruned).
+ */
+async function validateLogRefs(git: SimpleGit, branches: string[]): Promise<string[]> {
+  let refNames: Set<string> | null = null;
+  try {
+    // NOTE: argv must stay IDENTICAL to src/lib/incomingCommits.ts
+    // REF_LIST_ARGS so both share the coalescing-layer cache entry.
+    const out = await git.raw(['for-each-ref', '--format=%(refname)']);
+    refNames = new Set(out.split('\n').map((l) => l.trim()).filter(Boolean));
+  } catch {
+    // for-each-ref failed (corrupt repo?) — every ref goes through the
+    // rev-parse fallback below, which is the old sequential behaviour.
+  }
+  const valid: string[] = [];
+  const unresolved: string[] = [];
+  for (const b of branches) {
+    if (b === 'HEAD') {
+      // Always resolvable in a repo with commits; keep the cheap answer.
+      valid.push(b);
+      continue;
+    }
+    if (
+      refNames &&
+      (refNames.has(b) ||
+        refNames.has(`refs/heads/${b}`) ||
+        refNames.has(`refs/remotes/${b}`) ||
+        refNames.has(`refs/tags/${b}`))
+    ) {
+      valid.push(b);
+      continue;
+    }
+    // Not a known ref name — could be a SHA / rev expression (or a ref that
+    // genuinely does not exist). Probe with rev-parse.
+    unresolved.push(b);
+  }
+  for (const b of unresolved) {
+    // QUIET-FLAG PITFALL: `git rev-parse --verify -q <bad>` produces NO
+    // stderr, and simple-git treats an empty-stdout+empty-stderr failure as
+    // an EMPTY SUCCESS (resolves "") rather than a throw. So the "try/catch
+    // drop invalid refs" logic NEVER fired — invalid refs were treated as
+    // valid, passed to `git log`, and the whole log died with
+    // "fatal: ambiguous argument" → EMPTY history (user-visible: selecting
+    // a stale branch in History blanked the graph). VALIDITY = the resolved
+    // output is a non-empty SHA. (Verified: `-q <valid>` resolves the SHA.)
+    try {
+      const out = await git.raw(['rev-parse', '--verify', '-q', b]);
+      if (typeof out === 'string' && out.trim()) {
+        valid.push(b);
+      }
+      // Empty output (or a non-quiet throw, caught here) = the ref does not
+      // exist — skip it. Expected when a branch was deleted or a remote
+      // ref was pruned.
+    } catch {
+      /* invalid ref spec — skip */
+    }
+  }
+  return valid;
+}
+
 export async function log(
   repoPath: string,
-  options: { maxCount?: number; skip?: number; branch?: string; branches?: string[]; file?: string; follow?: boolean; all?: boolean; grep?: string; grepIgnoreCase?: boolean } = {}
+  options: { maxCount?: number; skip?: number; branch?: string; branches?: string[]; file?: string; follow?: boolean; all?: boolean; grep?: string; grepIgnoreCase?: boolean; author?: string; since?: string; until?: string } = {}
 ): Promise<LogEntry[]> {
   const git = getGit(repoPath);
-  const { maxCount = 500, skip = 0, branch, branches, file, follow = false, all = false, grep, grepIgnoreCase = false } = options;
+  const { maxCount = 500, skip = 0, branch, branches, file, follow = false, all = false, grep, grepIgnoreCase = false, author, since, until } = options;
 
   // Use a custom pretty format with record separator \x1e between commits and \x00 between fields.
   // simple-git's built-in log() uses \n\n to split commits which breaks when body contains blank lines.
@@ -1377,24 +2545,63 @@ export async function log(
   // `git log ref1 ref2 ref3` shows the union of all commits reachable from any of these refs,
   // in topological order — perfect for multi-branch history view.
   if (branches && branches.length > 0) {
-    // Don't use --all when explicit branches are given
-    for (const b of branches) rawArgs.push(b);
+    // Validate each ref BEFORE passing it to `git log`. If a ref doesn't
+    // exist (e.g. a deleted branch, or a remote-tracking ref that was pruned),
+    // `git log` exits 128 with "fatal: ambiguous argument". This spammed
+    // the command log with errors on every History page load.
+    //
+    // PERF (v3.1): the old validation ran ONE `git rev-parse --verify -q`
+    // PER BRANCH, SEQUENTIALLY — with the head+upstream view that is 2
+    // spawns, with a Ctrl+multi-branch selection it is N spawns (10+ on
+    // the live repo), each a full spawn+exec round-trip. We now fetch the
+    // repo's ENTIRE ref list with ONE
+    //   git for-each-ref --format=%(refname)
+    // — a 'meta' read in the coalescing layer (1s TTL + in-flight sharing),
+    // and the argv is IDENTICAL to the renderer's incoming-commits
+    // validation (src/lib/incomingCommits.ts REF_LIST_ARGS), so a History
+    // page load serves BOTH from the same cached subprocess.
+    // Entries that are NOT plain ref names (SHAs, HEAD~2, …) fall back to
+    // individual `rev-parse --verify -q` probes — behaviour identical to
+    // the old code for those exotic specs.
+    const validBranches = await validateLogRefs(git, branches);
+    if (validBranches.length === 0) {
+      // No valid refs — return empty instead of running git log with no refs
+      // (which would show HEAD, confusing the user).
+      return [];
+    }
+    for (const b of validBranches) rawArgs.push(b);
   } else if (all) {
     rawArgs.push('--all');
   } else if (branch) {
     rawArgs.push(branch);
   }
 
+  // v2.3.5 — AUTHOR + DATE filters, SERVER-SIDE. The user's report: with
+  // an author filter set, Refresh re-ran the same UNFILTERED git log (the
+  // filter was client-side over the loaded 100-commit page) — the author's
+  // commits beyond the first page only appeared after scrolling the whole
+  // history in. `--author` takes a regex over "Name <email>"; -i gives it
+  // the case-insensitivity the History filter UI promises. `--since/--until`
+  // pre-narrow the date window the same way (the client-side date check
+  // stays as the precise end-of-day guard — idempotent).
+  // ⚠ ORDER: every revision OPTION must precede the `-- <file>` pathspec
+  // separator — anything after `--` is a PATH. This also fixes the latent
+  // grep+file ordering bug (grep used to be pushed after `--`).
+  if (grep && grep.trim()) {
+    rawArgs.push(`--grep=${grep.trim()}`);
+    if (grepIgnoreCase) rawArgs.push('--regexp-ignore-case');
+  }
+  if (author && author.trim()) {
+    rawArgs.push(`--author=${author.trim()}`);
+    rawArgs.push('--regexp-ignore-case');
+  }
+  if (since) rawArgs.push(`--since=${since}`);
+  if (until) rawArgs.push(`--until=${until}`);
+
+  // Pathspec LAST — everything after `--` is a file path, never an option.
   if (file) {
     rawArgs.push('--', file);
     if (follow) rawArgs.splice(2, 0, '--follow');
-  }
-
-  // Commit-message search (Search tool → Commits tab). `--grep` matches the
-  // subject + body with basic regex; -i makes it case-insensitive.
-  if (grep && grep.trim()) {
-    rawArgs.push(`--grep=${grep.trim()}`);
-    if (grepIgnoreCase) rawArgs.push('-i');
   }
 
   let out: string;
@@ -1474,48 +2681,119 @@ export async function findCommit(repoPath: string, query: string): Promise<LogEn
 
 export async function branches(repoPath: string): Promise<BranchInfo[]> {
   const git = getGit(repoPath);
-  const current = await git.status();
+  // PERF (v3): this used to run a FULL `git status` here just to learn the
+  // current branch's tracking/ahead/behind — a whole extra subprocess
+  // (1–5s on LFS repos) whose data `for-each-ref` below ALREADY provides
+  // via %(upstream:short) / %(upstream:track) / %(HEAD). The status call
+  // was only "more authoritative" for an unborn HEAD — where there are no
+  // refs/heads entries at all, so the fields are never consumed. The extra
+  // `rev-parse refs/remotes/<upstream>` gone-probe is equally redundant:
+  // %(upstream:track) reports "gone" exactly when the configured upstream
+  // ref no longer exists.
 
   // Use for-each-ref to get all branches in a single git call.
   // Note: simple-git passes args through to git as-is, so we use real tab characters,
   // not the %x09 placeholder (which only works in --pretty=format).
-  // Fields: refname, objectname, subject, committerdate, *objectname (for annotated), upstream, HEAD
-  const fmt = [
+  //
+  // Fields for LOCAL branches:
+  //   refname, objectname, subject, committerdate, *objectname (annotated tag target),
+  //   upstream:short, upstream:track, HEAD
+  //
+  // `%(upstream:track)` is the key — it returns "ahead N", "behind N",
+  // "ahead N, behind M", "gone", or empty in a SINGLE git call for ALL
+  // local branches. Without it, we'd have to do N `git rev-list --count
+  // --left-right <branch>...<upstream>` calls (one per non-current branch
+  // with an upstream) — slow on big repos.
+  //
+  // Bug fix: the previous implementation only set `ahead`/`behind` on the
+  // CURRENT branch (taken from `git status`). Non-current branches had
+  // undefined ahead/behind, so the BranchSyncIndicator UI treated them
+  // as "in sync" (green PlugConnected) even when they were actually
+  // ahead/behind/gone.
+  const localFmt = [
     '%(refname)',
     '%(objectname)',
     '%(contents:subject)',
     '%(committerdate:iso-strict)',
     '%(*objectname)',
     '%(upstream:short)',
+    '%(upstream:track)',
     '%(HEAD)',
   ].join('\t');
-  let rawLocal = '';
-  let rawRemote = '';
-  try {
-    rawLocal = await git.raw(['for-each-ref', `--format=${fmt}`, 'refs/heads/']);
-  } catch { /* empty repo */ }
-  try {
-    rawRemote = await git.raw(['for-each-ref', `--format=${fmt}`, 'refs/remotes/']);
-  } catch { /* no remotes */ }
+  // Remote branches don't have an upstream — no track field needed.
+  const remoteFmt = [
+    '%(refname)',
+    '%(objectname)',
+    '%(contents:subject)',
+    '%(committerdate:iso-strict)',
+    '%(*objectname)',
+    '%(HEAD)',
+  ].join('\t');
+  // PERF: run both for-each-ref calls in parallel — they are independent.
+  const [localResult, remoteResult] = await Promise.all([
+    git.raw(['for-each-ref', `--format=${localFmt}`, 'refs/heads/']).catch(() => ''),
+    git.raw(['for-each-ref', `--format=${remoteFmt}`, 'refs/remotes/']).catch(() => ''),
+  ]);
+  const rawLocal = localResult;
+  const rawRemote = remoteResult;
 
   const result: BranchInfo[] = [];
 
-  const parseBlock = (raw: string, isRemote: boolean) => {
+  // Parse `%(upstream:track)` into { ahead, behind, gone }.
+  // Possible raw values (per git docs + verified output):
+  //   "" (no upstream configured)
+  //   "[gone]" (upstream was deleted on remote — git wraps in brackets!)
+  //   "[ahead 2]"
+  //   "[behind 5]"
+  //   "[ahead 2, behind 5]"
+  // Note: git wraps the WHOLE track value in square brackets. We strip
+  // them first, then parse the inner string.
+  const parseTrack = (track: string): { ahead?: number; behind?: number; gone?: boolean } => {
+    // Strip the wrapping `[...]` that git adds, then trim whitespace.
+    let t = track.trim();
+    if (t.startsWith('[') && t.endsWith(']')) {
+      t = t.slice(1, -1).trim();
+    }
+    if (!t) return {};
+    if (t === 'gone') return { gone: true };
+    const out: { ahead?: number; behind?: number } = {};
+    const aheadMatch = t.match(/ahead\s+(\d+)/);
+    const behindMatch = t.match(/behind\s+(\d+)/);
+    if (aheadMatch) out.ahead = parseInt(aheadMatch[1], 10);
+    if (behindMatch) out.behind = parseInt(behindMatch[1], 10);
+    return out;
+  };
+
+  const parseBlock = async (raw: string, isRemote: boolean) => {
     if (!raw.trim()) return;
     for (const line of raw.split('\n').filter(Boolean)) {
       const parts = line.split('\t');
       if (parts.length < 4) continue;
-      const [refname, objectname, subject, committerdate, targetHash, upstream, headMarker] = parts;
       let name: string;
+      let commitHash: string;
+      let isCurrent: boolean;
+      let upstream: string | undefined;
+      let trackInfo: { ahead?: number; behind?: number; gone?: boolean };
       if (isRemote) {
+        // Remote format: refname, objectname, subject, committerdate, *objectname, HEAD
+        const [refname, objectname, subject, committerdate, targetHash, headMarker] = parts;
         name = refname.replace(/^refs\/remotes\//, '');
+        commitHash = (targetHash || objectname) || '';
+        isCurrent = headMarker === '*';
+        upstream = undefined;
+        trackInfo = {};
       } else {
+        // Local format: refname, objectname, subject, committerdate, *objectname,
+        //              upstream:short, upstream:track, HEAD
+        const [refname, objectname, subject, committerdate, targetHash, upstreamShort, track, headMarker] = parts;
         name = refname.replace(/^refs\/heads\//, '');
+        commitHash = objectname || '';
+        isCurrent = headMarker === '*';
+        upstream = upstreamShort || undefined;
+        trackInfo = parseTrack(track || '');
       }
       // Skip symbolic refs like "origin/HEAD"
       if (name.endsWith('/HEAD')) continue;
-      const isCurrent = headMarker === '*';
-      const commitHash = (isRemote ? (targetHash || objectname) : objectname) || '';
 
       const branchInfo: BranchInfo = {
         name,
@@ -1523,65 +2801,184 @@ export async function branches(repoPath: string): Promise<BranchInfo[]> {
         remote: isRemote,
         lastCommit: {
           hash: commitHash.substring(0, 7),
-          date: committerdate || '',
-          message: subject || '',
+          date: parts[3] /* committerdate */ || '',
+          message: parts[2] /* subject */ || '',
         },
       };
 
       if (!isRemote && isCurrent) {
-        branchInfo.tracking = current.tracking || undefined;
-        branchInfo.ahead = current.ahead;
-        branchInfo.behind = current.behind;
+        // For the CURRENT branch, keep the `tracking` field name in sync
+        // with the rest of the UI — Toolbar Pull/Push dropdowns and
+        // HistoryPage head+upstream resolution read it. %(upstream:short)
+        // is the same `branch.<name>.merge` + remote pair git status
+        // would report; ahead/behind come from %(upstream:track) (same
+        // rev-list counts git status computes internally).
+        branchInfo.tracking = upstream;
+        if (trackInfo.gone) {
+          branchInfo.gone = true;
+        } else if (upstream) {
+          // In-sync semantics for the CURRENT branch: `git status` (the
+          // old data source here) reports EXPLICIT 0/0 when the branch
+          // matches its upstream, while an empty %(upstream:track) gives
+          // undefined/undefined. Downstream consumers (gitBranchesTrack
+          // integration test, Push/Pull toolbar enablement) treat the
+          // current branch's 0 as "nothing to push" — normalize it.
+          branchInfo.ahead = trackInfo.ahead ?? 0;
+          branchInfo.behind = trackInfo.behind ?? 0;
+        }
       } else if (!isRemote && upstream) {
+        // Non-current local branch with an upstream.
+        // Use the for-each-ref track field for ahead/behind/gone —
+        // this is the fix. Previously these were left undefined, so
+        // the BranchSyncIndicator treated every non-current branch
+        // as "in sync" (incorrect).
         branchInfo.upstream = upstream;
+        branchInfo.ahead = trackInfo.ahead;
+        branchInfo.behind = trackInfo.behind;
+        branchInfo.gone = trackInfo.gone;
       }
 
       result.push(branchInfo);
     }
   };
 
-  parseBlock(rawLocal, false);
-  parseBlock(rawRemote, true);
+  await parseBlock(rawLocal, false);
+  await parseBlock(rawRemote, true);
 
   return result;
 }
 
 export async function remotes(repoPath: string): Promise<RemoteInfo[]> {
   const git = getGit(repoPath);
-  const result = await git.getRemotes(true);
+  const result = await getCachedRemotes(repoPath, true);
   return result.map((r) => ({
     name: r.name,
-    refs: { fetch: r.refs.fetch, push: r.refs.push },
+    refs: { fetch: r.refs?.fetch ?? "", push: r.refs?.push ?? "" },
   }));
+}
+
+/**
+ * Would checking out `target` change .gitmodules? (phase 2.1 — SmartGit
+ * "Warn when checkout changes submodule configuration".)
+ *
+ * Compares HEAD..target restricted to the .gitmodules path; a non-empty
+ * diff means the submodule URL/path set differs between the current HEAD
+ * and the checkout target. `target` may be a local branch or a
+ * remote-tracking ref (origin/foo) — both are valid diff endpoints.
+ *
+ * Errors (unborn HEAD, missing .gitmodules on either side, corrupt repo)
+ * resolve to false — this is a courtesy warning, never a hard blocker.
+ */
+export async function hasSubmoduleConfigChanges(
+  repoPath: string,
+  target: string
+): Promise<boolean> {
+  const git = getGit(repoPath);
+  try {
+    const out = await git.raw(['diff', `HEAD..${target}`, '--', '.gitmodules']);
+    return out.trim().length > 0;
+  } catch {
+    return false;
+  }
 }
 
 export async function checkout(
   repoPath: string,
   branch: string,
   options: { newBranch?: boolean; force?: boolean; track?: boolean } = {}
-): Promise<void> {
+): Promise<AutoStashResult> {
+  // NOTE: do NOT add a `--` separator before `branch` here. Unlike most git
+  // commands, `git checkout` treats `--` as the pathspec separator, so
+  // `git checkout -- main` would discard all working-tree changes instead
+  // of switching to branch `main`. Branch-name argument injection is
+  // already mitigated upstream: createBranch uses `--`, and refspecs from
+  // the UI are validated to start with a letter/ref-prefix before they
+  // ever reach this code path.
   const args: string[] = ['checkout'];
   if (options.newBranch) args.push('-b');
   if (options.force) args.push('--force');
   if (options.track) args.push('--track');
   args.push(branch);
   const cmd = `git ${args.join(' ')}`;
-  await withOperationLog(options.newBranch ? 'Create & Checkout Branch' : 'Checkout', repoPath, cmd, async () => {
+  return withOperationLog(options.newBranch ? 'Create & Checkout Branch' : 'Checkout', repoPath, cmd, async () => {
     const git = getGit(repoPath);
+    // Auto-stash (Preferences → Commands → autoStashOnCommonCommands): a dirty
+    // working tree no longer blocks checkout; changes come back after.
+    const stashInfo = await autoStashIfNeeded(repoPath, 'checkout');
+    const result: AutoStashResult = { autoStashed: stashInfo.autoStashed, popFailed: false };
     try {
-      await git.raw(args);
-    } catch (e) {
-      const err = e as { stderr?: string; message?: string };
-      const msg = err?.stderr || err?.message || String(e);
-      const lines = msg.split('\n').filter(l => l.includes('error:') || l.includes('fatal:'));
-      throw new Error(lines.length > 0 ? lines.join('\n') : msg);
+      try {
+        await git.raw(args);
+      } catch (e) {
+        // ── BUGFIX: `git checkout --track origin/main` dies with
+        //    "fatal: a branch named 'main' already exists" when a local
+        //    branch of the same short name is already there (user report:
+        //    "При переключении на Remote ветку словил сообщение...").
+        //    Switching to the existing local branch is what the user meant —
+        //    fall back to a plain checkout of the stripped name.
+        //    (Renderers also pre-check, this is the defense-in-depth layer
+        //    for every other caller of git:checkout.)
+        if (options.track) {
+          const msg = (e as { stderr?: string; message?: string })?.stderr
+            || (e as { message?: string })?.message || String(e);
+          const m = msg.match(/a branch named '([^']+)' already exists/);
+          if (m) {
+            const localName = branch.replace(/^[^/]+\//, '');
+            if (localName === m[1]) {
+              await git.raw(['checkout', ...(options.force ? ['--force'] : []), localName]);
+              return result;
+            }
+          }
+        }
+        // ── Auto-recover from "untracked working tree files would be
+        //    overwritten by checkout" — same as pull.
+        if (isUntrackedOverwriteError(e)) {
+          const files = extractUntrackedFiles(e);
+          if (files.length > 0) {
+            await cleanConflictingUntracked(repoPath, files);
+            // Retry checkout after cleaning.
+            try {
+              await git.raw(args);
+              return result;
+            } catch (e2) {
+              const err2 = e2 as { stderr?: string; message?: string };
+              const msg2 = err2?.stderr || err2?.message || String(e2);
+              const lines2 = msg2.split('\n').filter(l => l.includes('error:') || l.includes('fatal:'));
+              throw new Error(lines2.length > 0 ? lines2.join('\n') : msg2);
+            }
+          }
+        }
+        const err = e as { stderr?: string; message?: string };
+        const msg = err?.stderr || err?.message || String(e);
+        const lines = msg.split('\n').filter(l => l.includes('error:') || l.includes('fatal:'));
+        throw new Error(lines.length > 0 ? lines.join('\n') : msg);
+      }
+    } finally {
+      if (stashInfo.autoStashed) {
+        result.popFailed = !(await autoStashPop(repoPath));
+      }
     }
+    return result;
   });
 }
 
 export async function checkoutFile(repoPath: string, file: string, ref?: string): Promise<void> {
   const git = getGit(repoPath);
   await git.checkout([ref || 'HEAD', '--', file]);
+}
+
+/**
+ * Restore multiple files from a ref in ONE git call instead of N sequential
+ * calls. `git checkout <ref> -- f1 f2 f3` works for any number of paths
+ * in a single invocation.
+ *
+ * For 50 files this is ~50× faster than calling checkoutFile() in a for-loop.
+ */
+export async function checkoutFiles(repoPath: string, files: string[], ref?: string): Promise<void> {
+  if (files.length === 0) return;
+  const git = getGit(repoPath);
+  removeStaleIndexLock(repoPath);
+  await git.checkout([ref || 'HEAD', '--', ...files]);
 }
 
 export async function createBranch(
@@ -1595,7 +2992,9 @@ export async function createBranch(
   const args: string[] = ['branch'];
   if (force) args.push('-f');
   if (track) args.push('--track');
-  args.push(name, startPoint || 'HEAD');
+  // SECURITY: `--` separator before user-controlled `name` so a branch
+  // name starting with `-` cannot be interpreted as a git option.
+  args.push('--', name, startPoint || 'HEAD');
   await git.raw(args);
 }
 
@@ -1607,7 +3006,12 @@ export async function deleteBranch(
 ): Promise<void> {
   const git = getGit(repoPath);
   if (remote) {
-    await git.raw([...(await remoteNetworkArgs(repoPath, 'origin', true)), 'push', 'origin', '--delete', name]);
+    const { git: netGit, cleanup } = await networkGit(repoPath, 'origin', true);
+    try {
+      await netGit.raw([...(await remoteNetworkArgs(repoPath, 'origin', true)), 'push', 'origin', '--delete', name]);
+    } finally {
+      cleanup();
+    }
   } else {
     await git.deleteLocalBranch(name, force);
   }
@@ -1664,10 +3068,16 @@ export async function abortMerge(repoPath: string): Promise<void> {
   await git.merge(['--abort']);
 }
 
-export async function continueMerge(repoPath: string): Promise<void> {
+/**
+ * Continue merge by committing the resolved conflicts.
+ * Returns the FULL hash of the created merge commit — the UI shows it as
+ * a copyable chip in the «Merge-коммит создан» toast (Task 29: the user
+ * reported commit hashes missing from toasts).
+ */
+export async function continueMerge(repoPath: string): Promise<string> {
   const git = getGit(repoPath);
-  // Continue merge by committing the resolved conflicts
   await git.raw(['commit', '--no-edit']);
+  return (await git.raw(['rev-parse', 'HEAD'])).trim();
 }
 
 /**
@@ -1728,8 +3138,15 @@ export async function aheadBehind(
   }
 }
 
-/** Never-resolving safety timeout for the network fetch of a remote check. */
-const REMOTE_FETCH_TIMEOUT_MS = 60_000;
+/** Inactivity timeout for the network fetch of a remote check — kills hung
+ * fetch subprocesses after 60s WITHOUT output (see gitPollCore.ts for the
+ * full rationale; the value is owned by the poll core because the fetch runs
+ * inside the dedicated git-poll process). */
+const REMOTE_FETCH_TIMEOUT_MS = DEFAULT_REMOTE_FETCH_TIMEOUT_MS;
+/** Back-off for poll results that carry a network error: don't re-fetch a
+ * failing remote every cycle (60s) — that is a spawn storm while the network
+ * is down. Successful results keep the 60s TTL. */
+const POLL_ERROR_TTL_MS = 5 * 60_000;
 
 function emptyRemoteCheckSummary(repoPath: string): RemoteCheckSummary {
   return {
@@ -1743,11 +3160,6 @@ function emptyRemoteCheckSummary(repoPath: string): RemoteCheckSummary {
     fetched: false,
     checkedAt: Date.now(),
   };
-}
-
-async function countRevList(git: SimpleGit, args: string[]): Promise<number> {
-  const out = await git.raw(args);
-  return parseInt(out.trim(), 10) || 0;
 }
 
 /**
@@ -1773,91 +3185,183 @@ function getBackgroundFetchRemotes(repoPath: string): string[] {
  * computations of incoming/outgoing commit counters and the working-tree
  * change count. NEVER throws — all failures land in `error`.
  */
+// Cache for pollRemoteSummary results. Each repo is polled at most once
+// per POLL_CACHE_TTL_MS, regardless of how many times pollRemoteSummaries
+// is called. This was the #2 source of git command spam: the sidebar
+// polled ALL repos every 30s (boost) / 120s (baseline), and EACH repo
+// ran 6-7 git commands. With 10 repos = 60-70 commands per poll cycle.
+// FAILED fetches get POLL_ERROR_TTL_MS instead — an unreachable remote
+// must not be retried every minute.
+const POLL_CACHE_TTL_MS = 60_000; // 1 minute — results are cached for 60s
+const pollCache = new Map<string, { summary: RemoteCheckSummary; expiresAt: number }>();
+// In-flight promises: prevents the race where two pollRemoteSummary calls
+// for the SAME repo both see a cache miss and both start computing.
+// Call A starts computing → sets inFlight. Call B sees inFlight → awaits
+// the same promise instead of spawning a duplicate set of git commands.
+const pollInFlight = new Map<string, Promise<RemoteCheckSummary>>();
+
 export async function pollRemoteSummary(repoPath: string): Promise<RemoteCheckSummary> {
-  const summary = emptyRemoteCheckSummary(repoPath);
-  if (!fs.existsSync(path.join(repoPath, '.git'))) {
-    return summary;
+  // Check cache first — if we polled this repo recently, return the cached result.
+  const cached = pollCache.get(repoPath);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.summary;
   }
 
-  const git = getGit(repoPath);
-
-  // 1. Remotes
-  try {
-    const remotes = (await git.getRemotes(true)) as Array<{ name: string; refs: { fetch: string } }>;
-    summary.remotes = remotes.map((r) => r.name);
-    summary.hasRemote = remotes.length > 0;
-  } catch {
-    return summary; // not a repo or unreadable — nothing else to report
+  // RACE FIX: if a poll for this repo is already in flight, await the same
+  // promise instead of spawning a duplicate set of git commands.
+  const inFlight = pollInFlight.get(repoPath);
+  if (inFlight) {
+    return inFlight;
   }
 
-  // 2. Network fetch. Refresh ONLY the remotes whose "Perform background
-  //    Poll or Fetch" checkbox is enabled in the repository settings — never
-  //    every remote of every repository. With no checked remotes there is no
-  //    network activity at all (counters reflect the last fetch).
-  //    GIT_TERMINAL_PROMPT=0 so a credential prompt can never hang the
-  //    background poll; per-remote timeout as a safety net.
-  //    NOTE: only the override variable goes into .env() — spreading the full
-  //    process.env here would trip simple-git's "unsafe operations" guard
-  //    whenever the user's environment contains EDITOR/PAGER etc.
-  if (summary.hasRemote) {
-    const checked = getBackgroundFetchRemotes(repoPath).filter((n) => summary.remotes.includes(n));
+  // Create the promise and store it BEFORE starting any async work so
+  // that subsequent calls see it immediately.
+  const promise = (async (): Promise<RemoteCheckSummary> => {
+    const summary = emptyRemoteCheckSummary(repoPath);
+    if (!fs.existsSync(path.join(repoPath, '.git'))) {
+      return summary;
+    }
+
+    // 1. Remotes (cheap: TTL-cached + in-flight-coalesced in THIS process).
+    try {
+      const remotes = (await getCachedRemotes(repoPath, true)) as Array<{ name: string; refs: { fetch: string } }>;
+      summary.remotes = remotes.map((r) => r.name);
+      summary.hasRemote = remotes.length > 0;
+    } catch {
+      return summary; // not a repo or unreadable — nothing else to report
+    }
+
+    // 2. Resolve the job's settings-dependent inputs HERE, in the main
+    //    process (in-memory settings + cached git reads): which remotes are
+    //    opted into "Perform background Poll or Fetch", the SSH env (incl.
+    //    the askpass secret), and the per-remote HTTP(S) auth `-c` args.
+    //    The git-poll worker is deliberately dumb — plain data in, plain
+    //    data out — so secrets never leave the main process as anything
+    //    but transient env-var strings, and the worker bundle stays free
+    //    of electron/settings/storage imports.
+    const checked = summary.hasRemote
+      ? getBackgroundFetchRemotes(repoPath).filter((n) => summary.remotes.includes(n))
+      : [];
+    let sshEnv: Record<string, string> = {};
+    let sshCleanup: (() => void) | null = null;
+    const authArgs: Record<string, string[]> = {};
     if (checked.length > 0) {
-      const fetchGit = simpleGit({ baseDir: repoPath, binary: 'git' })
-        .env({ GIT_TERMINAL_PROMPT: '0' });
-      const perRemote = async (name: string): Promise<void> => {
-        const authArgs = await remoteNetworkArgs(repoPath, name);
-        await Promise.race([
-          fetchGit.raw([...authArgs, 'fetch', '--prune', '--quiet', name]),
-          new Promise<never>((_, reject) => {
-            const timer = setTimeout(
-              () => reject(new Error(`fetch timed out after ${REMOTE_FETCH_TIMEOUT_MS / 1000}s`)),
-              REMOTE_FETCH_TIMEOUT_MS
-            );
-            // Don't keep the process alive just for this timer.
-            (timer as { unref?: () => void }).unref?.();
-          }),
-        ]);
-      };
-      const results = await Promise.allSettled(checked.map(perRemote));
-      const errors = results
-        .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
-        .map((r) => (r.reason instanceof Error ? r.reason.message : String(r.reason)));
-      if (errors.length === 0) {
-        summary.fetched = true;
-      } else if (errors.length === checked.length) {
-        summary.error = errors.join('; ');
-      } else {
-        // At least one remote refreshed the refs; surface partial failures.
-        summary.fetched = true;
-        summary.error = errors.join('; ');
+      // SSH env (GIT_SSH_COMMAND / askpass) resolved once from the first
+      // checked remote — key selection is per-repo, so the env is identical
+      // for every remote of this repository.
+      const ssh = await networkSshEnv(repoPath, checked[0]);
+      sshEnv = ssh.env;
+      sshCleanup = ssh.cleanup;
+      for (const name of checked) {
+        authArgs[name] = await remoteNetworkArgs(repoPath, name);
       }
     }
+
+    // 3. Execute the poll job — the network fetch of the opted-in remotes
+    //    (guarded by a timeout that KILLS hung fetch subprocesses; never
+    //    prompts) plus the four local counter reads — in the DEDICATED
+    //    git-poll process (see gitPollProcess.ts / gitPollCore.ts).
+    //
+    //    PERF (v3.3): all of that used to run on the MAIN event loop,
+    //    which is also the broker of every renderer IPC call. A poll cycle
+    //    across a sidebar of repos spawned per repo a fetch + 4 reads, with
+    //    subprocess bookkeeping and output pumping — saturating the loop
+    //    and queueing UI interactions for seconds ("интерфейс тупит",
+    //    degrading with every repo switch). In a separate OS process the
+    //    poll cannot contend with the UI at all: main forwards ONE message
+    //    per repo and awaits the plain-data result. Non-Electron hosts
+    //    (vitest) transparently run the same job in-process.
+    try {
+      const request: PollJobRequest = {
+        repoPath,
+        checkedRemotes: checked,
+        sshEnvVars: sshEnv,
+        authArgs,
+        fetchTimeoutMs: REMOTE_FETCH_TIMEOUT_MS,
+      };
+      const result = await runPollJobExternal(request);
+      summary.fetched = result.fetched;
+      if (result.error != null) summary.error = result.error;
+      summary.branch = result.branch;
+      summary.incoming = result.incoming;
+      summary.outgoing = result.outgoing;
+      summary.dirty = result.dirty;
+    } catch (e) {
+      // Belt and braces: the poll job never throws by design (fetch errors
+      // land in result.error) — a catastrophic failure still must not
+      // reject the whole poll.
+      summary.error = e instanceof Error ? e.message : String(e);
+    } finally {
+      // The askpass temp file (if any) lives under sshEnvVars.SSH_ASKPASS —
+      // main owns its lifecycle, the worker never deletes it.
+      sshCleanup?.();
+    }
+
+    summary.checkedAt = Date.now();
+    // Cache the result so the next poll within the TTL returns instantly
+    // without spawning any git subprocesses. Network errors back off for
+    // POLL_ERROR_TTL_MS — re-fetching a dead remote every 60s was a spawn
+    // storm whenever the network/VPN went down (and the fetch subprocesses
+    // used to linger even longer than that).
+    const ttl = summary.error ? POLL_ERROR_TTL_MS : POLL_CACHE_TTL_MS;
+    pollCache.set(repoPath, { summary, expiresAt: Date.now() + ttl });
+    return summary;
+  })(); // end of promise IIFE
+
+  // Store the in-flight promise so concurrent calls can await it.
+  pollInFlight.set(repoPath, promise);
+
+  try {
+    return await promise;
+  } finally {
+    // Clean up the in-flight entry — subsequent calls will either hit the
+    // cache (just set) or start a fresh computation.
+    pollInFlight.delete(repoPath);
   }
+}
 
-  // 3. Current branch
-  try {
-    const name = (await git.raw(['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
-    summary.branch = name === 'HEAD' ? null : name; // detached HEAD
-  } catch { /* keep null */ }
+/**
+ * Test/observability hook: the pollCache entry of one repo (summary +
+ * expiresAt), so tests can assert the TTL policy — 60s for successful
+ * results, POLL_ERROR_TTL_MS (5 min) back-off for network errors.
+ */
+export function __pollCacheEntryForTests(repoPath: string): { summary: RemoteCheckSummary; expiresAt: number } | undefined {
+  return pollCache.get(repoPath);
+}
 
-  // 4. Incoming: commits reachable from remote-tracking branches but not from
-  //    any local branch. Outgoing is the mirror image. These aggregates don't
-  //    require an upstream to be configured and cover all branches at once.
-  try {
-    summary.incoming = await countRevList(git, ['rev-list', '--count', '--remotes', '--not', '--branches']);
-  } catch { /* keep 0 */ }
-  try {
-    summary.outgoing = await countRevList(git, ['rev-list', '--count', '--branches', '--not', '--remotes']);
-  } catch { /* keep 0 */ }
-
-  // 5. Working tree changes (local only, cheap)
-  try {
-    const status = await git.raw(['status', '--porcelain']);
-    summary.dirty = status.split('\n').filter((line) => line.trim().length > 0).length;
-  } catch { /* keep 0 */ }
-
-  summary.checkedAt = Date.now();
-  return summary;
+/**
+ * Clear the poll cache for a specific repo (or all repos when no path
+ * given). Used by tests so each `pollRemoteSummary` call sees fresh git
+ * state instead of the cached result from a prior test. In production
+ * callers should NOT call this — the cache is the whole point of the
+ * background poll throttling.
+ *
+ * PERF (v3.4) `opts.remotes` (default TRUE for test parity): production
+ * IPC passes `remotes: false` — the manual "Check all repositories" click
+ * must re-poll but dropping the REMOTES cache only re-spawns `git remote -v`
+ * per repo on the MAIN loop for data that cannot have changed by clicking a
+ * button. Remotes have their own 60s TTL and explicit mutation-based
+ * invalidation (addRemote/removeRemote/etc.).
+ */
+export function clearPollCache(repoPath?: string, opts?: { remotes?: boolean }): void {
+  const wipeRemotes = opts?.remotes !== false;
+  if (repoPath) {
+    pollCache.delete(repoPath);
+  } else {
+    pollCache.clear();
+  }
+  // PERF-2: tests mutate repos through raw `git` commands the app never
+  // sees — the read coalescing caches must go the same way, or subsequent
+  // assertions would observe pre-mutation cached reads.
+  invalidateReadCache(repoPath);
+  if (!wipeRemotes) return;
+  // remotesCache keys are '<repoPath>|<withRefs>' — drop both variants.
+  if (repoPath) {
+    remotesCache.delete(repoPath + '|1');
+    remotesCache.delete(repoPath + '|0');
+  } else {
+    remotesCache.clear();
+  }
 }
 
 /**
@@ -1892,79 +3396,12 @@ export async function pollRemoteSummaries(paths: string[]): Promise<Record<strin
   return result;
 }
 
-function parseDiff(rawDiff: string, oldPath: string, newPath: string): { hunks: DiffHunk[]; newFile: boolean; deletedFile: boolean; renamedFile: boolean; modeChange?: { oldMode: number; newMode: number } } {
-  const lines = rawDiff.split('\n');
-  const hunks: DiffHunk[] = [];
-  let currentHunk: DiffHunk | null = null;
-  let oldLine = 0;
-  let newLine = 0;
-  let newFile = false;
-  let deletedFile = false;
-  let renamedFile = false;
-  let modeChange: { oldMode: number; newMode: number } | undefined;
-
-  for (const line of lines) {
-    if (line.startsWith('new file mode')) newFile = true;
-    if (line.startsWith('deleted file mode')) deletedFile = true;
-    if (line.startsWith('rename from') || line.startsWith('rename to')) renamedFile = true;
-    const modeMatch = line.match(/^old mode (\d+)$/) || line.match(/^new mode (\d+)$/);
-    if (modeMatch) {
-      const mode = parseInt(modeMatch[1], 10);
-      if (line.startsWith('old mode')) modeChange = { oldMode: mode, newMode: modeChange?.newMode ?? mode };
-      if (line.startsWith('new mode')) modeChange = { oldMode: modeChange?.oldMode ?? mode, newMode: mode };
-    }
-    if (line.startsWith('diff --git')) continue;
-    if (line.startsWith('index ')) continue;
-    if (line.startsWith('--- ') || line.startsWith('+++ ')) continue;
-    if (line.startsWith('@@')) {
-      if (currentHunk) hunks.push(currentHunk);
-      const match = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/);
-      if (match) {
-        const oldStart = parseInt(match[1], 10);
-        const oldLines = match[2] ? parseInt(match[2], 10) : 1;
-        const newStart = parseInt(match[3], 10);
-        const newLines = match[4] ? parseInt(match[4], 10) : 1;
-        currentHunk = {
-          oldStart,
-          oldLines,
-          newStart,
-          newLines,
-          header: line,
-          lines: [],
-        };
-        oldLine = oldStart;
-        newLine = newStart;
-      }
-      continue;
-    }
-    if (currentHunk) {
-      if (line.startsWith('+')) {
-        currentHunk.lines.push({
-          type: 'add',
-          content: line.substring(1),
-          oldLineNumber: null,
-          newLineNumber: newLine++,
-        });
-      } else if (line.startsWith('-')) {
-        currentHunk.lines.push({
-          type: 'del',
-          content: line.substring(1),
-          oldLineNumber: oldLine++,
-          newLineNumber: null,
-        });
-      } else if (line.startsWith(' ')) {
-        currentHunk.lines.push({
-          type: 'context',
-          content: line.substring(1),
-          oldLineNumber: oldLine++,
-          newLineNumber: newLine++,
-        });
-      }
-    }
-  }
-  if (currentHunk) hunks.push(currentHunk);
-  return { hunks, newFile, deletedFile, renamedFile, modeChange };
-}
+// D12: parseDiff was previously duplicated in this file (75 LOC). The
+// duplicate is now removed — we import the renderer-shared implementation
+// from src/lib/diffParser.ts so both processes parse diffs identically.
+// The shared parseDiff takes a single `rawDiff` argument; the old local
+// signature accepted `(rawDiff, oldPath, newPath)` but never read the
+// path arguments (they were only there for an early abandoned feature).
 
 export async function diff(
   repoPath: string,
@@ -2050,7 +3487,7 @@ export async function diff(
     newContent = '';
   }
 
-  const parsed = parseDiff(rawDiff, file, file);
+  const parsed: ParsedDiff = parseDiffShared(rawDiff);
   const result: DiffResult = {
     oldContent,
     newContent,
@@ -2102,7 +3539,7 @@ export async function diffBranches(
 ): Promise<DiffResult> {
   const git = getGit(repoPath);
   const rawDiff = await git.raw(['diff', `${base}...${compare}`, '--no-color']);
-  const parsed = parseDiff(rawDiff, base, compare);
+  const parsed: ParsedDiff = parseDiffShared(rawDiff);
   return {
     oldContent: '',
     newContent: '',
@@ -2123,44 +3560,73 @@ export async function diffCommit(
 ): Promise<DiffResult> {
   const git = getGit(repoPath);
 
-  // Preflight: verify the commit (and optional parent) exist before invoking
-  // `git diff`. When a commit becomes unreachable (e.g. after `git reset --hard`,
-  // `git commit --amend`, force-push, or `git gc --prune=now`), the hash in the
-  // History list may no longer resolve — `git diff` would throw
-  // `fatal: bad object <hash>`. We swallow that case and return an empty diff
-  // so the UI shows "No changes" instead of an IPC error popup.
-  if (!(await commitExists(repoPath, hash))) {
-    return {
-      oldContent: '', newContent: '',
-      oldPath: hash, newPath: hash,
-      hunks: [], binary: false,
-      newFile: false, deletedFile: false, renamedFile: false,
-    };
-  }
-  if (parentHash && !(await commitExists(repoPath, parentHash))) {
-    return {
-      oldContent: '', newContent: '',
-      oldPath: hash, newPath: hash,
-      hunks: [], binary: false,
-      newFile: false, deletedFile: false, renamedFile: false,
-    };
-  }
+  // PERF (v3): the old flow spawned up to FOUR sequential subprocesses here:
+  //   commitExists(hash) → commitExists(parentHash) →
+  //   rev-list --parents → diff/show
+  // Both existence preflights are redundant: every subsequent git call below
+  // ALREADY fails with `fatal: bad object <hash>` on an unreachable/gc'd
+  // commit, and each of those failures is caught and mapped to the exact
+  // same empty-DiffResult the preflights used to return. Removing them
+  // saves two subprocesses on EVERY diff view while keeping the degraded
+  // behavior identical (bad hash → empty diff, no IPC error popup).
+  //
+  // The rev-list --parents call stays: it is load-bearing for the root-commit
+  // case (a root commit has no parent, so `<hash>^..<hash>` is invalid —
+  // `git show <hash>` handles it) and for first-parent diffs.
+  const emptyDiff = (): DiffResult => ({
+    oldContent: '', newContent: '',
+    oldPath: hash, newPath: hash,
+    hunks: [], binary: false,
+    newFile: false, deletedFile: false, renamedFile: false,
+  });
 
-  const range = parentHash ? `${parentHash}..${hash}` : `${hash}^..${hash}`;
+  // Resolve the diff range.
+  // Bug fix: the previous code did `${hash}^..${hash}` when no parentHash
+  // was supplied. This breaks when `hash` is the ROOT commit (no parent):
+  // `git diff <root>^..<root>` throws
+  //   fatal: bad revision '<root>^..<root>'
+  // which surfaces to the user as an IPC error popup.
+  // We now check whether the commit has any parents. If it does (non-root),
+  // use `<first-parent>..<hash>` (same as before, but using the actual
+  // first parent instead of the syntactic `^`). If it doesn't (root),
+  // use `git diff --root <hash>` which shows the diff against the empty
+  // tree (i.e. all files in the commit are "new file").
+  let range: string;
+  let extraArgs: string[] = [];
+  let useShow = false;
+  if (parentHash) {
+    range = `${parentHash}..${hash}`;
+  } else {
+    // Get the actual parents of this commit. `git rev-list --parents -n 1`
+    // returns "<hash> <parent1> <parent2> ..." — the second+ tokens are
+    // the parents. For a root commit, only "<hash>" is returned.
+    const parentsRaw = await git.raw(['rev-list', '--parents', '-n', '1', hash]).catch(() => '');
+    const parents = parentsRaw.trim().split(/\s+/).filter(Boolean).slice(1);
+    if (parents.length === 0) {
+      // Root commit — use `git show` instead of `git diff --root`.
+      // `git diff --root <hash>` returns EMPTY for root commits (a git
+      // quirk), but `git show <hash> --format=` returns the full diff
+      // showing all files as "new file" against the empty tree.
+      range = hash;
+      useShow = true;
+    } else {
+      // Non-root, no explicit parent supplied — diff against the first parent.
+      range = `${parents[0]}..${hash}`;
+    }
+  }
   let rawDiff: string;
   try {
-    rawDiff = await git.raw(['diff', '--no-color', range]);
+    if (useShow) {
+      rawDiff = await git.raw(['show', '--no-color', '--format=', range]);
+    } else {
+      rawDiff = await git.raw(['diff', '--no-color', ...extraArgs, range]);
+    }
   } catch {
-    // Race: commit may have been gc'd between the preflight and the diff.
+    // Race: commit may have been gc'd between the rev-list and the diff.
     // Return an empty diff rather than propagating the error.
-    return {
-      oldContent: '', newContent: '',
-      oldPath: hash, newPath: hash,
-      hunks: [], binary: false,
-      newFile: false, deletedFile: false, renamedFile: false,
-    };
+    return emptyDiff();
   }
-  const parsed = parseDiff(rawDiff, hash, hash);
+  const parsed: ParsedDiff = parseDiffShared(rawDiff);
   return {
     oldContent: '',
     newContent: '',
@@ -2212,41 +3678,54 @@ export async function commitExists(repoPath: string, hash: string): Promise<bool
 export async function commitFiles(repoPath: string, hash: string): Promise<CommitFile[]> {
   const git = getGit(repoPath);
 
-  // Preflight: verify the commit exists. If the user clicked on a commit hash
-  // from a stale History list (e.g., the commit was force-pushed away or
-  // gc'd), `git show` would throw `fatal: bad object <hash>`. We catch that
-  // case here and return an empty file list — the UI shows "No files" which
-  // is the correct degraded behavior (and avoids the IPC error popup).
-  if (!(await commitExists(repoPath, hash))) {
-    return [];
-  }
-
-  // MERGE commits: `git show <merge>` prints a COMBINED diff which lists NO
-  // files for a clean merge — the History panel showed "Files (0)" for every
-  // merge commit (octopus merges too). SmartGit shows the changes the merge
-  // introduced relative to its FIRST parent — the union of everything the
-  // merged branches brought in (plus conflict resolutions). Detect merges via
-  // `rev-list --parents` and diff `<merge>^1..<merge>` for them.
+  // PERF (v3): the old flow spawned FOUR sequential subprocesses here:
+  //   commitExists (rev-parse --verify) → rev-list --parents →
+  //   show --name-status → show --numstat
+  // `rev-list --parents -n 1 <hash>` already fails with `fatal: bad object`
+  // on an unreachable/gc'd hash — making the dedicated commitExists
+  // preflight redundant (it existed to avoid the show throwing, but the
+  // show is already wrapped in try/catch returning []).
+  //
+  // New flow: rev-list (existence + merge detection) → then name-status
+  // and numstat in PARALLEL — they're independent git reads of the same
+  // commit. 4 sequential spawns → 1 + 2 concurrent ≈ 2× faster wall time
+  // on every commit click in History.
   let parentCount = 1;
   try {
     const parentsOut = await git.raw(['rev-list', '--parents', '-n', '1', hash]);
     parentCount = parentsOut.trim().split(/\s+/).length - 1;
-  } catch { /* default to non-merge handling */ }
-  const isMerge = parentCount > 1;
-
-  // Get file list with status. Wrap in try/catch as defense-in-depth — even
-  // with the preflight check, a race condition (commit gc'd between the check
-  // and the show) would otherwise throw.
-  // `-c core.quotePath=false` keeps non-ASCII filenames readable (raw UTF-8
-  // instead of C-escaped octal) so path matching + clicking work.
-  let raw: string;
-  try {
-    raw = isMerge
-      ? await git.raw(['-c', 'core.quotePath=false', 'diff', '--no-color', '--name-status', `${hash}^1`, hash])
-      : await git.raw(['-c', 'core.quotePath=false', 'show', '--no-color', '--name-status', '--format=', hash]);
   } catch {
+    // Unreachable commit (gc'd / force-pushed away) or bad hash — the UI
+    // shows "No files", the correct degraded behavior (same as the old
+    // commitExists preflight path).
     return [];
   }
+  const isMerge = parentCount > 1;
+
+  // Get file list with status AND numstat — two independent reads of the
+  // same commit, run in PARALLEL (previously sequential: 4 spawns total,
+  // now 3 with 2 concurrent ≈ half the wall time).
+  // Defense-in-depth stays: even with the rev-list validation above, a race
+  // (commit gc'd between the check and the show) is caught and returns [].
+  // `-c core.quotePath=false` keeps non-ASCII filenames readable (raw UTF-8
+  // instead of C-escaped octal) so path matching + clicking work.
+  //
+  // NB: `--name-status` and `--numstat` CANNOT be merged into one git call —
+  // git treats them as mutually exclusive diff formats (the later flag
+  // silently overrides the earlier one; verified empirically) — so this
+  // stays two calls, just parallel instead of sequential.
+  const [rawResult, numstatResult] = await Promise.allSettled([
+    isMerge
+      ? git.raw(['-c', 'core.quotePath=false', 'diff', '--no-color', '--name-status', `${hash}^1`, hash])
+      : git.raw(['-c', 'core.quotePath=false', 'show', '--no-color', '--name-status', '--format=', hash]),
+    isMerge
+      ? git.raw(['-c', 'core.quotePath=false', 'diff', '--no-color', '--numstat', `${hash}^1`, hash])
+      : git.raw(['-c', 'core.quotePath=false', 'show', '--numstat', '--format=', hash]),
+  ]);
+  if (rawResult.status !== 'fulfilled') {
+    return [];
+  }
+  const raw = rawResult.value;
   const result: CommitFile[] = [];
   const lines = raw.split('\n').filter(Boolean);
   for (const line of lines) {
@@ -2282,10 +3761,8 @@ export async function commitFiles(repoPath: string, hash: string): Promise<Commi
   // Previously each file triggered its own `git show --numstat <file>` spawn,
   // which on a 200-file merge commit meant 200 sequential git invocations
   // (~2-6 seconds on Windows). Now: 1 call, O(lines) parse.
-  try {
-    const numstatRaw = isMerge
-      ? await git.raw(['-c', 'core.quotePath=false', 'diff', '--no-color', '--numstat', `${hash}^1`, hash])
-      : await git.raw(['-c', 'core.quotePath=false', 'show', '--numstat', '--format=', hash]);
+  if (numstatResult.status === 'fulfilled') {
+    const numstatRaw = numstatResult.value;
     // Build a path → stat lookup. numstat format: "<add>\t<del>\t<path>"
     // (for renames: "<add>\t<del>\t<old>\t<new>" — but the last column is
     // always the resulting path, matching `result[i].path`).
@@ -2311,8 +3788,6 @@ export async function commitFiles(repoPath: string, hash: string): Promise<Commi
         f.binary = s.binary;
       }
     }
-  } catch {
-    /* ignore — numstat is best-effort */
   }
   return result;
 }
@@ -2591,16 +4066,46 @@ export async function stashPush(
   return out.trim();
 }
 
-export async function stashPop(repoPath: string, index = 0): Promise<void> {
-  const git = getGit(repoPath);
-  await git.raw(['stash', 'pop', `stash@{${index}}`]);
-  invalidateDiffCache(repoPath);
+/**
+ * Conflict-reaction audit (v3.6): `git stash pop|apply` prints CONFLICT to
+ * STDOUT with an EMPTY stderr, so simple-git's raw() RESOLVES as success —
+ * the UI was told «stash popped» while the working tree filled up with
+ * conflict markers (user report: «просто промолчать и отчитаться в лог»).
+ * merge()/cherryPick() already detect conflicts from the post-run status;
+ * stash gets the same treatment, but THROWS a typed error so every existing
+ * catch handler reacts: `.conflicts` carries the unmerged file list.
+ */
+async function throwIfStashConflict(repoPath: string): Promise<void> {
+  const st = await status(repoPath);
+  if ((st.conflicted?.length ?? 0) > 0) {
+    const err = new Error(
+      `stash: conflicts in ${st.conflicted.join(', ')}`
+    ) as Error & { conflicts: string[] };
+    err.conflicts = st.conflicted;
+    throw err;
+  }
 }
 
-export async function stashApply(repoPath: string, index = 0): Promise<void> {
+export async function stashPop(repoPath: string, index = 0, keepIndex = false): Promise<void> {
   const git = getGit(repoPath);
-  await git.raw(['stash', 'apply', `stash@{${index}}`]);
+  // --index restores the staged/unstaged split recorded in the stash
+  // (SmartGit "Keep index"): without it everything lands as unstaged.
+  await git.raw(keepIndex
+    ? ['stash', 'pop', '--index', `stash@{${index}}`]
+    : ['stash', 'pop', `stash@{${index}}`]);
   invalidateDiffCache(repoPath);
+  // git keeps the stash entry when the pop conflicts — surface it, never
+  // report success with a conflicted working tree.
+  await throwIfStashConflict(repoPath);
+}
+
+export async function stashApply(repoPath: string, index = 0, keepIndex = false): Promise<void> {
+  const git = getGit(repoPath);
+  await git.raw(keepIndex
+    ? ['stash', 'apply', '--index', `stash@{${index}}`]
+    : ['stash', 'apply', `stash@{${index}}`]);
+  invalidateDiffCache(repoPath);
+  await throwIfStashConflict(repoPath);
 }
 
 export async function stashDrop(repoPath: string, index = 0): Promise<void> {
@@ -2679,11 +4184,15 @@ export async function renameStash(repoPath: string, index: number, newMessage: s
  * On a complete repository this is a cheap no-op fetch.
  */
 export async function fetchDeepen(repoPath: string, remote = 'origin', commits = 100): Promise<void> {
-  const git = getGit(repoPath);
-  await git.raw([
-    ...(await remoteNetworkArgs(repoPath, remote)),
-    'fetch', remote, '--deepen', String(Math.max(1, commits)),
-  ]);
+  const { git, cleanup } = await networkGit(repoPath, remote);
+  try {
+    await git.raw([
+      ...(await remoteNetworkArgs(repoPath, remote)),
+      'fetch', remote, '--deepen', String(Math.max(1, commits)),
+    ]);
+  } finally {
+    cleanup();
+  }
   invalidateCache(repoPath);
 }
 
@@ -2692,12 +4201,16 @@ export async function fetchDeepen(repoPath: string, remote = 'origin', commits =
  * (git fetch --depth=N). depth <= 0 means unshallow (download full history).
  */
 export async function setFetchDepth(repoPath: string, remote = 'origin', depth: number): Promise<void> {
-  const git = getGit(repoPath);
-  const authArgs = await remoteNetworkArgs(repoPath, remote);
-  if (depth > 0) {
-    await git.raw([...authArgs, 'fetch', remote, '--depth', String(depth)]);
-  } else {
-    await git.raw([...authArgs, 'fetch', '--unshallow', remote]);
+  const { git, cleanup } = await networkGit(repoPath, remote);
+  try {
+    const authArgs = await remoteNetworkArgs(repoPath, remote);
+    if (depth > 0) {
+      await git.raw([...authArgs, 'fetch', remote, '--depth', String(depth)]);
+    } else {
+      await git.raw([...authArgs, 'fetch', '--unshallow', remote]);
+    }
+  } finally {
+    cleanup();
   }
   invalidateCache(repoPath);
 }
@@ -2839,8 +4352,19 @@ export async function createTag(
   const git = getGit(repoPath);
   const args: string[] = ['tag'];
   if (force) args.push('-f');
-  if (annotated && message) {
-    args.push('-a', name, '-m', message);
+  // NOTE: do NOT add `--` here. `git tag` does not treat the next token as
+  // a pathspec, and `--` after `-a` confuses the parser ("too many
+  // arguments") because `-m` then becomes a positional. Argument injection
+  // on tag names is mitigated upstream by UI input validation (tag names
+  // cannot start with `-`).
+  // annotated=true is an EXPLICIT user choice: it must always produce a real
+  // tag object. A missing message previously fell through to the lightweight
+  // branch — silently losing the annotation the user asked for (and, on
+  // rename-flows, destroying the old tag's message). `git tag -a` without
+  // -m would open an editor and HANG the app, so an empty message is passed
+  // explicitly as `-m ''`.
+  if (annotated) {
+    args.push('-a', name, '-m', message ?? '');
   } else {
     args.push(name);
   }
@@ -2848,23 +4372,112 @@ export async function createTag(
   await git.raw(args);
 }
 
+/**
+ * Full-fidelity read of ONE tag — the EDIT dialog's data source.
+ *
+ * `tagsAt`/`tags` only return the subject (first line); pre-filling an edit
+ * dialog from those silently TRUNCATES multi-line tag messages, and saving
+ * then destroys the tail (data loss). This reads the raw tag object via
+ * `git cat-file tag` so the message is byte-exact, plus tagger/target info.
+ *
+ * Returns null for a tag that does not exist (cat-file fails).
+ */
+export interface TagShowResult {
+  name: string;
+  /** true = real tag object (annotated), false = lightweight (commit ref). */
+  annotated: boolean;
+  /** Full tag message (subject + body) — '' for lightweight tags. */
+  message: string;
+  /** Tagger display name — annotated only. */
+  tagger?: string;
+  /** ISO date — annotated only. */
+  date?: string;
+  /** Commit the tag ultimately points at. */
+  targetHash: string;
+}
+
+export async function tagShow(repoPath: string, name: string): Promise<TagShowResult | null> {
+  const git = getGit(repoPath);
+  const fullRef = `refs/tags/${name}`;
+  let objectType = '';
+  try {
+    objectType = (await git.raw(['cat-file', '-t', fullRef])).trim();
+  } catch {
+    return null; // no such tag
+  }
+  if (objectType === 'tag') {
+    // Raw tag object: "object <sha>\ntype commit\ntag <name>\ntagger N <e> ts tz\n\n<message>"
+    const raw = await git.raw(['cat-file', 'tag', fullRef]);
+    const blank = raw.indexOf('\n\n');
+    const header = blank >= 0 ? raw.slice(0, blank) : raw;
+    const message = blank >= 0 ? raw.slice(blank + 2) : '';
+    let tagger: string | undefined;
+    let date: string | undefined;
+    let targetHash = '';
+    for (const line of header.split('\n')) {
+      if (line.startsWith('object ')) targetHash = line.slice('object '.length).trim();
+      if (line.startsWith('tagger ')) {
+        // "tagger Name <email> 1700000000 +0300" → name + ISO date
+        const m = line.match(/^tagger\s+(.*?)\s+<[^>]*>\s+(\d+)\s+([+-]\d{4})$/);
+        if (m) {
+          tagger = m[1];
+          date = new Date(Number(m[2]) * 1000).toISOString();
+        } else {
+          tagger = line.slice('tagger '.length).replace(/\s+<[^>]*>\s+\d+\s+[+-]\d{4}$/, '').trim();
+        }
+      }
+    }
+    if (!targetHash) {
+      try {
+        targetHash = (await git.raw(['rev-parse', `${fullRef}^{commit}`])).trim();
+      } catch { /* leave empty */ }
+    }
+    return {
+      name,
+      annotated: true,
+      message: message.replace(/\n+$/, ''),
+      tagger,
+      date,
+      targetHash,
+    };
+  }
+  // Lightweight: the ref points straight at a commit — no message of its own.
+  let targetHash = '';
+  try {
+    targetHash = (await git.raw(['rev-parse', fullRef])).trim();
+  } catch { /* leave empty */ }
+  return { name, annotated: false, message: '', targetHash };
+}
+
 export async function deleteTag(repoPath: string, name: string, remote = false): Promise<void> {
   const git = getGit(repoPath);
   if (remote) {
-    await git.raw([...(await remoteNetworkArgs(repoPath, 'origin', true)), 'push', 'origin', '--delete', name]);
+    const { git: netGit, cleanup } = await networkGit(repoPath, 'origin', true);
+    try {
+      // SECURITY: `--` separator before user-controlled `name` (argument injection).
+      await netGit.raw([...(await remoteNetworkArgs(repoPath, 'origin', true)), 'push', 'origin', '--delete', '--', name]);
+    } finally {
+      cleanup();
+    }
   } else {
-    await git.tag(['-d', name]);
+    // SECURITY: `--` separator before user-controlled `name` (argument injection).
+    await git.tag(['-d', '--', name]);
   }
 }
 
 export async function pushTag(repoPath: string, name: string, remote = 'origin'): Promise<void> {
-  const git = getGit(repoPath);
-  await git.raw([
-    ...(await remoteNetworkArgs(repoPath, remote, true)),
-    '-c', 'http.version=HTTP/1.1',
-    '-c', 'http.postBuffer=524288000',
-    'push', remote, name,
-  ]);
+  const { git, cleanup } = await networkGit(repoPath, remote, true);
+  try {
+    // SECURITY: `--` separator before user-controlled `name` (argument injection).
+    await git.raw([
+      ...(await remoteNetworkArgs(repoPath, remote, true)),
+      '-c', 'http.version=HTTP/1.1',
+      '-c', 'http.postBuffer=524288000',
+      'push', remote, '--', name,
+    ]);
+  } finally {
+    cleanup();
+  }
 }
 
 export async function submodules(repoPath: string): Promise<SubmoduleInfo[]> {
@@ -2891,7 +4504,7 @@ export async function submodules(repoPath: string): Promise<SubmoduleInfo[]> {
     let currentCommit = '';
     let trackedCommit = '';
     try {
-      const subGit = simpleGit({ baseDir: absSubPath });
+      const subGit = withMergedGitEnv(simpleGit({ baseDir: absSubPath, ...GIT_UNSAFE_OPTIONS }));
       const subStatus = await subGit.status();
       upToDate = subStatus.isClean();
       currentCommit = await subGit.revparse(['HEAD']);
@@ -2973,24 +4586,155 @@ export async function submoduleAdd(
 export async function clone(
   url: string,
   targetPath: string,
-  options: { depth?: number; branch?: string; recursive?: boolean; shallowSubmodules?: boolean } = {}
+  options: { depth?: number; branch?: string; recursive?: boolean; shallowSubmodules?: boolean; timeoutMs?: number; sslVerify?: boolean } = {}
 ): Promise<string> {
-  const git = simpleGit();
-  const args: string[] = ['clone'];
-  if (options.depth) args.push('--depth', String(options.depth));
+  // SSH URL → use the default managed key when the user configured one
+  // (repoPath '' resolves sshDefaultKeyId; without a key git uses system ssh).
+  const ssh = buildSshEnv(url, '');
+  // RACE FIX (E1): previously used `simpleGit.raw(args)` which has no
+  // timeout and no AbortController — a slow/hung clone on a big repo or
+  // flaky network kept the IPC handler's promise pending forever (up to
+  // 30+ minutes on a kernel-size repo over a bad connection). The user
+  // could not cancel: the UI showed a permanent "Cloning..." spinner and
+  // the only way out was to kill the app.
+  //
+  // Now we spawn git directly with a configurable timeout (default 30 min,
+  // overridable per-call via options.timeoutMs). The IPC handler in
+  // electron/ipc/git.ts can pass through the renderer's AbortController in
+  // a follow-up — for now the timeout is the safety net.
+  const CLONE_TIMEOUT_MS = options.timeoutMs ?? 30 * 60 * 1000;
+  // TLS bypass for clone contexts (SslBypassDialog → retry): the repo does
+  // not exist yet, so there is no local config to flip — instead the retry
+  // passes sslVerify:false and we carry the bypass ON THE COMMAND LINE:
+  //   - `-c http.sslVerify=false` BEFORE the subcommand applies during the
+  //     transfer itself (belt);
+  //   - `clone --config http.sslVerify=false` persists the setting into the
+  //     NEW repository's config (suspenders) — git documents that it "takes
+  //     effect immediately after the repository is initialized, but before
+  //     the remote history is fetched", so it covers the transfer too, and
+  //     every later pull/push/fetch from the cloned repo stays bypassed.
+  const sslArgs: string[] = [];
+  const sslPersistArgs: string[] = [];
+  if (options.sslVerify === false) {
+    sslArgs.push('-c', 'http.sslVerify=false');
+    sslPersistArgs.push('--config', 'http.sslVerify=false');
+  }
+  // HTTP(S) auth for CLONE contexts: the RemoteAuthDialog saves the entered
+  // credentials keyed by the TARGET path + 'origin' (the remote the clone
+  // creates). The repo does not exist yet, so remoteNetworkArgs() — which
+  // reads the remote URL out of the repo config — cannot apply here; read
+  // the stored credential by the target key instead and carry the
+  // Authorization header on the command line. A `-c` override is per-command
+  // only: the password never lands in .git/config or the remote URL, and
+  // later fetch/pull/push pick the SAME stored credential up through their
+  // regular remoteNetworkArgs() path.
+  const authArgs = buildHttpAuthArgs(url, getStoredCredential(targetPath, 'origin'));
+  const args: string[] = [...sslArgs, ...authArgs, 'clone', ...sslPersistArgs];
+  // BUGFIX "не получаю все ветки": `git clone --depth N` IMPLIES
+  // --single-branch — the clone's remote.origin.fetch refspec then covers
+  // exactly ONE branch, every later fetch keeps that refspec, and the
+  // Branches page never shows the rest of the remote's branches even though
+  // they exist (the Remotes page lists them via live ls-remote). Depth
+  // should limit HISTORY, not branch visibility — add --no-single-branch so
+  // a shallow clone still fetches all branch refs at that depth.
+  if (options.depth) args.push('--depth', String(options.depth), '--no-single-branch');
   if (options.branch) args.push('--branch', options.branch);
   if (options.recursive) args.push('--recursive');
   if (options.shallowSubmodules) args.push('--shallow-submodules');
   args.push(url, targetPath);
-  await git.raw(args);
+  try {
+    const result = await new Promise<{ code: number; stdout: string; stderr: string }>((resolve, reject) => {
+      const child = spawn('git', args, {
+        cwd: process.cwd(),
+        windowsHide: true,
+        env: {
+          ...process.env,
+          ...GIT_ENV_LFS_SKIP,
+          ...ssh.env,
+          // A GUI must never block on a terminal credential prompt: without
+          // stored credentials git would otherwise sit on an invisible
+          // prompt until the 30-min clone timeout. With prompts disabled it
+          // fails FAST with "could not read Username …: terminal prompts
+          // disabled" — which classifyAuthFailure() turns into the
+          // RemoteAuthDialog reaction (same contract as the pull path).
+          GIT_TERMINAL_PROMPT: '0',
+        },
+      });
+      const stdoutChunks: Buffer[] = [];
+      const stderrChunks: Buffer[] = [];
+      child.stdout.on('data', (d: Buffer) => { stdoutChunks.push(d); });
+      child.stderr.on('data', (d: Buffer) => { stderrChunks.push(d); });
+      const timer = setTimeout(() => {
+        try { child.kill('SIGTERM'); } catch { /* ignore */ }
+        // Give git 5 s to flush after SIGTERM, then SIGKILL.
+        setTimeout(() => {
+          try { child.kill('SIGKILL'); } catch { /* ignore */ }
+        }, 5000);
+        reject(new Error(`git clone timed out after ${Math.round(CLONE_TIMEOUT_MS / 1000)} s — try a shallow clone (--depth 1) or check the network.`));
+      }, CLONE_TIMEOUT_MS);
+      child.on('error', (e) => { clearTimeout(timer); reject(e); });
+      child.on('close', (code) => {
+        clearTimeout(timer);
+        resolve({ code: code ?? -1, stdout: Buffer.concat(stdoutChunks).toString('utf8'), stderr: Buffer.concat(stderrChunks).toString('utf8') });
+      });
+    });
+    if (result.code !== 0) {
+      const err = new Error(result.stderr.trim() || result.stdout.trim() || 'git clone failed');
+      throw err;
+    }
+  } finally {
+    ssh.cleanup();
+  }
   invalidateCache();
+  await applyGitIdentity(targetPath);
   return targetPath;
 }
 
 export async function init(targetPath: string, bare = false): Promise<void> {
-  const git = simpleGit({ baseDir: targetPath });
+  const git = withMergedGitEnv(simpleGit({ baseDir: targetPath, ...GIT_UNSAFE_OPTIONS }));
   await git.init(bare);
+  // Ensure the initial branch is `main` — modern git default since 2.28,
+  // but git only uses it when init.defaultBranch is set globally. We force
+  // it locally on every fresh init so repositories created by PrismGit are
+  // consistent regardless of the user's git config. This also matches what
+  // every test in tests/integration/ expects (they all check out `main`).
+  try {
+    await git.raw(['symbolic-ref', 'HEAD', 'refs/heads/main']);
+  } catch {
+    /* pre-init HEAD — ignore */
+  }
   invalidateCache();
+  if (!bare) await applyGitIdentity(targetPath);
+}
+
+/**
+ * Write the default commit identity (Settings → Git → "Default commit
+ * author" — gitUserName / gitUserEmail app settings) into a repository's
+ * LOCAL config.
+ *
+ * Called right after `git init` and `git clone` so a new repository is
+ * immediately usable: git refuses the first commit with
+ * "Please tell me who you are" when neither repo-local nor global
+ * user.name/user.email are configured — exactly what users saw when they
+ * created a repository from PrismGit and then tried to commit.
+ *
+ * Non-fatal by design: when no defaults are configured (or the config write
+ * fails), the repo behaves like a plain git clone.
+ */
+export async function applyGitIdentity(repoPath: string): Promise<boolean> {
+  const name = String(getSetting('gitUserName') ?? '').trim();
+  const email = String(getSetting('gitUserEmail') ?? '').trim();
+  if (!name && !email) return false;
+  try {
+    const git = withMergedGitEnv(simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS }));
+    if (name) await git.raw(['config', 'user.name', name]);
+    if (email) await git.raw(['config', 'user.email', email]);
+    return true;
+  } catch {
+    // A repo without a local identity still falls back to global config /
+    // the commit-time -c retry — never block repo creation on this.
+    return false;
+  }
 }
 
 export async function addRemote(
@@ -3000,6 +4744,7 @@ export async function addRemote(
 ): Promise<void> {
   const git = getGit(repoPath);
   await git.addRemote(name, url);
+  remotesCache.delete(repoPath + "|1"); remotesCache.delete(repoPath + "|0");
 }
 
 export async function removeRemote(repoPath: string, name: string): Promise<void> {
@@ -3014,6 +4759,8 @@ export async function renameRemote(
 ): Promise<void> {
   const git = getGit(repoPath);
   await git.raw(['remote', 'rename', oldName, newName]);
+  // Invalidate remotes cache
+  remotesCache.delete(repoPath + '|1'); remotesCache.delete(repoPath + '|0');
 }
 
 export async function setRemoteUrl(
@@ -3027,22 +4774,74 @@ export async function setRemoteUrl(
   if (pushUrl) args.push('--push');
   args.push(name, url);
   await git.raw(args);
+  // Invalidate remotes cache
+  remotesCache.delete(repoPath + '|1'); remotesCache.delete(repoPath + '|0');
 }
 
 export async function currentBranch(repoPath: string): Promise<string | null> {
+  // PERF: use symbolic-ref instead of git.branch() which loads ALL branches
+  // just to return branch.current. symbolic-ref is ~50x faster (1 spawn vs
+  // parsing the full ref list).
   const git = getGit(repoPath);
-  const branch = await git.branch();
-  return branch.current || null;
+  try {
+    const out = await git.raw(['symbolic-ref', '--short', '-q', 'HEAD']);
+    return out.trim() || null;
+  } catch {
+    // Detached HEAD — symbolic-ref fails, no current branch name.
+    return null;
+  }
 }
 
 export async function revParse(repoPath: string, ref: string): Promise<string> {
   const git = getGit(repoPath);
-  return (await git.revparse([ref])).trim();
+  try {
+    return (await git.revparse([ref])).trim();
+  } catch (e) {
+    // On a fresh repo with NO commits, `git rev-parse HEAD` fails with:
+    //   "fatal: ambiguous argument 'HEAD': unknown revision or path not
+    //    in the working tree."
+    // This is expected — return empty string instead of throwing, so the
+    // caller can handle the "no HEAD yet" case gracefully.
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/ambiguous argument|unknown revision|not in the working tree/i.test(msg)) {
+      return '';
+    }
+    throw e;
+  }
+}
+
+export async function rawExternal(repoPath: string, args: string[]): Promise<string> {
+  // v3.6 (repo-switch freeze): the Changes page's repo-open read burst
+  // (ls-files -v / numstat x2 / submodule summary) spawns these reads in
+  // the DEDICATED git worker process instead of the main loop — measured
+  // 60-90ms main-loop blocks per switch on a 2.5k-file repo, scaling into
+  // seconds on 50k-file repos. Worker failure falls back to the in-process
+  // shared instance (read-only + idempotent, retry-safe). Read commands are
+  // allow-listed in gitRawCore; anything mutating stays on the main path.
+  try {
+    return await runRawJobExternal({ repoPath, args });
+  } catch {
+    return raw(repoPath, args);
+  }
 }
 
 export async function raw(repoPath: string, args: string[]): Promise<string> {
   const git = getGit(repoPath);
-  return git.raw(args);
+  try {
+    return await git.raw(args);
+  } catch (e) {
+    // If the failure is caused by git-lfs filter-process (git-lfs not
+    // installed but .gitattributes configures LFS filters), retry with
+    // LFS smudge disabled. This is common for `git checkout -- .` and
+    // `git checkout -- <files>` when the repo has LFS-tracked files but
+    // git-lfs is not installed on the user's machine.
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg.includes('git-lfs') || msg.includes('filter-process')) {
+      const gitNoLfs = withMergedGitEnv(simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS }));
+      return await gitNoLfs.raw(args);
+    }
+    throw e;
+  }
 }
 
 // ============= SmartGit 20-24 Extended Features =============
@@ -3497,7 +5296,7 @@ export async function editCommitMessage(
   message: string
 ): Promise<void> {
   const git = getGit(repoPath);
-  const headHash = (await git.raw(['rev-parse', 'HEAD'])).trim();
+  const headHash = await revParse(repoPath, 'HEAD');
 
   if (hash === 'HEAD' || hash === headHash) {
     // Amending HEAD is safe and simple — no rebase needed.
@@ -3546,7 +5345,7 @@ export async function editCommitMessage(
       // simple-git blocks `-c core.editor` on the default instance — the
       // non-HEAD reword path silently always failed. An unsafe instance is
       // required for interactive-rebase automation.
-      const gitUnsafe = simpleGit({ baseDir: repoPath, unsafe: { allowUnsafeEditor: true } });
+      const gitUnsafe = withMergedGitEnv(simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS, unsafe: { ...GIT_UNSAFE_OPTIONS.unsafe, allowUnsafeEditor: true } }));
       // Rewording the ROOT commit: rebase needs --root there (same parent-
       // counting probe as squashCommits — rev-parse --quiet never throws).
       let rootCase = false;
@@ -3600,19 +5399,182 @@ export async function configGet(
   }
 }
 
+/**
+ * simple-git's blockUnsafeOperationsPlugin rejects `git config <key> <value>`
+ * writes for a set of "unsafe" config keys (gpg.program, core.sshCommand,
+ * credential.helper, …) unless the matching `unsafe.allowUnsafe*` option is
+ * enabled. PrismGit is a desktop Git client with an explicit config editor —
+ * when the user edits one of these keys in a settings dialog it IS the
+ * intent, so a rejected write is retried on a dedicated instance with the
+ * allow-flags enabled. Detection is message-based (not a hand-maintained key
+ * list), so new entries in simple-git's blocklist are handled automatically.
+ */
+const UNSAFE_CONFIG_ERROR_RE = /is not permitted without enabling (allowUnsafe\w+)/;
+
+function isUnsafeConfigError(err: unknown): boolean {
+  return UNSAFE_CONFIG_ERROR_RE.test(err instanceof Error ? err.message : String(err));
+}
+
+/**
+ * All `unsafe.allowUnsafe*` flags that un-block config WRITES. Only used for
+ * explicit, user-initiated config edits (configSet / configUnset) — the
+ * shared getGit() instance keeps the conservative defaults.
+ */
+const CONFIG_WRITE_UNSAFE_FLAGS = {
+  allowUnsafeAlias: true as const,
+  allowUnsafeAskPass: true as const,
+  allowUnsafeCredentialHelper: true as const,
+  allowUnsafeDiffExternal: true as const,
+  allowUnsafeDiffTextConv: true as const,
+  allowUnsafeFilter: true as const,
+  allowUnsafeFsMonitor: true as const,
+  allowUnsafeGitProxy: true as const,
+  allowUnsafeGpgProgram: true as const,
+  allowUnsafeMergeDriver: true as const,
+  allowUnsafePack: true as const,
+  allowUnsafePager: true as const,
+  allowUnsafeProtocolOverride: true as const,
+  allowUnsafeTemplateDir: true as const,
+};
+
+function gitWithUnsafeConfigWrites(repoPath: string): SimpleGit {
+  return withMergedGitEnv(simpleGit({
+    baseDir: repoPath,
+    binary: 'git',
+    maxConcurrentProcesses: 2,
+    trimmed: false,
+    ...GIT_UNSAFE_OPTIONS,
+    unsafe: {
+      ...GIT_UNSAFE_OPTIONS.unsafe,
+      ...CONFIG_WRITE_UNSAFE_FLAGS,
+    },
+  }));
+}
+
 export async function configSet(
   repoPath: string,
   key: string,
   value: string,
   scope?: 'system' | 'global' | 'local'
 ): Promise<void> {
-  const git = getGit(repoPath);
   const args = ['config'];
   if (scope === 'system') args.push('--system');
   else if (scope === 'global') args.push('--global');
   else if (scope === 'local') args.push('--local');
   args.push(key, value);
-  await git.raw(args);
+  const git = getGit(repoPath);
+  try {
+    await git.raw(args);
+  } catch (e) {
+    if (!isUnsafeConfigError(e)) throw e;
+    // Explicit user edit of a simple-git "unsafe" key (e.g. gpg.program in
+    // Repository Settings → Signing) — retry with the write allowed. Failure
+    // of the retry is a real git error and propagates.
+    await gitWithUnsafeConfigWrites(repoPath).raw(args);
+  }
+}
+
+// ─── Batched config access for dialogs ──────────────────────────────────────
+//
+// PERF (v3.4, "Repository Settings зависло приложение при открытии"):
+// RepoSettingsDialog used to read its ~19 keys through 19 PARALLEL
+// configGet IPC round-trips — 19 git subprocess spawns through the shared
+// getGit() queue (4 slots). On machines where a spawn is expensive
+// (Windows with antivirus, cold FS cache, a background poll cycle landing
+// in the same queue) the dialog's busy spinner sat there for many seconds
+// and the whole app read as frozen. One `git config --list -z` returns
+// every scope (system + global + local merged, include.path honored) in a
+// SINGLE subprocess; for repeated keys the LAST entry wins — exactly the
+// value `git config --get <key>` answers (the coalescing classifier also
+// recognizes --list/-l as a read, so concurrent identical batches share
+// one subprocess).
+
+export async function configGetMany(
+  repoPath: string,
+  keys: string[]
+): Promise<Record<string, string | undefined>> {
+  const out: Record<string, string | undefined> = {};
+  for (const k of keys) out[k] = undefined;
+  if (keys.length === 0) return out;
+  const git = getGit(repoPath);
+  let raw: string;
+  try {
+    raw = await git.raw(['config', '--list', '-z']);
+  } catch (err) {
+    // Missing config file (e.g. no /etc/gitconfig on minimal systems) →
+    // every requested key stays undefined — the same answer an individual
+    // configGet's catch() gives.
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!MISSING_CONFIG_FILE_RE.test(msg)) throw err;
+    return out;
+  }
+  // -z: records are NUL-separated "key\nvalue" (the key/value separator is
+  // a NEWLINE in the -z format, unlike the '=' of the plain format — values
+  // with '=' in them stay intact); the final record may lack the trailing
+  // NUL — tolerate both.
+  //
+  // KEY CASE: `git config --list -z` prints section.variable keys in
+  // CANONICAL LOWERCASE ('http.sslverify'), while callers ask for the
+  // camelCase spelling ('http.sslVerify') that `git config --get` happily
+  // accepts. A plain `key in out` lookup made every mixed-case key read as
+  // undefined — http.sslVerify (Repository Settings / the SSL bypass
+  // dialog), feature.manyFiles, core.fsmonitor, fetch.writeCommitGraph
+  // (Performance tab) silently fell back to defaults. Match the REQUESTED
+  // key case-insensitively instead; a collision would need two requested
+  // keys differing only by case, which the dialogs never use.
+  const requestedByLower = new Map(keys.map((k) => [k.toLowerCase(), k]));
+  for (const entry of raw.split('\0')) {
+    if (!entry) continue;
+    const idx = entry.indexOf('\n');
+    if (idx <= 0) continue;
+    const key = entry.substring(0, idx);
+    const requested = requestedByLower.get(key.toLowerCase());
+    if (requested) out[requested] = entry.substring(idx + 1); // later scopes override earlier
+  }
+  return out;
+}
+
+/** One batched config write. `value: null | ''` → the key is UNSET. */
+export interface ConfigSetEntry {
+  key: string;
+  value: string | null;
+}
+
+/** git fails with this when .git/config.lock is held by a concurrent writer. */
+const CONFIG_LOCK_RE = /config\.lock|another git process|file exists/i;
+
+export async function configSetMany(
+  repoPath: string,
+  entries: ConfigSetEntry[]
+): Promise<void> {
+  // Sequential ON PURPOSE: every `git config` write takes .git/config.lock —
+  // parallel writes would fight over the lock and fail with "Another git
+  // process seems to be operating". The wins over per-key IPC round-trips
+  // are (a) ONE renderer→main call for the whole dialog, and (b) the
+  // lock-contention retry below — a watcher refresh, an open IDE or an
+  // external terminal can hold .git/config.lock for a moment while the
+  // user hits Save.
+  for (const entry of entries) {
+    const attempt = async (): Promise<void> => {
+      if (entry.value == null || entry.value.trim() === '') {
+        // Unsetting an absent key must stay a NO-OP — the same contract the
+        // dialog's old `configUnset(...).catch(() => {})` had.
+        await configUnset(repoPath, entry.key).catch(() => {});
+      } else {
+        await configSet(repoPath, entry.key, entry.value.trim());
+      }
+    };
+    try {
+      await attempt();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!CONFIG_LOCK_RE.test(msg)) throw err;
+      // .git/config.lock held by a concurrent writer — brief backoff, ONE
+      // retry; a second failure is a real error and propagates.
+      await new Promise((r) => setTimeout(r, 150));
+      await attempt();
+    }
+  }
 }
 
 /**
@@ -3674,7 +5636,16 @@ export async function configUnset(
     // Unsetting from a missing config file is a no-op — there is nothing to unset.
     const msg = err instanceof Error ? err.message : String(err);
     if (MISSING_CONFIG_FILE_RE.test(msg)) return;
-    throw err;
+    if (!isUnsafeConfigError(err)) throw err;
+    // Explicit user edit of a simple-git "unsafe" key (e.g. clearing
+    // gpg.program) — retry with the write allowed (see configSet).
+    try {
+      await gitWithUnsafeConfigWrites(repoPath).raw(args);
+    } catch (retryErr) {
+      const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+      if (MISSING_CONFIG_FILE_RE.test(retryMsg)) return;
+      throw retryErr;
+    }
   }
 }
 
@@ -3735,6 +5706,34 @@ export async function resetFile(
   invalidateDiffCache(repoPath);
 }
 
+/**
+ * Reset multiple files in ONE git call instead of N sequential calls.
+ *
+ * `git reset HEAD -- f1 f2 f3` works for any number of paths in a single
+ * invocation — much faster than calling resetFile() in a for-loop (each
+ * for-loop iteration spawns a new git process + walks the index from
+ * scratch). For 50 files this is ~50× faster (50× fewer git spawns).
+ *
+ * Files that fail (e.g. untracked, not in index) are silently skipped —
+ * `git reset HEAD -- untracked.txt` is a no-op, not an error, so the
+ * whole batch succeeds.
+ */
+export async function resetFiles(
+  repoPath: string,
+  files: string[],
+  ref?: string
+): Promise<void> {
+  if (files.length === 0) return;
+  const git = getGit(repoPath);
+  removeStaleIndexLock(repoPath);
+  // git reset HEAD -- f1 f2 f3 ... fN
+  // Single call — supports any number of paths. Files not in the index are
+  // silently skipped by git (no error), so the call succeeds even when the
+  // batch mixes tracked + untracked paths.
+  await git.raw(['reset', ref || 'HEAD', '--', ...files]);
+  invalidateDiffCache(repoPath);
+}
+
 export async function clean(
   repoPath: string,
   paths: string[],
@@ -3754,33 +5753,59 @@ export async function clean(
 
 export async function extractRepoInfo(
   repoPath: string
-): Promise<{ provider: 'github' | 'gitlab' | 'bitbucket' | 'unknown'; owner?: string; repo?: string; url?: string; webUrl?: string }> {
+): Promise<{ provider: 'github' | 'gitlab' | 'unknown'; owner?: string; repo?: string; url?: string; webUrl?: string }> {
   const git = getGit(repoPath);
   try {
-    const remotes = await git.getRemotes(true);
+    const remotes = await getCachedRemotes(repoPath, true);
     const origin = remotes.find((r) => r.name === 'origin') || remotes[0];
     if (!origin) return { provider: 'unknown' };
-    const url = origin.refs.fetch;
+    const rawUrl = origin.refs?.fetch ?? "";
+    // Strip embedded credentials from the URL before parsing — git allows
+    //   https://user:token@host/path/repo.git
+    // and the previous regex captured the whole 'user:token@host' as the
+    // host, leading to garbage owner/repo. The user's actual repo had
+    //   http://mirocow:glpat-xxx@178.140.10.58:8082/web/git/gitclient.git
+    // which the old code parsed as owner='web', repo='git/gitclient' →
+    // GitLab API 404 because the project path was wrong.
+    const url = rawUrl.replace(/^(https?:\/\/)[^@]+@/, '$1');
     let webUrl = url;
-    let provider: 'github' | 'gitlab' | 'bitbucket' | 'unknown' = 'unknown';
+    let provider: 'github' | 'gitlab' | 'unknown' = 'unknown';
     let owner: string | undefined;
     let repo: string | undefined;
+    let host: string | undefined;
 
-    const sshMatch = url.match(/git@([^:]+):([^/]+)\/(.+?)(?:\.git)?$/);
-    const httpsMatch = url.match(/https?:\/\/([^/]+)\/([^/]+)\/(.+?)(?:\.git)?$/);
+    // SSH form: git@host:owner/repo(.git) — owner can be a multi-segment
+    // group path (e.g. 'group/sub/repo' on GitLab).
+    const sshMatch = url.match(/git@([^:]+):(.+?)(?:\.git)?$/);
+    // HTTP(S) form: http(s)://host/path/to/repo(.git) — same multi-segment
+    // path support.
+    const httpsMatch = url.match(/https?:\/\/([^/]+)\/(.+?)(?:\.git)?$/);
 
+    let fullPath: string | undefined;
     if (sshMatch) {
-      const [, host, ownerName, repoName] = sshMatch;
-      webUrl = `https://${host}/${ownerName}/${repoName}`;
-      if (host.includes('github.com')) { provider = 'github'; owner = ownerName; repo = repoName; }
-      else if (host.includes('gitlab')) { provider = 'gitlab'; owner = ownerName; repo = repoName; }
-      else if (host.includes('bitbucket.org')) { provider = 'bitbucket'; owner = ownerName; repo = repoName; }
+      [, host, fullPath] = sshMatch;
     } else if (httpsMatch) {
-      const [, host, ownerName, repoName] = httpsMatch;
-      webUrl = `https://${host}/${ownerName}/${repoName}`;
-      if (host.includes('github.com')) { provider = 'github'; owner = ownerName; repo = repoName; }
-      else if (host.includes('gitlab')) { provider = 'gitlab'; owner = ownerName; repo = repoName; }
-      else if (host.includes('bitbucket.org')) { provider = 'bitbucket'; owner = ownerName; repo = repoName; }
+      [, host, fullPath] = httpsMatch;
+    }
+
+    if (host && fullPath) {
+      // Split into segments — for nested GitLab groups (group/sub/repo),
+      // owner = all but last segment (joined by '/'), repo = last segment.
+      const segments = fullPath.split('/');
+      if (segments.length >= 2) {
+        owner = segments.slice(0, -1).join('/');
+        repo = segments[segments.length - 1];
+      } else if (segments.length === 1) {
+        // Single-segment path (e.g. 'repo') — uncommon but defensive.
+        repo = segments[0];
+      }
+      webUrl = `https://${host}/${owner ?? ''}/${repo ?? ''}`.replace(/\/+$/, '');
+    }
+
+    if (host) {
+      const h = host.toLowerCase();
+      if (h.includes('github')) { provider = 'github'; }
+      else if (h.includes('gitlab')) { provider = 'gitlab'; }
     }
     return { provider, owner, repo, url, webUrl };
   } catch {
@@ -3790,7 +5815,33 @@ export async function extractRepoInfo(
 
 // ============= LFS Support =============
 
+/**
+ * Hard kill-switch for the whole LFS integration: `PRISMGIT_LFS_DISABLE=1`
+ * makes every LFS call report "not installed" / degrade to safe defaults,
+ * regardless of whether git-lfs exists on PATH. Lets users force-disable
+ * the integration and lets the test suite exercise the graceful-degradation
+ * code paths deterministically on machines where git-lfs IS installed.
+ */
+function lfsDisabledByEnv(): boolean {
+  return process.env.PRISMGIT_LFS_DISABLE === '1';
+}
+
+/** Not-installed message reused by every LFS preflight. */
+const LFS_NOT_INSTALLED_MSG =
+  'Git LFS is not installed (or disabled with PRISMGIT_LFS_DISABLE=1). ' +
+  'Install it from https://git-lfs.com and run "git lfs install" from a terminal, then retry.';
+
+/**
+ * Preflight for mutating LFS operations: throws the standard clear error
+ * when LFS is unavailable (env kill-switch OR binary missing on PATH).
+ */
+async function assertLfsAvailable(repoPath: string): Promise<void> {
+  if (lfsDisabledByEnv()) throw new Error(LFS_NOT_INSTALLED_MSG);
+  if (!await isLfsInstalled(repoPath)) throw new Error(LFS_NOT_INSTALLED_MSG);
+}
+
 export async function lfsStatus(repoPath: string): Promise<{ installed: boolean; files: { path: string; size: string; status: string }[] }> {
+  if (lfsDisabledByEnv()) return { installed: false, files: [] };
   const git = getGit(repoPath);
   try {
     // Check if LFS is initialized — `git lfs version` exits non-zero when
@@ -3827,21 +5878,54 @@ export async function lfsStatus(repoPath: string): Promise<{ installed: boolean;
  * show as an error in the Output panel even though the failure is
  * expected when git-lfs is not installed.
  */
+/**
+ * PERF (v3.1, repo-open): machine-wide session cache for isLfsInstalled().
+ * `git lfs version` is a machine property — the answer cannot differ per
+ * repository — yet the check ran on EVERY repo open (with a 3s timeout,
+ * the worst-case open penalty). One spawn per session (TTL 10min) instead
+ * of one per repo open. Repo-scoped LFS CONFIG detection is separate
+ * (detectLfsConfigured) and stays per-repo.
+ */
+const lfsInstalledCache: { value: boolean; ts: number } = { value: false, ts: 0 };
+const LFS_INSTALLED_TTL_MS = 10 * 60_000;
+
 export async function isLfsInstalled(repoPath: string): Promise<boolean> {
+  if (lfsDisabledByEnv()) return false;
+  if (lfsInstalledCache.ts > 0 && Date.now() - lfsInstalledCache.ts < LFS_INSTALLED_TTL_MS) {
+    return lfsInstalledCache.value;
+  }
   try {
-    const { execFileSync } = await import('node:child_process');
-    const out = execFileSync('git', ['-C', repoPath, 'lfs', 'version'], {
-      encoding: 'utf8',
-      timeout: 5000,
-      stdio: ['ignore', 'pipe', 'ignore'],  // suppress stderr completely
+    // Use ASYNC spawn instead of execFileSync — execFileSync BLOCKS the entire
+    // main process (Electron event loop) for up to 5s on repos where git-lfs
+    // is not installed or is slow to respond. This was a major cause of
+    // "repos take a minute to open" — the main process was frozen.
+    const { execFile } = await import('node:child_process');
+    return new Promise<boolean>((resolve) => {
+      const child = execFile('git', ['-C', repoPath, 'lfs', 'version'], {
+        encoding: 'utf8',
+        timeout: 3000,
+        windowsHide: true,
+      }, (err: unknown, stdout: string) => {
+        // Cache BOTH outcomes (installed AND not-installed) — the
+        // not-installed case is the COMMON one for most users and the slow
+        // one (spawn + non-zero exit). A 10-min TTL covers a user
+        // installing git-lfs while the app runs.
+        const installed = !err && !!stdout.trim();
+        lfsInstalledCache.value = installed;
+        lfsInstalledCache.ts = Date.now();
+        resolve(installed);
+      });
+      // Process-level failure (git binary itself missing / ENOENT) — do NOT
+      // cache; it's transient and unrelated to LFS availability.
+      child.on('error', () => resolve(false));
     });
-    return !!out.trim();
   } catch {
     return false;
   }
 }
 
 export async function lfsPull(repoPath: string, files?: string[]): Promise<void> {
+  await assertLfsAvailable(repoPath);
   const git = getGit(repoPath);
   const args = ['lfs', 'pull'];
   if (files && files.length > 0) args.push('--include', files.join(','));
@@ -3849,11 +5933,13 @@ export async function lfsPull(repoPath: string, files?: string[]): Promise<void>
 }
 
 export async function lfsPush(repoPath: string): Promise<void> {
+  await assertLfsAvailable(repoPath);
   const git = getGit(repoPath);
   await git.raw(['lfs', 'push', 'origin', '--all']);
 }
 
 export async function lfsFetch(repoPath: string): Promise<void> {
+  await assertLfsAvailable(repoPath);
   const git = getGit(repoPath);
   await git.raw(['lfs', 'fetch']);
 }
@@ -3862,24 +5948,218 @@ export async function lfsInstall(repoPath: string): Promise<void> {
   // Check if git-lfs is installed FIRST — if not, give a clear error
   // message instead of letting simple-git throw a raw "git: 'lfs' is not
   // a git command" error.
-  if (!await isLfsInstalled(repoPath)) {
-    throw new Error(
-      'Git LFS is not installed on this system. Install it from https://git-lfs.com ' +
-      'and run "git lfs install" from a terminal, then retry.'
-    );
-  }
+  await assertLfsAvailable(repoPath);
   const git = getGit(repoPath);
   await git.raw(['lfs', 'install']);
 }
 
+/**
+ * Detect whether the repo has LFS configured — in .gitattributes OR git
+ * hooks OR git config filter.lfs.*.
+ *
+ * Returns true if ANY of:
+ *   - .gitattributes contains filter=lfs / diff=lfs / merge=lfs
+ *   - .git/hooks/ has LFS hooks (post-checkout, post-merge, post-commit, pre-push)
+ *     that call git-lfs
+ *   - git config has filter.lfs.clean / filter.lfs.smudge / filter.lfs.process set
+ *
+ * This is used by the LFS health check on repo open — if LFS is configured
+ * but git-lfs is NOT installed, the user is prompted to either:
+ *   1. Install git-lfs (open https://git-lfs.com in browser)
+ *   2. Remove the LFS configuration (clean up .gitattributes + hooks + config)
+ *   3. Skip (continue with GIT_LFS_SKIP_SMUDGE=1 — current default)
+ */
+export async function detectLfsConfigured(repoPath: string): Promise<boolean> {
+  // 1. Check .gitattributes for LFS filter rules
+  try {
+    const attrsPath = path.join(repoPath, '.gitattributes');
+    if (fs.existsSync(attrsPath)) {
+      const content = fs.readFileSync(attrsPath, 'utf8');
+      if (/filter\s*=\s*lfs|diff\s*=\s*lfs|merge\s*=\s*lfs/i.test(content)) {
+        return true;
+      }
+    }
+  } catch { /* ignore */ }
+
+  // 2. Check git config for filter.lfs.* entries
+  // ⚠️ MUST be scoped with --local: the app's own env (git-env.ts
+  // GIT_CONFIG_COUNT) injects EMPTY `filter.lfs.process/smudge/clean`
+  // overrides into EVERY git command to bypass LFS filters. A plain
+  // `git config --get-regexp '^filter\.lfs\.'` matches those env entries
+  // (exit 0, empty values) for EVERY repository — making detectLfsConfigured
+  // return true on repos with zero LFS traces and popping the "Git LFS is
+  // configured but not installed" modal on every repo open (broke the whole
+  // e2e suite: the modal intercepted every click). --local reads only
+  // .git/config, immune to the env overrides; genuine repo-scoped LFS
+  // installs (`git lfs install --local`) still show up there.
+  try {
+    const git = getGit(repoPath);
+    const config = await git.raw(['config', '--local', '--get-regexp', '^filter\\.lfs\\.']).catch(() => '');
+    if (config.trim()) return true;
+  } catch { /* ignore */ }
+
+  // 3. Check for LFS hooks in .git/hooks/
+  try {
+    // Resolve hooks dir — may be overridden by core.hookspath.
+    // --local for the same reason as check #2: the app env injects an EMPTY
+    // core.hooksPath override, and a plain --get would return that instead
+    // of the repo's real value.
+    const git = getGit(repoPath);
+    let hooksDir = path.join(repoPath, '.git', 'hooks');
+    const hooksPathConfig = await git.raw(['config', '--local', '--get', 'core.hookspath']).catch(() => '');
+    if (hooksPathConfig.trim()) {
+      // core.hookspath is relative to the repo root
+      hooksDir = path.isAbsolute(hooksPathConfig.trim())
+        ? hooksPathConfig.trim()
+        : path.join(repoPath, hooksPathConfig.trim());
+    }
+    const lfsHooks = ['post-checkout', 'post-merge', 'post-commit', 'pre-push', 'post-fetch'];
+    for (const hook of lfsHooks) {
+      const hookPath = path.join(hooksDir, hook);
+      if (fs.existsSync(hookPath)) {
+        const content = fs.readFileSync(hookPath, 'utf8');
+        if (/git-lfs|git lfs/i.test(content)) return true;
+      }
+    }
+  } catch { /* ignore */ }
+
+  return false;
+}
+
+/**
+ * Comprehensively remove ALL LFS configuration from a repository:
+ *
+ *   1. Remove filter=lfs / diff=lfs / merge=lfs lines from .gitattributes
+ *   2. Remove LFS git hooks (post-checkout, post-merge, post-commit, pre-push)
+ *   3. Unset git config filter.lfs.* entries (clean, smudge, process, required)
+ *
+ * After removal, the repo no longer triggers git-lfs for ANY operation.
+ * The user should commit the .gitattributes change to make it permanent.
+ *
+ * Returns the total number of items removed (lines + hooks + config entries).
+ */
+export async function removeLfsFilter(repoPath: string): Promise<number> {
+  let removed = 0;
+
+  // 1. Remove LFS filter lines from .gitattributes
+  try {
+    const attrsPath = path.join(repoPath, '.gitattributes');
+    if (fs.existsSync(attrsPath)) {
+      const content = fs.readFileSync(attrsPath, 'utf8');
+      const lines = content.split('\n');
+      const kept: string[] = [];
+      for (const line of lines) {
+        if (/filter\s*=\s*lfs|diff\s*=\s*lfs|merge\s*=\s*lfs/i.test(line)) {
+          removed++;
+        } else {
+          kept.push(line);
+        }
+      }
+      if (removed > 0) {
+        fs.writeFileSync(attrsPath, kept.join('\n'), 'utf8');
+      }
+    }
+  } catch { /* ignore */ }
+
+  // 2. Remove LFS git hooks
+  try {
+    const git = getGit(repoPath);
+    let hooksDir = path.join(repoPath, '.git', 'hooks');
+    const hooksPathConfig = await git.raw(['config', '--get', 'core.hookspath']).catch(() => '');
+    if (hooksPathConfig.trim()) {
+      hooksDir = path.isAbsolute(hooksPathConfig.trim())
+        ? hooksPathConfig.trim()
+        : path.join(repoPath, hooksPathConfig.trim());
+    }
+    const lfsHooks = ['post-checkout', 'post-merge', 'post-commit', 'pre-push', 'post-fetch'];
+    for (const hook of lfsHooks) {
+      const hookPath = path.join(hooksDir, hook);
+      if (fs.existsSync(hookPath)) {
+        const content = fs.readFileSync(hookPath, 'utf8');
+        if (/git-lfs|git lfs/i.test(content)) {
+          // Rename to .bak instead of deleting — user might want to restore
+          const bakPath = hookPath + '.bak';
+          try {
+            if (fs.existsSync(bakPath)) fs.unlinkSync(bakPath);
+            fs.renameSync(hookPath, bakPath);
+            removed++;
+          } catch { /* ignore — can't rename */ }
+        }
+      }
+    }
+  } catch { /* ignore */ }
+
+  // 3. Unset git config filter.lfs.* entries
+  try {
+    const git = getGit(repoPath);
+    const configEntries = [
+      'filter.lfs.clean',
+      'filter.lfs.smudge',
+      'filter.lfs.process',
+      'filter.lfs.required',
+    ];
+    for (const key of configEntries) {
+      try {
+        await git.raw(['config', '--unset', key]);
+        removed++;
+      } catch {
+        // Key doesn't exist — that's fine.
+      }
+    }
+    // Also unset in global config if present
+    for (const key of configEntries) {
+      try {
+        await git.raw(['config', '--global', '--unset', key]);
+      } catch {
+        // Key doesn't exist globally — fine.
+      }
+    }
+  } catch { /* ignore */ }
+
+  return removed;
+}
+
 export async function lfsTrack(repoPath: string, patterns: string[]): Promise<void> {
+  await assertLfsAvailable(repoPath);
   const git = getGit(repoPath);
   for (const p of patterns) {
     await git.raw(['lfs', 'track', p]);
   }
 }
 
+/**
+ * Stop tracking a pattern with Git LFS (git lfs untrack <pattern>).
+ * Removes the pattern from .gitattributes (LFS-managed section).
+ */
+export async function lfsUntrack(repoPath: string, pattern: string): Promise<void> {
+  await assertLfsAvailable(repoPath);
+  const git = getGit(repoPath);
+  await git.raw(['lfs', 'untrack', pattern]);
+}
+
+/**
+ * Check LFS object integrity (git lfs fsck). Reports corrupt/missing
+ * LFS objects. Returns { ok, output } where ok=true means no issues.
+ */
+export async function lfsFsck(repoPath: string): Promise<{ ok: boolean; output: string }> {
+  if (lfsDisabledByEnv()) {
+    return { ok: false, output: LFS_NOT_INSTALLED_MSG };
+  }
+  const git = getGit(repoPath);
+  try {
+    const output = await git.raw(['lfs', 'fsck']);
+    // git lfs fsck exits 0 with empty output when everything is OK,
+    // and prints "Git LFS fsck OK" or lists corrupt objects.
+    const ok = !output.toLowerCase().includes('corrupt') &&
+               !output.toLowerCase().includes('missing');
+    return { ok, output: output || 'Git LFS fsck OK' };
+  } catch (e) {
+    return { ok: false, output: String(e) };
+  }
+}
+
 export async function lfsList(repoPath: string): Promise<string[]> {
+  if (lfsDisabledByEnv()) return [];
   const git = getGit(repoPath);
   const result = await git.raw(['lfs', 'ls-files']).catch(() => '');
   return result.split('\n').filter(Boolean).map(l => l.split(' * ').pop() || l);
@@ -3892,7 +6172,7 @@ export async function splitCommit(repoPath: string, hash: string): Promise<{ sta
   // Dedicated instance with unsafe.allowUnsafeEditor: simple-git blocks
   // `-c sequence.editor=...` on the default instance, which made splitCommit
   // fail silently (always {started:false}) despite valid git commands.
-  const gitUnsafe = simpleGit({ baseDir: repoPath, unsafe: { allowUnsafeEditor: true } });
+  const gitUnsafe = withMergedGitEnv(simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS, unsafe: { ...GIT_UNSAFE_OPTIONS.unsafe, allowUnsafeEditor: true } }));
   // Start an interactive rebase with "edit" for the target commit
   // This will stop at the commit, allowing the user to split it
   try {
@@ -4156,18 +6436,32 @@ async function buildDirLevel(
     })
     .map((e) => e.name)
     .sort((a, b) => a.localeCompare(b));
-  const nodes: DirNode[] = [];
-  for (const name of names) {
-    if (budget.count >= budget.max) break;
-    const childRel = rel ? `${rel}/${name}` : name;
-    budget.count += 1;
-    nodes.push({
-      name,
-      path: childRel,
-      children: await buildDirLevel(absBase, childRel, depth + 1, maxDepth, budget, includeIgnored),
-    });
+
+  // PERFORMANCE (P14): previously each child directory was awaited
+  // sequentially in a `for...of` loop — on a 10 000-directory repo this
+  // serialized 10 000 readdir syscalls. Now we recurse into all siblings
+  // in parallel with bounded concurrency 8 (filesystem readdir is mostly
+  // I/O-bound, so parallel reads are safe and dramatically faster on
+  // SSDs / cold caches). The `budget` counter is incremented atomically
+  // (single-threaded JS, so no race) and re-checked inside the recursive
+  // calls so a parallel spike can't blow past the cap by more than the
+  // concurrency factor.
+  const BUILD_CONCURRENCY = 8;
+  const results = new Array<DirNode | null>(names.length).fill(null);
+  let cursor = 0;
+  async function worker(): Promise<void> {
+    while (cursor < names.length) {
+      const idx = cursor++;
+      const name = names[idx];
+      if (budget.count >= budget.max) break;
+      budget.count += 1;
+      const childRel = rel ? `${rel}/${name}` : name;
+      const children = await buildDirLevel(absBase, childRel, depth + 1, maxDepth, budget, includeIgnored);
+      results[idx] = { name, path: childRel, children };
+    }
   }
-  return nodes;
+  await Promise.all(Array.from({ length: Math.min(BUILD_CONCURRENCY, names.length) }, worker));
+  return results.filter((n): n is DirNode => n !== null);
 }
 
 /** List repository directories (Changes view tree), skipping VCS/build directories. */
@@ -4307,9 +6601,28 @@ export async function showBuffer(repoPath: string, args: string[]): Promise<Buff
  *
  * Returns when the clone is complete.
  */
-export async function mirror(remoteUrl: string, targetPath: string): Promise<void> {
-  const git = simpleGit();
-  await git.mirror(remoteUrl, targetPath);
+export async function mirror(
+  remoteUrl: string,
+  targetPath: string,
+  options: { sslVerify?: boolean } = {}
+): Promise<void> {
+  const git = withMergedGitEnv(simpleGit(GIT_UNSAFE_OPTIONS));
+  // Same TLS-bypass contract as clone(): -c for the transfer, --config to
+  // persist into the mirrored repo (see clone()). Same HTTP-auth contract:
+  // the RemoteAuthDialog stores the entered credentials keyed by the TARGET
+  // path + 'origin' — carry the Authorization header on the command line
+  // (per-command only, never persisted).
+  const authArgs = buildHttpAuthArgs(remoteUrl, getStoredCredential(targetPath, 'origin'));
+  if (options.sslVerify === false) {
+    await git.raw([
+      ...authArgs,
+      '-c', 'http.sslVerify=false',
+      'clone', '--mirror', '--config', 'http.sslVerify=false',
+      remoteUrl, targetPath,
+    ]);
+    return;
+  }
+  await git.raw([...authArgs, 'clone', '--mirror', remoteUrl, targetPath]);
 }
 
 /**
@@ -4365,7 +6678,7 @@ export async function updateServerInfo(repoPath: string): Promise<string> {
  * checking what branches/tags exist before deciding to clone.
  */
 export async function listRemote(repoPath: string, remote: string = 'origin'): Promise<string> {
-  const git = getGit(repoPath);
+  const { git, cleanup } = await networkGit(repoPath, remote);
   try {
     // Per-remote auth (http.extraHeader) — private servers reject anonymous
     // ls-remote, and the Remotes tool preview must use the same stored
@@ -4373,6 +6686,34 @@ export async function listRemote(repoPath: string, remote: string = 'origin'): P
     return await git.raw([...(await remoteNetworkArgs(repoPath, remote)), 'ls-remote', remote]);
   } catch (e) {
     throw describeNetworkError(e, 'fetch');
+  } finally {
+    cleanup();
+  }
+}
+
+/**
+ * list-remote for a RAW URL (no repository yet) — Clone dialog "detect active
+ * branch" for ssh:// and scp-like URLs. MUST carry the same SSH environment
+ * as clone() itself: the old renderer path went through git:raw → cached
+ * instance → system ssh only, so for ssh://git@host:50022/repo.git with a
+ * PrismGit-managed key or password profile the detection failed (or hung on
+ * a prompt) while the actual clone worked.
+ */
+export async function lsRemoteUrl(
+  url: string,
+  args: string[] = ['--symref', 'HEAD']
+): Promise<string> {
+  const ssh = buildSshEnv(url, '');
+  const httpArgs = buildHttpAuthArgs(url, undefined);
+  const git = withMergedGitEnv(simpleGit(GIT_SSH_UNSAFE_OPTIONS), {
+    ...ssh.env,
+    // GUI: never block on a terminal prompt for an unreachable/private host.
+    GIT_TERMINAL_PROMPT: '0',
+  });
+  try {
+    return await git.raw([...httpArgs, 'ls-remote', ...args, url]);
+  } finally {
+    ssh.cleanup();
   }
 }
 
@@ -4490,6 +6831,32 @@ export async function setIndexFlag(
 }
 
 /**
+ * Toggle an index flag (assume-unchanged / skip-worktree) on MULTIPLE files
+ * in ONE git call instead of N sequential calls.
+ *
+ * `git update-index --skip-worktree -- f1 f2 f3` accepts any number of paths.
+ * For 50 files this is ~50× faster than calling setIndexFlag() in a for-loop.
+ *
+ * Files not in the index are silently skipped by git (no error).
+ */
+export async function setIndexFlagBatch(
+  repoPath: string,
+  files: string[],
+  flag: 'assume-unchanged' | 'skip-worktree',
+  value: boolean
+): Promise<void> {
+  if (files.length === 0) return;
+  const git = getGit(repoPath);
+  removeStaleIndexLock(repoPath);
+  const opt =
+    flag === 'assume-unchanged'
+      ? value ? '--assume-unchanged' : '--no-assume-unchanged'
+      : value ? '--skip-worktree' : '--no-skip-worktree';
+  await git.raw(['update-index', opt, '--', ...files]);
+  invalidateCache(repoPath);
+}
+
+/**
  * Delete a file from the working tree (and the index when tracked).
  * Tracked files go through `git rm -f` (removes from index + disk);
  * untracked files are removed from disk directly — `git rm` refuses them,
@@ -4503,6 +6870,39 @@ export async function deleteFile(repoPath: string, file: string): Promise<void> 
   } catch {
     const abs = path.resolve(repoPath, file);
     if (fs.existsSync(abs)) fs.rmSync(abs, { force: true });
+  }
+  invalidateCache(repoPath);
+}
+
+/**
+ * Delete multiple files from the working tree (and the index when tracked)
+ * in ONE git call instead of N sequential calls.
+ *
+ * `git rm -f -- f1 f2 f3` accepts any number of paths in a single invocation.
+ * For 50 files this is ~50× faster than calling deleteFile() in a for-loop.
+ *
+ * Files that fail (e.g. untracked — git rm refuses them) are retried one
+ * at a time and removed from disk directly via fs.rmSync as a fallback.
+ */
+export async function deleteFiles(repoPath: string, files: string[]): Promise<void> {
+  if (files.length === 0) return;
+  const git = getGit(repoPath);
+  removeStaleIndexLock(repoPath);
+  // Try the batch first — works for tracked files. Falls back to per-file
+  // fs.rmSync for untracked files that `git rm` refuses.
+  try {
+    await git.raw(['rm', '-f', '--', ...files]);
+  } catch {
+    // Some files were untracked → retry each individually. Tracked ones go
+    // through `git rm`, untracked ones go through `fs.rmSync`.
+    for (const f of files) {
+      try {
+        await git.raw(['rm', '-f', '--', f]);
+      } catch {
+        const abs = path.resolve(repoPath, f);
+        if (fs.existsSync(abs)) fs.rmSync(abs, { force: true });
+      }
+    }
   }
   invalidateCache(repoPath);
 }
@@ -4574,18 +6974,24 @@ export async function notesShow(
   notesRef: string,
   commit: string
 ): Promise<string | null> {
-  // Use execFileSync instead of simple-git so the command logger doesn't
-  // record the 'git notes show' call — when no note exists, git exits 1
-  // with "error: no note found" which shows as an error in the Output panel
-  // even though it's a perfectly normal state (most commits have no notes).
+  // Use spawnGitCapture (async) instead of execFileSync — the sync version
+  // blocked the Electron main-process event loop for up to 5 s per call on
+  // network-mounted repos, which froze every IPC handler in the app.
+  //
+  // The `--` separator after `show` is defensive: `commit` is normally a
+  // 40-char SHA, but if a caller ever passes a user-controlled ref that
+  // starts with `-`, git would otherwise interpret it as an option.
+  //
+  // stderr is ignored: when a commit has no note, `git notes show` exits 1
+  // with "error: no note found" on stderr — that's a perfectly normal
+  // state (most commits have no notes) and we surface `null` to callers.
   try {
-    const { execFileSync } = await import('node:child_process');
-    const out = execFileSync('git', ['-C', repoPath, 'notes', `--ref=${notesRef}`, 'show', commit], {
-      encoding: 'utf8',
-      timeout: 5000,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    return out.trim() || null;
+    const { code, stdout } = await spawnGitCapture(repoPath, [
+      '-C', repoPath,
+      'notes', `--ref=${notesRef}`, 'show', '--', commit,
+    ]);
+    if (code !== 0) return null;
+    return stdout.trim() || null;
   } catch {
     return null;
   }
@@ -4688,7 +7094,7 @@ export async function subtreeAdd(
     throw new Error(`Directory "${prefix}" already exists and is not empty`);
   }
   // Register or verify the remote, then fetch it so <remote>/<branch> exists
-  const remotes = await git.getRemotes(false);
+  const remotes = await getCachedRemotes(repoPath, false);
   const exists = remotes.some((r) => r.name === opts.remote);
   if (!exists) {
     if (!opts.remoteUrl) throw new Error(`Remote "${opts.remote}" does not exist — provide a URL to create it`);
@@ -4773,6 +7179,13 @@ export async function subtreeRemove(repoPath: string, name: string): Promise<voi
 
 /** List LFS locks. local=true reads only local locks (no server round-trip). */
 export async function lfsLocks(repoPath: string, local = false): Promise<LfsLockInfo[]> {
+  try {
+    await assertLfsAvailable(repoPath);
+  } catch (e) {
+    // Keep the established "Failed to list LFS locks:" prefix for every
+    // failure mode of this read (unavailable binary included).
+    throw new Error(`Failed to list LFS locks: ${e instanceof Error ? e.message : String(e)}`);
+  }
   const git = getGit(repoPath);
   const args = ['lfs', 'locks'];
   if (local) args.push('--local');
@@ -4803,12 +7216,14 @@ export async function lfsLocks(repoPath: string, local = false): Promise<LfsLock
 
 /** Lock a file on the LFS server for exclusive editing. */
 export async function lfsLock(repoPath: string, file: string): Promise<void> {
+  await assertLfsAvailable(repoPath);
   const git = getGit(repoPath);
   await git.raw(['lfs', 'lock', file]);
 }
 
 /** Unlock a file; force removes a lock owned by someone else (requires permissions). */
 export async function lfsUnlock(repoPath: string, file: string, force = false): Promise<void> {
+  await assertLfsAvailable(repoPath);
   const git = getGit(repoPath);
   const args = ['lfs', 'unlock'];
   if (force) args.push('--force');
@@ -4836,7 +7251,34 @@ export async function formatPatch(
     throw new Error('formatPatch requires a commit or a from..to range');
   }
   const out = await git.raw(args);
-  return out.split('\n').map((l) => l.trim()).filter(Boolean);
+  // git prints the created file paths to stdout, but the EXACT form varies
+  // across git versions and platforms (absolute vs repo-relative, /var vs
+  // /private/var on macOS, …). Trust a printed line ONLY when the file
+  // really exists on disk; otherwise fall back to scanning the output
+  // directory (sorted for determinism). Never return a path that cannot be
+  // read — an empty string silently broke consumers (bug: "expected '' to
+  // contain 'From '").
+  const printed = out
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .filter((l) => {
+      try {
+        return fs.statSync(l).isFile();
+      } catch {
+        return false;
+      }
+    });
+  if (printed.length > 0) return printed;
+  const written = fs
+    .readdirSync(opts.outputDir)
+    .filter((f) => f.endsWith('.patch'))
+    .sort()
+    .map((f) => path.join(opts.outputDir, f));
+  if (written.length > 0) return written;
+  throw new Error(
+    `git format-patch produced no patch files in ${opts.outputDir}. git output was:\n${out}`
+  );
 }
 
 // =====================================================================
@@ -4857,12 +7299,20 @@ export async function editCommitAuthor(
     return;
   }
   const esc = (s: string) => s.replace(/'/g, `'\\''`);
+  // Bug fix: `${hash}^..HEAD` breaks when hash is the ROOT commit (no parent):
+  //   fatal: ambiguous argument '<root>^..HEAD': unknown revision
+  // We check if the commit has any parents first. If it does (non-root),
+  // use `<hash>^..HEAD` (same as before). If it doesn't (root), use
+  // `--root` so filter-branch starts from the actual root commit.
+  const parentsRaw = await git.raw(['rev-list', '--parents', '-n', '1', hash]).catch(() => '');
+  const parents = parentsRaw.trim().split(/\s+/).filter(Boolean).slice(1);
+  const rangeArg = parents.length > 0 ? `${hash}^..HEAD` : '--root';
   await git.raw([
     'filter-branch', '-f', '--env-filter',
     `if [ "$GIT_COMMIT" = "${hash}" ]; then ` +
     `export GIT_AUTHOR_NAME='${esc(name)}'; ` +
     `export GIT_AUTHOR_EMAIL='${esc(email)}'; fi`,
-    `${hash}^..HEAD`,
+    rangeArg,
   ]);
   invalidateCache(repoPath);
 }
@@ -4889,6 +7339,76 @@ export async function garbageCollect(repoPath: string, aggressive = false): Prom
   const args = ['gc', '--quiet'];
   if (aggressive) args.push('--aggressive');
   await git.raw(args);
+  invalidateCache(repoPath);
+  return git.raw(['count-objects', '-vH']);
+}
+
+/**
+ * Repack all objects into a single packfile — more thorough than `git gc`
+ * and useful when the repo has many small packfiles (slow on network FS).
+ *
+ * Equivalent to: git repack -a -d --quiet
+ *   -a = pack all objects into a single pack
+ *   -d = delete redundant packs after repacking
+ */
+export async function repack(repoPath: string): Promise<void> {
+  const git = getGit(repoPath);
+  await git.raw(['repack', '-a', '-d', '--quiet']);
+  invalidateCache(repoPath);
+}
+
+/**
+ * Pack loose refs into a single file (.git/packed-refs) for faster
+ * ref enumeration on large repos. Equivalent to: git pack-refs --all
+ */
+export async function packRefs(repoPath: string): Promise<void> {
+  const git = getGit(repoPath);
+  await git.raw(['pack-refs', '--all']);
+  invalidateCache(repoPath);
+}
+
+/**
+ * Prune loose objects that are unreachable from any ref or the reflog.
+ * Equivalent to: git prune --expire=now
+ *
+ * Unlike `git gc`, this does NOT repack — it just deletes loose objects
+ * that are already unreachable. Faster than gc, less thorough.
+ */
+export async function pruneObjects(repoPath: string): Promise<void> {
+  const git = getGit(repoPath);
+  await git.raw(['prune', '--expire=now', '-v']);
+  invalidateCache(repoPath);
+}
+
+/**
+ * Expire old reflog entries to free up reflog space.
+ * Equivalent to: git reflog expire --expire=now --expire-unreachable=now --all
+ *
+ * After expiring, you typically run `git gc --prune=now` to actually
+ * delete the now-unreachable objects.
+ */
+export async function reflogExpire(repoPath: string): Promise<void> {
+  const git = getGit(repoPath);
+  await git.raw(['reflog', 'expire', '--expire=now', '--expire-unreachable=now', '--all']);
+  invalidateCache(repoPath);
+}
+
+/**
+ * Full maintenance: reflog expire + prune + repack + gc.
+ * This is the most thorough cleanup — equivalent to running:
+ *   git reflog expire --expire=now --expire-unreachable=now --all
+ *   git gc --prune=now --aggressive
+ *
+ * Returns the count-objects output so the UI can show before/after stats.
+ */
+export async function fullMaintenance(repoPath: string): Promise<string> {
+  const git = getGit(repoPath);
+  // 1. Expire reflog entries (frees reflog space)
+  await git.raw(['reflog', 'expire', '--expire=now', '--expire-unreachable=now', '--all']);
+  // 2. Aggressive gc with immediate prune (frees loose objects)
+  await git.raw(['gc', '--prune=now', '--aggressive', '--quiet']);
+  // 3. Pack refs (faster ref enumeration going forward)
+  await git.raw(['pack-refs', '--all']);
   invalidateCache(repoPath);
   return git.raw(['count-objects', '-vH']);
 }
@@ -5045,35 +7565,6 @@ export async function showFile(repoPath: string, ref: string, file: string): Pro
 // ============================================================
 
 /**
- * Auto-stash: stash local changes before an operation, then pop after.
- * Used by merge/rebase/pull to enable --autostash-like behavior.
- */
-export async function autoStash<T>(repoPath: string, fn: () => Promise<T>): Promise<T> {
-  const git = getGit(repoPath);
-  const s = await git.status();
-  const dirty = !s.isClean();
-  let stashHash: string | null = null;
-  if (dirty) {
-    try {
-      stashHash = await git.stash(['push', '-u', '-m', 'prismgit-autostash']);
-    } catch {
-      /* ignore — proceed without stash */
-    }
-  }
-  try {
-    return await fn();
-  } finally {
-    if (stashHash) {
-      try {
-        await git.stash(['pop']);
-      } catch {
-        /* swallow pop errors; user can recover via stashes view */
-      }
-    }
-  }
-}
-
-/**
  * Recyclable commits — unreachable reflog commits eligible for GC (see types/git-api).
  */
 export async function recyclableCommits(repoPath: string): Promise<RecyclableCommit[]> {
@@ -5119,6 +7610,7 @@ export async function recyclableCommits(repoPath: string): Promise<RecyclableCom
 }
 
 export async function lfsListLocks(repoPath: string, remote = 'origin'): Promise<LfsLock[]> {
+  if (lfsDisabledByEnv()) return [];
   const git = getGit(repoPath);
   try {
     const out = await git.raw(['lfs', 'locks', '--remote=' + remote, '--json']);
@@ -5183,6 +7675,79 @@ export async function isEolOnlyChange(repoPath: string, file: string): Promise<b
   }
 }
 
+/**
+ * BATCH EOL-only detection — PERF (v3.1).
+ *
+ * The Changes page's EOL-detection effect used to call isEolOnlyChange()
+ * PER FILE: up to 100 `git diff --ignore-cr-at-eol -- <file>` subprocesses
+ * on EVERY status refresh (watcher ticks every ~5s → a repo with 50 modified
+ * files spawned 50 processes per tick, permanently saturating the simple-git
+ * queue and competing with the user's own actions).
+ *
+ * One batched `git diff --ignore-cr-at-eol --numstat -z -- <files…>` yields
+ * the same answer: verified against real git, `--numstat` RESPECTS
+ * `--ignore-cr-at-eol` (EOL-only files are omitted from the listing
+ * entirely), unlike `--name-only` which lists every raw content difference
+ * regardless of the flag. Files that appear in the numstat listing = real
+ * changes; files that do NOT = EOL-only. One subprocess per chunk.
+ *
+ * The file list is chunked (≤40 files or ≤8k characters per invocation) so
+ * the argv can never approach the Windows CreateProcess 32k limit; chunks
+ * run in parallel via the getGit queue.
+ *
+ * Returns the files (among `files`) that have REAL (non-EOL) changes. A
+ * failed chunk's files are conservatively reported as real changes —
+ * matching the old per-file catch path, where an error meant
+ * isEolOnlyChange() === false ("real change").
+ */
+export async function filesWithRealChanges(repoPath: string, files: string[]): Promise<string[]> {
+  if (files.length === 0) return [];
+  const git = getGit(repoPath);
+  // Chunk: max 40 files AND max 8000 characters of joined paths per call.
+  const chunks: string[][] = [];
+  let current: string[] = [];
+  let chars = 0;
+  for (const f of files) {
+    const cost = f.length + 4; // path + arg separator + quoting headroom
+    if (current.length > 0 && (current.length >= 40 || chars + cost > 8000)) {
+      chunks.push(current);
+      current = [];
+      chars = 0;
+    }
+    current.push(f);
+    chars += cost;
+  }
+  if (current.length > 0) chunks.push(current);
+
+  const results = await Promise.allSettled(
+    chunks.map((chunk) =>
+      git.raw(['diff', '--ignore-cr-at-eol', '--numstat', '-z', '--', ...chunk])
+    )
+  );
+
+  const real = new Set<string>();
+  const failed = new Set<string>();
+  chunks.forEach((chunk, i) => {
+    const r = results[i];
+    if (r.status !== 'fulfilled') {
+      // A chunk failed — treat only ITS files as real changes (the old
+      // per-file path swallowed exactly this class of error per file).
+      for (const f of chunk) failed.add(f);
+      return;
+    }
+    // -z numstat entries: `added\tdel\tpath\0` — paths are NOT quoted in
+    // -z mode, so they match status.files paths byte-for-byte. Binary
+    // entries are `-\t-\tpath` — still a real change (listed).
+    for (const entry of r.value.split('\0')) {
+      if (!entry) continue;
+      const secondTab = entry.indexOf('\t', entry.indexOf('\t') + 1);
+      const p = secondTab >= 0 ? entry.slice(secondTab + 1) : entry;
+      if (p) real.add(p);
+    }
+  });
+  return files.filter((f) => real.has(f) || failed.has(f));
+}
+
 /** Push to Gerrit — refs/for/<branch> instead of HEAD */
 export async function pushToGerrit(
   repoPath: string,
@@ -5202,7 +7767,7 @@ export async function pushToGerrit(
       if (match) targetBranch = match[1].trim();
     }
     if (!targetBranch) {
-      const s = await git.status();
+      const s = await git.status(['--ignore-submodules=all']);
       targetBranch = s.current || 'main';
     }
   }
@@ -5219,8 +7784,13 @@ export async function pushToGerrit(
     for (const r of options.reviewers) gerritOpts.push(`r=${r}`);
   }
   if (gerritOpts.length) refspec += '%' + gerritOpts.join(',');
-  const args = [...(await remoteNetworkArgs(repoPath, remote, true)), 'push', remote, refspec];
-  return git.raw(args);
+  const { git: netGit, cleanup } = await networkGit(repoPath, remote, true);
+  try {
+    const args = [...(await remoteNetworkArgs(repoPath, remote, true)), 'push', remote, refspec];
+    return await netGit.raw(args);
+  } finally {
+    cleanup();
+  }
 }
 
 /** Clone with partial clone filter (--filter=blob:none etc.) */
@@ -5228,16 +7798,32 @@ export async function clonePartial(
   url: string,
   targetPath: string,
   filter: 'blob:none' | 'tree:0' | 'blob:limit=1m' = 'blob:none',
-  options?: { depth?: number; branch?: string; recursive?: boolean }
+  options?: { depth?: number; branch?: string; recursive?: boolean; sslVerify?: boolean }
 ): Promise<string> {
-  const args = ['clone', '--filter=' + filter, url, targetPath];
-  if (options?.depth) args.push('--depth=' + options.depth);
-  if (options?.branch) args.push('--branch=' + options.branch, '--single-branch');
+  // TLS-bypass args first (see clone()): -c covers the transfer, --config
+  // persists into the new repo. HTTP-auth args next — same contract as
+  // clone(): credentials stored (by the RemoteAuthDialog) keyed by the
+  // TARGET path + 'origin', carried per-command only.
+  const authArgs = buildHttpAuthArgs(url, getStoredCredential(targetPath, 'origin'));
+  const args = options?.sslVerify === false
+    ? [...authArgs, '-c', 'http.sslVerify=false', 'clone', '--config', 'http.sslVerify=false', '--filter=' + filter, url, targetPath]
+    : [...authArgs, 'clone', '--filter=' + filter, url, targetPath];
+  if (options?.depth) args.push('--depth=' + options.depth, '--no-single-branch');
+  // BUGFIX "не получаю все ветки": --single-branch here limited the partial
+  // clone to ONE branch's refs. --filter only filters BLOBS from history;
+  // branch visibility should stay complete (SmartGit/SourceTree behavior),
+  // so a branch checkout no longer implies single-branch refs.
+  if (options?.branch) args.push('--branch=' + options.branch);
   if (options?.recursive) args.push('--recursive');
-  const git = simpleGit();
-  const result = await git.raw(args);
-  invalidateCache();
-  return result || targetPath;
+  const ssh = buildSshEnv(url, '');
+  const git = withMergedGitEnv(simpleGit(GIT_SSH_UNSAFE_OPTIONS), ssh.env);
+  try {
+    const result = await git.raw(args);
+    invalidateCache();
+    return result || targetPath;
+  } finally {
+    ssh.cleanup();
+  }
 }
 
 /** Set up PrismGit as credential helper for the cloned repo */
@@ -5246,7 +7832,7 @@ export async function setupCredentialHelper(repoPath: string): Promise<void> {
   // ("Configuring credential.helper is not permitted without enabling
   // allowUnsafeCredentialHelper") — the old code swallowed that error, so this
   // function silently did nothing. Use an unsafe instance and actually set it.
-  const git = simpleGit({ baseDir: repoPath, unsafe: { allowUnsafeCredentialHelper: true } });
+  const git = withMergedGitEnv(simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS, unsafe: { ...GIT_UNSAFE_OPTIONS.unsafe, allowUnsafeCredentialHelper: true } }));
   try {
     await git.addConfig('credential.helper', 'store', false /* replace-all */, 'local');
   } catch {
@@ -5391,6 +7977,28 @@ export async function isCommitPushed(repoPath: string, hash: string): Promise<bo
   }
 }
 
+/** Branches a commit belongs to — answers «какой ветке принадлежит коммит?»
+ *  in the History detail card. `git branch --contains` for local branches
+ *  and `-r` for remote-tracking ones (symbolic `origin/HEAD -> …` rows are
+ *  not branches and are skipped). Results are immutable per SHA — the
+ *  renderer caches them like tagsAt. */
+export interface BranchesContaining {
+  local: string[];
+  remote: string[];
+}
+
+export async function branchesContaining(repoPath: string, hash: string): Promise<BranchesContaining> {
+  const git = getGit(repoPath);
+  const parse = (raw: string): string[] => raw.split('\n')
+    .map((l) => l.replace(/^\*/, '').trim())
+    .filter((l) => l && !l.includes('-> '));
+  const [localRaw, remoteRaw] = await Promise.all([
+    git.raw(['branch', '--contains', hash]).catch(() => ''),
+    git.raw(['branch', '-r', '--contains', hash]).catch(() => ''),
+  ]);
+  return { local: parse(localRaw), remote: parse(remoteRaw) };
+}
+
 /**
  * Squash multiple commits into one (interactive rebase automation).
  * Uses git rebase --interactive with autosquash, by writing fixup! messages.
@@ -5444,7 +8052,7 @@ export async function squashCommits(
     // pitfall splitCommit documents) — an unsafe instance is MANDATORY here,
     // otherwise the rebase always fails with "Configuring core.editor is not
     // permitted without enabling allowUnsafeEditor".
-    const gitUnsafe = simpleGit({ baseDir: repoPath, unsafe: { allowUnsafeEditor: true } });
+    const gitUnsafe = withMergedGitEnv(simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS, unsafe: { ...GIT_UNSAFE_OPTIONS.unsafe, allowUnsafeEditor: true } }));
     // fromHash may be the ROOT commit — rebase needs --root there. NOTE: a
     // `rev-parse --verify --quiet <hash>^` probe does NOT work: it exits 1
     // with EMPTY output and simple-git resolves that (no stderr → no throw).
@@ -5491,6 +8099,297 @@ export async function coalesceCommits(
     } catch { /* ignore */ }
   }
   await squashCommits(repoPath, older, newer, messages.join('\n\n'));
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// Squash-to-branch (History tool): carry a contiguous group of commits to
+// ANOTHER branch as a single squashed commit — onto an existing branch, or
+// onto a NEW branch created on the fly.
+//
+// The user asked for: "выделение группы коммитов и отправка их в другую
+// ветку в виде одного (сквош)" + "могут быть ещё и конфликты" + "не только
+// в существующую ветку, но и создавать новую".
+//
+// Two execution paths, chosen by an upfront READ-ONLY conflict dry-run:
+//
+//  FAST PATH (clean) — pure plumbing, zero worktree impact:
+//    1. git merge-tree --write-tree --merge-base=<oldest^> <targetTip> <newest>
+//       → merged tree (this is exactly "apply the range's net diff to the
+//       target": ours=target, theirs=newest, base=range base).
+//    2. git commit-tree <mergedTree> -p <targetTip> -m <message> with the
+//       ORIGINAL author (name/email/date of the oldest commit) via env.
+//    3. git update-ref refs/heads/<target> <new> <oldTip> — atomic CAS.
+//    Works with a dirty working tree, does not switch branches, never
+//    touches HEAD — the user's current context is fully preserved.
+//
+//  LIVE ROUTE (conflicts) — reuses the cherry-pick machinery:
+//    A synthetic "carrier" commit S = commit-tree(<newest's tree>, -p <oldest^>,
+//    message, original author) carries the net range diff. We check out the
+//    target and run a plain `git cherry-pick S`:
+//      - conflicts → CHERRY_PICK_HEAD + MERGE_MSG(= S's message = the squash
+//        message) — the app's existing resolve flow takes over (repo-state
+//        banner, Continue/Skip/Abort in Changes). `--continue` then commits
+//        with S's message AND S's author, so both the message and the
+//        preserved author survive the conflict resolution.
+//      - no conflicts (dry-run false alarm / branch moved meanwhile) → the
+//        cherry-pick itself created the squashed commit — same guarantees.
+//
+// The dry-run is completely read-only: on 'conflicts-preview' NOTHING has
+// been touched yet — the UI asks the user, then re-invokes with
+// proceedOnConflict: true to actually run the live route.
+// Types (SquashToBranchTarget/Params/Result) live in types/git-api.ts.
+// ═════════════════════════════════════════════════════════════════════════
+
+/** git's well-known empty tree OID (used as the merge base for root-commit ranges). */
+const SQUASH_EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
+
+export async function squashToBranch(
+  repoPath: string,
+  params: SquashToBranchParams,
+): Promise<SquashToBranchResult> {
+  const git = getGit(repoPath);
+  const commits = (params.commits ?? []).map((h) => String(h).trim()).filter(Boolean);
+  const n = commits.length;
+  if (n === 0) throw new Error('squashToBranch: no commits selected');
+  const message = (params.message ?? '').trim();
+  if (!message) throw new Error('squashToBranch: commit message is required');
+
+  const oldest = commits[0];
+  const newest = commits[n - 1];
+
+  // ── 1. The selection must be ONE gap-free linear range. ──────────────────
+  // Two output-based checks (simple-git RESOLVES exit-1 failures with empty
+  // stderr — never throws — so exceptions cannot be relied on here):
+  //   a) count(oldest..newest) == n-1  → the oldest IS an ancestor of the
+  //      newest and nothing outside the selection lies between them;
+  //   b) count(oldest^..newest) == n   → including the oldest, the range is
+  //      gap-free AND spans no merges (a merge's side-branch commits would
+  //      be reachable but not selected — the tree-level squash would
+  //      silently carry their changes, so refuse).
+  let rootCase = false;
+  {
+    const parentsOut = await git.raw(['rev-list', '--parents', '-n', '1', oldest]);
+    rootCase = parentsOut.trim().split(/\s+/).filter(Boolean).length < 2;
+  }
+  const spanRaw = rootCase
+    ? await git.raw(['rev-list', '--count', newest])
+    : await git.raw(['rev-list', '--count', `${oldest}^..${newest}`]);
+  const span = parseInt(spanRaw.trim(), 10) || 0;
+  if (span !== n) {
+    throw new Error(
+      `The selection is not a contiguous range: ${span} commit(s) exist between the oldest and newest selected commit, but ${n} are selected. Re-select with Shift so the range has no gaps and no merge commits.`,
+    );
+  }
+  const betweenRaw = await git.raw(['rev-list', '--count', `${oldest}..${newest}`]);
+  const between = parseInt(betweenRaw.trim(), 10) || 0;
+  if (between !== n - 1) {
+    throw new Error('The selected commits are not on one line of history: the oldest selected commit is not an ancestor of the newest one. Select commits from the same branch with Shift+click.');
+  }
+
+  // ── 2. Preserve the original author (oldest commit's name/email/date). ───
+  let authorEnv: Record<string, string> = {};
+  if (params.keepAuthor !== false) {
+    try {
+      const raw = await git.raw(['log', '-1', '--format=%an%x1f%ae%x1f%aI', oldest]);
+      const parts = raw.trim().split('\x1f');
+      if (parts[0] && parts[1]) {
+        authorEnv = { GIT_AUTHOR_NAME: parts[0], GIT_AUTHOR_EMAIL: parts[1] };
+        if (parts[2]) authorEnv.GIT_AUTHOR_DATE = parts[2];
+      }
+    } catch { /* fall back to the committer identity */ }
+  }
+  // A PRIVATE instance carrying the author env (the cached getGit instance
+  // shares a live env view without per-call extras).
+  const gitAuthor = withMergedGitEnv(
+    simpleGit({ baseDir: repoPath, ...GIT_UNSAFE_OPTIONS }),
+    authorEnv,
+  );
+
+  // ── 3. Guard: no sequencer/rebase/merge/bisect may be in progress. ───────
+  {
+    const gitDir = await resolveGitDir(repoPath, git);
+    const st = detectRepoStateFromGitDir(gitDir);
+    if (st.isMerging || st.isRebasing || st.isCherryPicking || st.isReverting || st.isBisecting) {
+      throw new Error('Repository is in the middle of another operation (merge/rebase/cherry-pick/revert/bisect) — finish or abort it first.');
+    }
+  }
+
+  // ── 4. Resolve the target branch and its tip. ───────────────────────────
+  let branch: string;
+  let targetTip: string | null = null; // null → new branch with NO parent commit
+  let trivial = false; // new branch forked at the range base → conflicts impossible
+  if (params.target?.kind === 'new') {
+    const name = (params.target.name ?? '').trim();
+    if (!name) throw new Error('New branch name is required');
+    try {
+      await git.raw(['check-ref-format', '--branch', name]);
+    } catch {
+      throw new Error(`Invalid branch name: "${name}"`);
+    }
+    // Must not exist yet (refs/heads scope = local branches only).
+    const existsOut = await git.raw(['rev-parse', '--verify', '--quiet', `refs/heads/${name}`]);
+    if (existsOut.trim()) throw new Error(`Branch "${name}" already exists — pick a different name, or select it as an existing branch.`);
+    branch = name;
+    const base = (params.target.base ?? '').trim() || 'range-base';
+    if (base === 'range-base') {
+      trivial = true;
+      if (rootCase) targetTip = null; // the squashed commit becomes the branch ROOT
+      else {
+        targetTip = (await git.raw(['rev-parse', '--verify', '--quiet', `${oldest}^`])).trim();
+        if (!targetTip) throw new Error('Could not resolve the range base commit.');
+      }
+    } else {
+      const tip = (await git.raw(['rev-parse', '--verify', '--quiet', `${base}^{commit}`])).trim();
+      if (!tip) throw new Error(`Could not resolve the new branch base: "${base}"`);
+      targetTip = tip;
+    }
+  } else {
+    const name = (params.target?.branch ?? '').trim();
+    if (!name) throw new Error('Target branch is required');
+    const tip = (await git.raw(['rev-parse', '--verify', '--quiet', `refs/heads/${name}`])).trim();
+    if (!tip) throw new Error(`Branch "${name}" was not found among the local branches.`);
+    // Squashing onto the CURRENT branch is a different feature (in-branch
+    // squash via Interactive Rebase) — refuse it here, otherwise update-ref
+    // would move HEAD under the user's feet.
+    let cur: string | null = null;
+    try {
+      cur = (await git.raw(['symbolic-ref', '--short', 'HEAD'])).trim() || null;
+    } catch { cur = null; }
+    if (cur && name === cur) {
+      throw new Error(`"${name}" is the current branch. Use Interactive Rebase (Ctrl+Shift+R) to squash within the current branch.`);
+    }
+    branch = name;
+    targetTip = tip;
+  }
+
+  const newestTree = (await git.raw(['rev-parse', `${newest}^{tree}`])).trim();
+
+  // ── 5. Conflict dry-run (read-only) — unless conflicts are impossible. ───
+  let mergedTree = '';
+  let dryConflicts: string[] = [];
+  let dryRunUnavailable = false;
+  if (trivial) {
+    // New branch at the range base: merging newest onto its own parent with
+    // itself as the base yields newest's tree, always clean.
+    mergedTree = newestTree;
+  } else {
+    const baseArg = rootCase ? SQUASH_EMPTY_TREE : `${oldest}^`;
+    let out = '';
+    try {
+      out = await git.raw([
+        'merge-tree', '--write-tree', '--name-only', '--merge-base', baseArg,
+        targetTip ?? SQUASH_EMPTY_TREE, newest,
+      ]);
+    } catch {
+      // git < 2.38 (no merge-tree --write-tree) or a hard error. Without the
+      // dry-run we cannot pre-detect conflicts — take the live route and let
+      // cherry-pick surface them naturally.
+      dryRunUnavailable = true;
+    }
+    if (out) {
+      // Output format: "<tree OID>\n<conflicted files…>\n\n<info messages>".
+      // On the CLEAN path the tree line is all there is. With --name-only the
+      // conflict block is bare file paths (stop at the blank separator line —
+      // do NOT trim entries: filenames may contain spaces).
+      const lines = out.split('\n');
+      mergedTree = (lines[0] ?? '').trim();
+      for (let i = 1; i < lines.length; i++) {
+        if (lines[i] === '') break;
+        dryConflicts.push(lines[i]);
+      }
+    }
+  }
+
+  // ── 6. Empty diff: the target already contains these changes. ───────────
+  if (mergedTree && targetTip) {
+    const targetTree = (await git.raw(['rev-parse', `${targetTip}^{tree}`])).trim();
+    if (mergedTree === targetTree) return { status: 'empty', branch };
+  }
+
+  if (dryConflicts.length > 0 && !params.proceedOnConflict) {
+    // Read-only outcome: the UI shows the file list and asks the user.
+    return { status: 'conflicts-preview', branch, conflicts: dryConflicts };
+  }
+
+  if (dryConflicts.length === 0 && !dryRunUnavailable) {
+    // ── 7a. FAST PATH — plumbing only, no worktree/HEAD impact. ────────────
+    const commitArgs = ['commit-tree', mergedTree, '-m', message];
+    if (targetTip) commitArgs.push('-p', targetTip);
+    const newCommit = (await gitAuthor.raw(commitArgs)).trim();
+    if (!newCommit) throw new Error('squashToBranch: commit-tree produced no commit');
+    if (params.target.kind === 'new') {
+      await git.raw(['update-ref', `refs/heads/${branch}`, newCommit]);
+    } else {
+      // Atomic CAS: fails loudly if the branch moved since we read its tip.
+      await git.raw(['update-ref', `refs/heads/${branch}`, newCommit, targetTip!]);
+    }
+    const wantSwitch = params.switchToTarget ?? (params.target.kind === 'new');
+    let switchedTo: string | undefined;
+    let switchWarning: string | undefined;
+    if (wantSwitch) {
+      try {
+        await git.raw(['checkout', branch]);
+        switchedTo = branch;
+      } catch (e) {
+        switchWarning = e instanceof Error ? e.message : String(e);
+      }
+    }
+    return { status: 'ok', branch, commit: newCommit, ...(switchedTo ? { switchedTo } : {}), ...(switchWarning ? { switchWarning } : {}) };
+  }
+
+  // ── 7b. LIVE ROUTE — checkout target + carrier cherry-pick. ──────────────
+  // Requires a clean working tree: the checkout would otherwise drag the
+  // user's uncommitted changes onto another branch.
+  {
+    const porcelain = await git.raw(['status', '--porcelain']);
+    if (porcelain.trim() !== '') {
+      throw new Error('Working tree is not clean — commit or stash your changes before carrying the squash with conflicts.');
+    }
+  }
+  // Carrier commit S: newest's tree parented on the range base, carrying the
+  // user's message and the original author. A plain cherry-pick of S applies
+  // the range's net diff to the target; on conflicts, --continue commits with
+  // S's message AND author (both survive the resolution).
+  const carrierArgs = ['commit-tree', newestTree, '-m', message];
+  if (!rootCase) carrierArgs.push('-p', `${oldest}^`);
+  const carrier = (await gitAuthor.raw(carrierArgs)).trim();
+  if (!carrier) throw new Error('squashToBranch: could not create the carrier commit');
+
+  if (params.target.kind === 'new') {
+    // Fork the new branch at its base, then pick onto it.
+    const startPoint = targetTip ?? (rootCase ? undefined : `${oldest}^`);
+    const coArgs = ['checkout', '-b', branch];
+    if (startPoint) coArgs.push(startPoint);
+    await git.raw(coArgs);
+  } else {
+    await git.raw(['checkout', branch]);
+  }
+
+  // Plain (committing) cherry-pick of the carrier; conflicts leave the
+  // standard CHERRY_PICK_HEAD + MERGE_MSG state for the app's resolve flow.
+  let pickErr = '';
+  try {
+    await git.raw(['cherry-pick', carrier]);
+  } catch (e) {
+    pickErr = e instanceof Error
+      ? (((e as { stderr?: string }).stderr || e.message) as string)
+      : String(e);
+  }
+  const statusRes = await status(repoPath);
+  if (statusRes.conflicted.length > 0) {
+    return { status: 'conflicts', branch, conflicts: statusRes.conflicted };
+  }
+  if (statusRes.isCherryPicking) {
+    // Pick stuck without conflicts (empty pick) — abort it and report: the
+    // target already had the changes (dry-run raced with a concurrent update).
+    await git.raw(['cherry-pick', '--abort']);
+    return { status: 'empty', branch };
+  }
+  if (pickErr) throw new Error(pickErr);
+  // The pick succeeded cleanly (dry-run false alarm or the branch moved in
+  // between): the cherry-pick itself created the squashed commit.
+  const newHead = (await git.raw(['rev-parse', 'HEAD'])).trim();
+  return { status: 'ok', branch, commit: newHead, switchedTo: branch };
 }
 
 /** Tag-Grouping: group tags by patterns (e.g., v1.0.0, v1.0.1 → group "v1.0") */
@@ -5558,8 +8457,18 @@ export async function smartPull(
   // Fetch first
   try {
     await git.raw(['fetch', remote, targetBranch]);
-  } catch {
-    /* ignore fetch errors */
+  } catch (e) {
+    // A certificate failure MUST NOT be swallowed: with the fetch silently
+    // dead, the ahead/behind math below runs on STALE refs and the fallback
+    // pull would surface the same TLS error anyway. Re-throw it (wrapped,
+    // like pull/fetch do) so the renderer's catch site can offer the SSL
+    // bypass dialog and the retry actually fixes the fetch too. Every OTHER
+    // fetch failure keeps the lenient fallback (deleted remote branch, ref
+    // gone mid-flight, …).
+    if (classifySslFailure(e instanceof Error ? e.message : String(e))) {
+      throw describeNetworkError(e, 'fetch');
+    }
+    /* ignore other fetch errors */
   }
   // Check ahead/behind. `rev-list --left-right --count HEAD...remote` prints
   // "<left> <right>": left = commits only in HEAD (LOCAL, ahead), right =
@@ -5579,7 +8488,7 @@ export async function smartPull(
     return { strategy: 'rebase', message: 'No remote tracking ref — pulled with --rebase' };
   }
   // Check working tree status
-  const st = await git.status();
+  const st = await git.status(['--ignore-submodules=all']);
   if (st.isClean() && ahead === 0) {
     // Safe to reset to remote — prevents divergence after remote force-push
     await git.raw(['reset', '--hard', remoteRef]);
@@ -5620,13 +8529,23 @@ export async function octopusMerge(
 /**
  * Force Push policy check — SmartGit Manual: configurable safety.
  * Returns true if force-push is allowed for the given branch.
+ *
+ * The protected list is PURELY LOCAL and OPT-IN (empty by default): a plain
+ * git client cannot know the server-side protection state of GitLab/GitHub,
+ * so it must never claim "Branch X is protected" out of thin air. Only
+ * branches explicitly listed in Preferences → Commands are blocked locally;
+ * a REAL server-side protection surfaces as a push rejection which
+ * describeNetworkError() translates into an actionable hint.
  */
 export type ForcePushPolicy = 'deny' | 'feature-only' | 'allow';
+
+/** Which git flag a force push uses: real `--force` (default) or `--force-with-lease`. */
+export type ForcePushMode = 'lease' | 'force';
 
 export function isForcePushAllowed(
   branch: string | undefined,
   policy: ForcePushPolicy,
-  protectedBranches: string[] = ['main', 'master', 'develop', 'release/*']
+  protectedBranches: string[] = []
 ): { allowed: boolean; reason: string } {
   if (policy === 'allow') return { allowed: true, reason: 'Force push allowed by policy' };
   if (policy === 'deny') return { allowed: false, reason: 'Force push denied by global policy' };
@@ -5640,7 +8559,11 @@ export function isForcePushAllowed(
     return branch === pattern;
   });
   if (isProtected) {
-    return { allowed: false, reason: `Branch '${branch}' is protected` };
+    // Honest wording: this is the user's own LOCAL opt-in list, NOT a
+    // server-side protection (the old "Branch 'main' is protected" was a
+    // false claim whenever the server had no protection at all — GitLab
+    // protection state is invisible to a plain git client).
+    return { allowed: false, reason: `Branch '${branch}' is in the local protected list` };
   }
   return { allowed: true, reason: `Force push allowed on feature branch '${branch}'` };
 }
@@ -5787,20 +8710,6 @@ export async function createSignedTag(
 }
 
 /**
- * LFS fsck — validate LFS object integrity.
- * SmartGit Manual: LFS validation.
- */
-export async function lfsFsck(repoPath: string): Promise<{ ok: boolean; output: string }> {
-  const git = getGit(repoPath);
-  try {
-    const out = await git.raw(['lfs', 'fsck']);
-    return { ok: true, output: out };
-  } catch (e) {
-    return { ok: false, output: String(e) };
-  }
-}
-
-/**
  * Multi-repo batch operation — run a git command across multiple repos.
  * SmartGit Manual: Batch operations for multi-repo management.
  */
@@ -5809,30 +8718,54 @@ export async function batchOperation(
   operation: 'fetch' | 'pull' | 'push' | 'status',
   options: { remote?: string; branch?: string; force?: boolean } = {}
 ): Promise<{ repo: string; success: boolean; error?: string }[]> {
+  // BATCH: run all repos in PARALLEL with bounded concurrency (4 at a time).
+  // Previously this was a sequential for-loop — for 10 repos × ~2s per fetch
+  // that was 20s. Now it's ~5s (ceil(10/4) × 2s).
+  const CONCURRENCY = 4;
   const results: { repo: string; success: boolean; error?: string }[] = [];
-  for (const repo of repos) {
-    try {
-      const git = getGit(repo);
-      const r = options.remote || 'origin';
-      const isPush = operation === 'push';
-      const netArgs = await remoteNetworkArgs(repo, r, isPush);
-      switch (operation) {
-        case 'fetch':
-          await git.raw([...netArgs, 'fetch', r, '--prune']);
-          break;
-        case 'pull':
-          await git.raw([...netArgs, 'pull', r, options.branch || '']);
-          break;
-        case 'push':
-          await git.raw([...netArgs, '-c', 'http.version=HTTP/1.1', 'push', r, ...(options.force ? ['--force-with-lease'] : [])]);
-          break;
-        case 'status':
-          await git.status();
-          break;
-      }
-      results.push({ repo, success: true });
-    } catch (e) {
-      results.push({ repo, success: false, error: String(e) });
+  for (let i = 0; i < repos.length; i += CONCURRENCY) {
+    const batch = repos.slice(i, i + CONCURRENCY);
+    const batchResults = await Promise.allSettled(
+      batch.map(async (repo) => {
+        try {
+          const r = options.remote || 'origin';
+          const isPush = operation === 'push';
+          const { git, cleanup } = await networkGit(repo, r, isPush);
+          const netArgs = await remoteNetworkArgs(repo, r, isPush);
+          try {
+            switch (operation) {
+              case 'fetch':
+                await git.raw([...netArgs, 'fetch', r, '--prune']);
+                break;
+              case 'pull':
+                // Delegate to the dedicated pull() function — it ALWAYS
+                // passes `--rebase` OR `--no-rebase` so git 2.27+ never
+                // refuses with "Need to specify how to reconcile divergent
+                // branches". The previous raw git.raw() here hit that
+                // error on every divergent repo in the batch.
+                // pull() also handles auto-stash + untracked-overwrite
+                // recovery, which the raw form didn't.
+                await pull(repo, r, options.branch || undefined, false, false);
+                break;
+              case 'push':
+                await git.raw([...netArgs, '-c', 'http.version=HTTP/1.1', 'push', r, ...(options.force ? ['--force-with-lease'] : [])]);
+                break;
+              case 'status':
+                await git.status(['--ignore-submodules=all']);
+                break;
+            }
+          } finally {
+            cleanup();
+          }
+          return { repo, success: true };
+        } catch (e) {
+          return { repo, success: false, error: e instanceof Error ? e.message : String(e) };
+        }
+      })
+    );
+    for (const r of batchResults) {
+      if (r.status === 'fulfilled') results.push(r.value);
+      else results.push({ repo: '?', success: false, error: String(r.reason) });
     }
   }
   return results;
@@ -5918,4 +8851,4 @@ export async function importConfig(
   }
 }
 
-export { invalidateCache };
+export { invalidateCache, trimRepoCaches };

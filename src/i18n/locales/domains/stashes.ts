@@ -15,6 +15,10 @@ export const en: Record<string, string> = {
   'stashes.renameFailed': 'Stash rename failed',
   'stashes.dropFailed': 'Stash drop failed',
   'stashes.popFailed': 'Stash pop failed',
+  'stashes.popConflicts': "Stash pop resulted in conflicts",
+  'stashes.popConflictsHint': "The stash entry was KEPT. Resolve the conflicts in the Changes tool, then commit (or discard the changes)",
+  'stashes.applyConflicts': "Stash apply resulted in conflicts",
+  'stashes.applyConflictsHint': "The stash entry was kept. Resolve the conflicts in the Changes tool, then commit (or discard the changes)",
   'stashes.branchFailed': 'Stash branch failed',
   'stashes.loadFailed': 'Failed to load stashes',
   // Apply
@@ -63,6 +67,14 @@ export const en: Record<string, string> = {
   'stashes.viewMenu': 'View Stash (Diff tool)',
   'stashes.branchMenu': 'Branch from Stash...',
   'stashes.applyItem': 'Apply stash@{{index}}',
+  // 2.3 — keep index (restore staged/unstaged split)
+  'stashes.applyKeepIndexMenu': 'stash@{{index}} apply (keep index)',
+  'stashes.popKeepIndexMenu': 'stash@{{index}} pop (keep index)',
+  'stashes.keepIndexPush': 'Keep index',
+  'stashes.keepIndexPushHint': 'Stash everything, but leave staged changes in the index (--keep-index).',
+  'stashes.poppedKeepIndex': 'stash@{{{index}}} popped — staged state restored',
+  'stashes.appliedKeepIndex': 'stash@{{{index}}} applied — staged state restored',
+
   // Page chrome
   'stashes.entriesCount': '{count} entries',
   'stashes.loading': 'Loading stashes...',
@@ -83,6 +95,9 @@ export const en: Record<string, string> = {
   'stashes.renameTooltip': 'Rename Stash',
   'stashes.dropRowTooltip': 'Drop Stash',
   'stashes.branchesRowTooltip': 'Click: show content in Log · Right-click: stash menu',
+
+  // ── v3.4 localization completion ──
+  'stashes.restoreGroup': 'Restore',
 };
 
 export const ru: Record<string, string> = {
@@ -94,6 +109,10 @@ export const ru: Record<string, string> = {
   'stashes.renameFailed': 'Не удалось переименовать stash',
   'stashes.dropFailed': 'Не удалось удалить stash',
   'stashes.popFailed': 'Не удалось выполнить pop stash',
+  'stashes.popConflicts': "Pop stash привёл к конфликтам",
+  'stashes.popConflictsHint': "Запись stash сохранена. Разрешите конфликты в инструменте Changes, затем закоммитьте (или отбросьте изменения)",
+  'stashes.applyConflicts': "Применение stash привело к конфликтам",
+  'stashes.applyConflictsHint': "Запись stash сохранена. Разрешите конфликты в инструменте Changes, затем закоммитьте (или отбросьте изменения)",
   'stashes.branchFailed': 'Не удалось создать ветку из stash',
   'stashes.loadFailed': 'Не удалось загрузить stash',
   // Apply
@@ -142,6 +161,14 @@ export const ru: Record<string, string> = {
   'stashes.viewMenu': 'Просмотреть Stash (в Diff)',
   'stashes.branchMenu': 'Ветка из Stash...',
   'stashes.applyItem': 'Применить stash@{{index}}',
+  // 2.3 — сохранение индекса (восстановление staged/unstaged)
+  'stashes.applyKeepIndexMenu': 'stash@{{index}} применить (сохранить индекс)',
+  'stashes.popKeepIndexMenu': 'stash@{{index}} извлечь (сохранить индекс)',
+  'stashes.keepIndexPush': 'Сохранить индекс',
+  'stashes.keepIndexPushHint': 'Спрятать всё, но оставить проиндексированные изменения в индексе (--keep-index).',
+  'stashes.poppedKeepIndex': 'stash@{{{index}}} извлечён — состояние индекса восстановлено',
+  'stashes.appliedKeepIndex': 'stash@{{{index}}} применён — состояние индекса восстановлено',
+
   // Page chrome
   'stashes.entriesCount': 'Записей: {count}',
   'stashes.loading': 'Загрузка stash...',
@@ -162,6 +189,9 @@ export const ru: Record<string, string> = {
   'stashes.renameTooltip': 'Переименовать Stash',
   'stashes.dropRowTooltip': 'Удалить Stash',
   'stashes.branchesRowTooltip': 'Клик: показать содержимое в журнале · Правый клик: меню stash',
+
+  // ── v3.4 localization completion ──
+  'stashes.restoreGroup': 'Восстановить',
 };
 
 export const zh: Record<string, string> = {
@@ -173,6 +203,10 @@ export const zh: Record<string, string> = {
   'stashes.renameFailed': '重命名贮藏失败',
   'stashes.dropFailed': '删除贮藏失败',
   'stashes.popFailed': '弹出贮藏失败',
+  'stashes.popConflicts': "弹出贮藏产生了冲突",
+  'stashes.popConflictsHint': "贮藏条目已保留。请在更改工具中解决冲突，然后提交（或放弃更改）",
+  'stashes.applyConflicts': "应用贮藏产生了冲突",
+  'stashes.applyConflictsHint': "贮藏条目已保留。请在更改工具中解决冲突，然后提交（或放弃更改）",
   'stashes.branchFailed': '从贮藏创建分支失败',
   'stashes.loadFailed': '加载贮藏列表失败',
   // Apply
@@ -221,6 +255,14 @@ export const zh: Record<string, string> = {
   'stashes.viewMenu': '查看贮藏（Diff 工具）',
   'stashes.branchMenu': '从贮藏创建分支...',
   'stashes.applyItem': '应用 stash@{{index}}',
+  // 2.3 — 保留索引（恢复 staged/unstaged 划分）
+  'stashes.applyKeepIndexMenu': '应用 stash@{{index}}（保留索引）',
+  'stashes.popKeepIndexMenu': '弹出 stash@{{index}}（保留索引）',
+  'stashes.keepIndexPush': '保留索引',
+  'stashes.keepIndexPushHint': '贮藏所有更改，但已暂存的更改保留在索引中（--keep-index）。',
+  'stashes.poppedKeepIndex': '已弹出 stash@{{{index}}}——已恢复暂存状态',
+  'stashes.appliedKeepIndex': '已应用 stash@{{{index}}}——已恢复暂存状态',
+
   // Page chrome
   'stashes.entriesCount': '{count} 条记录',
   'stashes.loading': '正在加载贮藏...',
@@ -241,6 +283,9 @@ export const zh: Record<string, string> = {
   'stashes.renameTooltip': '重命名贮藏',
   'stashes.dropRowTooltip': '删除贮藏',
   'stashes.branchesRowTooltip': '点击：在日志中显示内容 · 右键：贮藏菜单',
+
+  // ── v3.4 localization completion ──
+  'stashes.restoreGroup': '恢复',
 };
 
 export const de: Record<string, string> = {
@@ -252,6 +297,10 @@ export const de: Record<string, string> = {
   'stashes.renameFailed': 'Stash umbenennen fehlgeschlagen',
   'stashes.dropFailed': 'Stash löschen fehlgeschlagen',
   'stashes.popFailed': 'Stash pop fehlgeschlagen',
+  'stashes.popConflicts': "Stash pop führte zu Konflikten",
+  'stashes.popConflictsHint': "Der Stash-Eintrag wurde BEHALTEN. Konflikte im Changes-Werkzeug lösen, dann committen (oder Änderungen verwerfen)",
+  'stashes.applyConflicts': "Stash anwenden führte zu Konflikten",
+  'stashes.applyConflictsHint': "Der Stash-Eintrag wurde behalten. Konflikte im Changes-Werkzeug lösen, dann committen (oder Änderungen verwerfen)",
   'stashes.branchFailed': 'Branch aus Stash fehlgeschlagen',
   'stashes.loadFailed': 'Stashes konnten nicht geladen werden',
   // Apply
@@ -300,6 +349,14 @@ export const de: Record<string, string> = {
   'stashes.viewMenu': 'Stash anzeigen (Diff-Tool)',
   'stashes.branchMenu': 'Branch aus Stash...',
   'stashes.applyItem': 'stash@{{index}} anwenden',
+  // 2.3 — Index behalten (staged/unstaged-Aufteilung wiederherstellen)
+  'stashes.applyKeepIndexMenu': 'stash@{{index}} anwenden (Index behalten)',
+  'stashes.popKeepIndexMenu': 'stash@{{index}} auspacken (Index behalten)',
+  'stashes.keepIndexPush': 'Index behalten',
+  'stashes.keepIndexPushHint': 'Stasht alles, lässt aber Änderungen in der Staging-Area im Index (--keep-index).',
+  'stashes.poppedKeepIndex': 'stash@{{{index}}} ausgepackt — Staging-Zustand wiederhergestellt',
+  'stashes.appliedKeepIndex': 'stash@{{{index}}} angewendet — Staging-Zustand wiederhergestellt',
+
   // Page chrome
   'stashes.entriesCount': '{count} Einträge',
   'stashes.loading': 'Stashes werden geladen...',
@@ -320,4 +377,7 @@ export const de: Record<string, string> = {
   'stashes.renameTooltip': 'Stash umbenennen',
   'stashes.dropRowTooltip': 'Stash löschen',
   'stashes.branchesRowTooltip': 'Klick: Inhalt im Log anzeigen · Rechtsklick: Stash-Menü',
+
+  // ── v3.4 localization completion ──
+  'stashes.restoreGroup': 'Wiederherstellen',
 };
