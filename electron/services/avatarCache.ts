@@ -23,6 +23,7 @@ import * as https from 'https';
 import * as http from 'http';
 import { URL } from 'url';
 import { app } from 'electron';
+import { isInsecureSslHost } from './insecureHosts.js';
 
 const CACHE_DIR = path.join(app.getPath('userData'), 'avatar-cache');
 
@@ -64,6 +65,11 @@ function download(url: string, timeoutMs = 5000): Promise<Buffer | null> {
     const req = lib.get(url, {
       timeout: timeoutMs,
       headers: { 'User-Agent': 'PrismGit/1.0' },
+      // TLS bypass for hosts the user EXPLICITLY marked insecure via the
+      // SslBypassDialog — see gitlab.ts apiJsonRequest for the contract.
+      // Avatars come from the SAME corporate server whose certificate git
+      // already rejects; without this they silently never load.
+      ...(u.protocol === 'https:' && isInsecureSslHost(u.hostname) ? { rejectUnauthorized: false } : {}),
     }, (res) => {
       if (res.statusCode !== 200) {
         // Non-200 (404, 403, etc.) — no avatar available.

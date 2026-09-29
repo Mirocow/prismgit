@@ -483,6 +483,11 @@ const api = {
     get: (key: string) => ipcRenderer.invoke('settings:get', key),
     set: (key: string, value: unknown) => ipcRenderer.invoke('settings:set', key, value),
     getAll: () => ipcRenderer.invoke('settings:getAll'),
+    // Hosts whose TLS certificates are deliberately not verified — dedicated
+    // channels (the main process keeps a cache in sync with every mutation).
+    getInsecureSslHosts: () => ipcRenderer.invoke('settings:getInsecureSslHosts') as Promise<string[]>,
+    addInsecureSslHost: (host: string) => ipcRenderer.invoke('settings:addInsecureSslHost', host),
+    removeInsecureSslHost: (host: string) => ipcRenderer.invoke('settings:removeInsecureSslHost', host),
     getRepos: () => ipcRenderer.invoke('settings:getRepos'),
     addRepo: (repo: { path: string; name: string }) => ipcRenderer.invoke('settings:addRepo', repo),
     removeRepo: (path: string) => ipcRenderer.invoke('settings:removeRepo', path),

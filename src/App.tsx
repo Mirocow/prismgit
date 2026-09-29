@@ -116,6 +116,14 @@ const PushRejectionDialog = lazy(() =>
         default: m.PushRejectionDialog,
     })),
 );
+// TLS-certificate reaction surface — opened from ANY network catch site via
+// offerSslBypass() (sslBypassStore) when git rejects the server's cert
+// (expired / self-signed / unknown CA). Mounted once, self-gating on ctx.
+const SslBypassDialog = lazy(() =>
+    import("./components/SslBypassDialog").then((m) => ({
+        default: m.SslBypassDialog,
+    })),
+);
 const ErrorDialogHost = lazy(() =>
     import("./components/ErrorDialogHost").then((m) => ({
         default: m.ErrorDialogHost,
@@ -2783,6 +2791,7 @@ export default function App() {
                         onClose={() => setShowApplyPatch(false)}
                     />
                     <PushRejectionDialog />
+                    <SslBypassDialog />
                 </Suspense>
                 <Suspense fallback={null}>
                     <KeyboardShortcutsOverlay

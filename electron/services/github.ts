@@ -6,6 +6,7 @@ import { setSecret, getSecret, deleteSecret } from './secrets.js';
 import { NS_GITHUB } from './credentialKeys.js';
 import type { GithubUser, GithubRepository, GithubPullRequest, GithubPRFile, GithubPRComment, GithubPRCommit } from '../types/github-api.js';
 import { startApiCall, finishApiCall, sanitizeApiPath } from './commandLog.js';
+import { isInsecureSslHost } from './insecureHosts.js';
 
 interface AuthState {
   token?: string;
@@ -71,6 +72,9 @@ async function httpsJson<T>(url: string, options: https.RequestOptions & { token
         path: u.pathname + u.search,
         method: options.method || 'GET',
         headers,
+        // TLS bypass for hosts the user EXPLICITLY marked insecure via the
+        // SslBypassDialog — see gitlab.ts apiJsonRequest for the contract.
+        ...(isHttps && isInsecureSslHost(u.hostname) ? { rejectUnauthorized: false } : {}),
       },
       (res) => {
         let data = '';

@@ -6,6 +6,7 @@ import { useI18n } from "../lib/i18n";
 import { isThemeDark } from "../lib/themes";
 import { cn } from "../lib/utils";
 import { useGitStore } from "../stores/gitStore";
+import { offerSslBypass } from "../stores/sslBypassStore";
 import { useRepositoryStore } from "../stores/repositoryStore";
 import { useSettingsStore } from "../stores/settingsStore";
 import { useToastActions } from "../stores/toastStore";
@@ -118,9 +119,14 @@ export function CommandPalette({
                               .then(() =>
                                   toast.success(t("status.pushedSuccessfully")),
                               )
-                              .catch((e) =>
-                                  toast.error(t("shell.pushFailed"), String(e)),
-                              ),
+                              .catch((e) => {
+                                  if (offerSslBypass(e, {
+                                      repoPath: repo.path,
+                                      retry: () => git.push(repo.path).then(() =>
+                                          toast.success(t("status.pushedSuccessfully"))),
+                                  })) return;
+                                  toast.error(t("shell.pushFailed"), String(e));
+                              }),
                   },
                   {
                       id: "act-push-force",
@@ -160,9 +166,14 @@ export function CommandPalette({
                               .then(() =>
                                   toast.success(t("status.pulledSuccessfully")),
                               )
-                              .catch((e) =>
-                                  toast.error(t("shell.pullFailed"), String(e)),
-                              ),
+                              .catch((e) => {
+                                  if (offerSslBypass(e, {
+                                      repoPath: repo.path,
+                                      retry: () => git.pull(repo.path).then(() =>
+                                          toast.success(t("status.pulledSuccessfully"))),
+                                  })) return;
+                                  toast.error(t("shell.pullFailed"), String(e));
+                              }),
                   },
                   {
                       id: "act-fetch",
@@ -179,12 +190,17 @@ export function CommandPalette({
                                       t("status.fetchedSuccessfully"),
                                   ),
                               )
-                              .catch((e) =>
+                              .catch((e) => {
+                                  if (offerSslBypass(e, {
+                                      repoPath: repo.path,
+                                      retry: () => git.fetch(repo.path).then(() =>
+                                          toast.success(t("status.fetchedSuccessfully"))),
+                                  })) return;
                                   toast.error(
                                       t("shell.fetchFailed"),
                                       String(e),
-                                  ),
-                              ),
+                                  );
+                              }),
                   },
                   {
                       id: "act-refresh",

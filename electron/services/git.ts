@@ -18,6 +18,7 @@ import {
 // duplicate had drifted from the renderer version once already). The
 // shared module exports identical types, so no conversion is needed.
 import { parseDiff as parseDiffShared, type ParsedDiff } from '../../src/lib/diffParser';
+import { classifySslFailure } from '../../src/lib/sslErrors';
 import { addGitSpawnListener } from './commandLog.js';
 import { buildSshEnv } from './ssh.js';
 import { getSetting } from './storage.js';
@@ -1990,7 +1991,18 @@ async function networkSshEnv(
 function describeNetworkError(e: unknown, op: 'push' | 'pull' | 'fetch'): Error {
   const raw = e instanceof Error ? e.message : String(e);
   let hint = '';
-  if (/remote rejected|protected branch|GH006|hook declined|pre-receive/i.test(raw)) {
+  // TLS certificate rejection (expired / self-signed / unknown CA — the
+  // classic internal-corporate-Git case). The renderer's offerSslBypass()
+  // opens the SslBypassDialog for the SAME error class; this hint keeps the
+  // toast path (batch operations, background fetches) actionable too.
+  const ssl = classifySslFailure(raw);
+  if (ssl) {
+    hint =
+      `The server's TLS certificate was rejected (${ssl.kind}` +
+      (ssl.host ? ` — ${ssl.host}` : '') +
+      `). Disable certificate verification for this repository and retry ` +
+      `(Repository Settings → Fetch and Pull, or the SSL dialog). `;
+  } else if (/remote rejected|protected branch|GH006|hook declined|pre-receive/i.test(raw)) {
     hint =
       'The server REFUSED the branch update — the branch is protected ' +
       '(e.g. GitHub "Protect this branch" / required PR reviews) or you lack ' +
@@ -5455,12 +5467,24 @@ export async function configGetMany(
   // a NEWLINE in the -z format, unlike the '=' of the plain format — values
   // with '=' in them stay intact); the final record may lack the trailing
   // NUL — tolerate both.
+  //
+  // KEY CASE: `git config --list -z` prints section.variable keys in
+  // CANONICAL LOWERCASE ('http.sslverify'), while callers ask for the
+  // camelCase spelling ('http.sslVerify') that `git config --get` happily
+  // accepts. A plain `key in out` lookup made every mixed-case key read as
+  // undefined — http.sslVerify (Repository Settings / the SSL bypass
+  // dialog), feature.manyFiles, core.fsmonitor, fetch.writeCommitGraph
+  // (Performance tab) silently fell back to defaults. Match the REQUESTED
+  // key case-insensitively instead; a collision would need two requested
+  // keys differing only by case, which the dialogs never use.
+  const requestedByLower = new Map(keys.map((k) => [k.toLowerCase(), k]));
   for (const entry of raw.split('\0')) {
     if (!entry) continue;
     const idx = entry.indexOf('\n');
     if (idx <= 0) continue;
     const key = entry.substring(0, idx);
-    if (key in out) out[key] = entry.substring(idx + 1); // later scopes override earlier
+    const requested = requestedByLower.get(key.toLowerCase());
+    if (requested) out[requested] = entry.substring(idx + 1); // later scopes override earlier
   }
   return out;
 }

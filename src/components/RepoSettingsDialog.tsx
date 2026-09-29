@@ -27,6 +27,7 @@ const CONFIG_KEYS = [
   'smartgit.tag-grouping.pattern', 'smartgit.tag-grouping.single', 'smartgit.tag-grouping.order',
   'credential.helper', 'submodule.recurse', 'submodule.active',
   'feature.manyFiles', 'core.fsmonitor', 'fetch.writeCommitGraph',
+  'http.sslVerify',
 ];
 
 /** Busy-spinner guard: even if the main process/queue wedges, the dialog
@@ -77,6 +78,11 @@ export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => voi
   const [repoManyFiles, setRepoManyFiles] = useState('');
   const [repoFsmonitor, setRepoFsmonitor] = useState('');
   const [repoCommitGraph, setRepoCommitGraph] = useState('');
+  // Fetch and Pull — TLS certificate verification (http.sslVerify). The
+  // SslBypassDialog writes 'false' automatically when the user accepts the
+  // bypass after a rejected certificate; this checkbox makes the state
+  // visible AND reversible per repository.
+  const [sslVerify, setSslVerify] = useState(true);
 
   const load = useCallback(async () => {
     setBusy(true);
@@ -107,6 +113,9 @@ export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => voi
       setRepoManyFiles(v('feature.manyFiles'));
       setRepoFsmonitor(v('core.fsmonitor'));
       setRepoCommitGraph(v('fetch.writeCommitGraph'));
+      // http.sslVerify: effective (merged scopes) value — 'false' anywhere
+      // means verification is off for this repo.
+      setSslVerify(v('http.sslVerify', 'true') !== 'false');
     } catch (e) {
       toast.error(t('toast.repo.settingsLoadFailed'), String(e));
       // Fields keep their defaults — the dialog stays usable and closable;
@@ -163,6 +172,10 @@ export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => voi
     setOrUnset('feature.manyFiles', repoManyFiles);
     setOrUnset('core.fsmonitor', repoFsmonitor);
     setOrUnset('fetch.writeCommitGraph', repoCommitGraph);
+    // TLS verification — explicit local value so a repo-level 'true' can
+    // override a global http.sslVerify=false (the checkbox mirrors the
+    // EFFECTIVE value, and only an explicit local entry beats the global).
+    set('http.sslVerify', sslVerify ? 'true' : 'false');
 
     try {
       await api.git.configSetMany(p, entries);
@@ -262,6 +275,11 @@ export function RepoSettingsDialog({ onClose, remoteName }: { onClose: () => voi
               <label className="flex flex-col gap-1 text-text-secondary">Initialize new submodules (submodule.active)
                 <input value={submoduleInit} onChange={(e) => setSubmoduleInit(e.target.value)} className={inputCls} placeholder=".* (all) or specific paths, empty = disabled" />
               </label>
+              <label className="flex items-center gap-2 text-text-secondary">
+                <input type="checkbox" checked={sslVerify} onChange={(e) => setSslVerify(e.target.checked)} />
+                {t('settings.repo.sslVerifyLabel')}
+              </label>
+              <p className="text-2xs text-text-tertiary">{t('settings.repo.sslVerifyHint')}</p>
             </div>
           )}
           {tab === 'Push' && (

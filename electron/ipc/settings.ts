@@ -1,5 +1,10 @@
 import { ipcMain } from 'electron';
 import * as storage from '../services/storage.js';
+import {
+  addInsecureSslHost,
+  getInsecureSslHosts,
+  removeInsecureSslHost,
+} from '../services/insecureHosts.js';
 
 export function registerSettingsIpc(): void {
   // Settings
@@ -8,6 +13,14 @@ export function registerSettingsIpc(): void {
     storage.setSetting(key, value)
   );
   ipcMain.handle('settings:getAll', () => storage.getAllSettings());
+
+  // Hosts whose TLS certificates are deliberately not verified (the
+  // SslBypassDialog confirm / Settings → Security → SSL/TLS management).
+  // Dedicated channels instead of raw settings:set so the main-process
+  // isInsecureSslHost() cache stays in sync with every mutation.
+  ipcMain.handle('settings:getInsecureSslHosts', () => getInsecureSslHosts());
+  ipcMain.handle('settings:addInsecureSslHost', (_e, host: string) => addInsecureSslHost(host));
+  ipcMain.handle('settings:removeInsecureSslHost', (_e, host: string) => removeInsecureSslHost(host));
 
   // Repository list
   ipcMain.handle('settings:getRepos', () => storage.getRepos());

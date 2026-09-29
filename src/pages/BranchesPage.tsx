@@ -13,6 +13,7 @@ import type { AppSettings } from '../../electron/types/settings-api';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore, surfaceConflictedState } from '../stores/gitStore';
+import { offerSslBypass } from '../stores/sslBypassStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { useSelectionStore } from '../stores/selectionStore';
 import { useOperationLogStore } from '../stores/operationLogStore';
@@ -946,6 +947,11 @@ export function BranchesPage() {
       await load();
       await refreshStatus(repo.path);
     } catch (e) {
+      // TLS certificate rejection (expired / self-signed corporate remote) —
+      // offer the per-repo bypass + retry BEFORE the conflict probing: a
+      // rejected cert never leaves a conflicted state behind, so the extra
+      // repo-state read is wasted work in exactly this case.
+      if (offerSslBypass(e, { repoPath: repo.path, retry: () => executePull(opts) })) return;
       // A conflicted pull leaves the repo mid-merge — surface the Conflicts
       // UI (state-based detection, see gitStore.surfaceConflictedState)
       // instead of only a transient error toast.

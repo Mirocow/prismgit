@@ -18,6 +18,7 @@ import type {
   GitLabMRCommit,
 } from '../types/gitlab-api.js';
 import { startApiCall, finishApiCall, sanitizeApiPath } from './commandLog.js';
+import { isInsecureSslHost } from './insecureHosts.js';
 
 export interface GitLabUser {
   id: number;
@@ -166,6 +167,11 @@ function apiJsonRequest<T>(
         path: u.pathname + u.search,
         method: options.method || 'GET',
         headers,
+        // TLS bypass for hosts the user EXPLICITLY marked insecure via the
+        // SslBypassDialog (expired / self-signed corporate GitLab certs break
+        // the API exactly like they break git itself). Traffic stays
+        // TLS-encrypted — only the trust check is dropped for that host.
+        ...(isHttps && isInsecureSslHost(u.hostname) ? { rejectUnauthorized: false } : {}),
       },
       (res) => {
         let data = '';

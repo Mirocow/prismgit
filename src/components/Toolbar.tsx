@@ -18,6 +18,7 @@ import {
 } from "../stores/navHistoryStore";
 import { useOperationLogStore } from "../stores/operationLogStore";
 import { offerPushRejection } from "../stores/pushRejectionStore";
+import { offerSslBypass } from "../stores/sslBypassStore";
 import { useRepositoryStore } from "../stores/repositoryStore";
 import { useSelectionStore } from "../stores/selectionStore";
 import { useSettingsStore } from "../stores/settingsStore";
@@ -227,10 +228,12 @@ export function Toolbar({
             else toast.success(pr.title, pr.detail);
         } catch (e) {
             // Remote-conflict reaction (non-fast-forward / lease-stale /
-            // protected / policy) — dialog with recovery actions; plain network
-            // errors keep the old error toast.
-            if (!offerPushRejection(e, { repoPath: currentRepo.path }))
-                toast.error(t("shell.pushFailed"), String(e));
+            // protected / policy) — dialog with recovery actions; TLS cert
+            // rejection (expired / self-signed corporate server) — SSL bypass
+            // dialog; plain network errors keep the old error toast.
+            if (offerPushRejection(e, { repoPath: currentRepo.path })) return;
+            if (offerSslBypass(e, { repoPath: currentRepo.path, retry: () => handlePush() })) return;
+            toast.error(t("shell.pushFailed"), String(e));
         }
     };
     const handlePull = async () => {
@@ -239,6 +242,8 @@ export function Toolbar({
             await pull(currentRepo.path);
             toast.success(t("status.pulledSuccessfully"));
         } catch (e) {
+            // TLS certificate rejection — offer the bypass + auto-retry.
+            if (offerSslBypass(e, { repoPath: currentRepo.path, retry: () => handlePull() })) return;
             toast.error(t("shell.pullFailed"), String(e));
         }
     };
@@ -251,9 +256,11 @@ export function Toolbar({
             toast.success(t("shell.synchronized"));
         } catch (e) {
             // The pull half may conflict (handled by gitStore.pull's own catch);
-            // the push half may be REJECTED by the remote — react to that here.
-            if (!offerPushRejection(e, { repoPath: currentRepo.path }))
-                toast.error(t("shell.synchronizeFailed"), String(e));
+            // the push half may be REJECTED by the remote — react to that here;
+            // the whole sync dies on a rejected TLS certificate — bypass it.
+            if (offerPushRejection(e, { repoPath: currentRepo.path })) return;
+            if (offerSslBypass(e, { repoPath: currentRepo.path, retry: () => handleSynchronize() })) return;
+            toast.error(t("shell.synchronizeFailed"), String(e));
         }
     };
     const handleOpenInBrowser = async () => {

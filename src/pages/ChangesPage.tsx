@@ -29,6 +29,7 @@ import { useContextMenu } from '../lib/useContextMenu';
 import { cn, getStatusColor } from '../lib/utils';
 import { useGitStore } from '../stores/gitStore';
 import { offerPushRejection } from '../stores/pushRejectionStore';
+import { offerSslBypass } from '../stores/sslBypassStore';
 import { useOperationLogStore } from '../stores/operationLogStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore, type FileDisplayFlag } from '../stores/selectionStore';
@@ -1204,8 +1205,22 @@ export function ChangesPage({ onResolveConflict, onResolveConflictAction }: Chan
       else toast.success(t.title, t.detail);
     } catch (e) {
       // Remote-conflict reaction — same matrix as the Toolbar push: the
-      // dialog offers pull/rebase/force recovery instead of a raw toast.
-      if (!offerPushRejection(e, { repoPath: repo.path })) toast.error(t('changes.pushFailed'), String(e));
+      // dialog offers pull/rebase/force recovery instead of a raw toast;
+      // TLS certificate rejection (expired / self-signed corporate Git) —
+      // the SSL bypass dialog retries the push after disabling verification.
+      if (offerPushRejection(e, { repoPath: repo.path })) return;
+      // Retry ONLY the push half — the commit above already succeeded, so
+      // re-running handleCommitAndPush would die on "nothing to commit".
+      if (offerSslBypass(e, {
+        repoPath: repo.path,
+        retry: () => push(repo.path).then((res) => {
+          const d = describePushResult(res);
+          if (d.kind === 'error') toast.error(d.title, d.detail);
+          else if (d.kind === 'info') toast.info(d.title, d.detail);
+          else toast.success(d.title, d.detail);
+        }),
+      })) return;
+      toast.error(t('changes.pushFailed'), String(e));
     }
   };
 

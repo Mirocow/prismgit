@@ -18,7 +18,9 @@ import { cn } from '../../lib/utils';
  *     form to register new secrets manually. Values are never rendered.
  *  3. SSH keys — generate/import/test/delete managed keys, pick the default
  *     key, strict host key checking. Passphrases never appear in this UI;
- *     they live in the vault from the moment of creation.
+ *     they live in the vault from the moment of their creation.
+ *  4. SSL/TLS — hosts whose certificates PrismGit does not verify (the
+ *     SslBypassDialog opt-out); review and re-enable per host.
  */
 
 const KNOWN_SECRET_GROUPS = ['tokens', 'remoteAuth', 'ai', 'github', 'ssh'] as const;
@@ -51,23 +53,26 @@ export function SecuritySettings() {
   const [secrets, setSecrets] = useState<SecretEntryMeta[]>([]);
   const [profiles, setProfiles] = useState<SshProfile[]>([]);
   const [systemKeys, setSystemKeys] = useState<SshSystemKey[]>([]);
+  const [sslHosts, setSslHosts] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
   const reload = useCallback(async () => {
     setLoading(true);
     try {
-      const [st, ks, entries, pf, sys] = await Promise.all([
+      const [st, ks, entries, pf, sys, insecureHosts] = await Promise.all([
         Promise.resolve(api.credentials?.status?.()).catch(() => null),
         Promise.resolve(api.ssh?.list?.()).catch(() => [] as SshKeyMeta[]),
         Promise.resolve(api.credentials?.list?.()).catch(() => [] as SecretEntryMeta[]),
         Promise.resolve(api.ssh?.listProfiles?.()).catch(() => [] as SshProfile[]),
         Promise.resolve(api.ssh?.listSystemKeys?.()).catch(() => [] as SshSystemKey[]),
+        Promise.resolve(api.settings?.getInsecureSslHosts?.()).catch(() => [] as string[]),
       ]);
       setStatus((st as CredentialsStatus | null) ?? null);
       setKeys((ks as SshKeyMeta[]) ?? []);
       setSecrets((entries as SecretEntryMeta[]) ?? []);
       setProfiles((pf as SshProfile[]) ?? []);
       setSystemKeys((sys as SshSystemKey[]) ?? []);
+      setSslHosts((insecureHosts as string[]) ?? []);
     } finally {
       setLoading(false);
     }
@@ -447,6 +452,16 @@ export function SecuritySettings() {
     try {
       await api.ssh.remove(key.id);
       toast.success(t('security.ssh.deleted'));
+      await reload();
+    } catch (e) {
+      toast.error(t('common.error'), String(e));
+    }
+  };
+
+  const handleRemoveInsecureHost = async (host: string) => {
+    try {
+      await api.settings?.removeInsecureSslHost?.(host);
+      toast.success(t('security.ssl.removed', { host }));
       await reload();
     } catch (e) {
       toast.error(t('common.error'), String(e));
@@ -1047,6 +1062,49 @@ export function SecuritySettings() {
           </label>
 
           <p className="text-2xs text-text-tertiary">{t('security.ssh.repoHint')}</p>
+        </div>
+      </section>
+
+      {/* ── SSL/TLS: hosts without certificate verification ── */}
+      <section className="panel mb-4">
+        <div className="panel-header flex items-center justify-between">
+          <span className="flex items-center gap-2">
+            <Lock size={12} />
+            {t('security.ssl.title')}
+            {sslHosts.length > 0 && (
+              <span className="badge badge-renamed text-2xs">{sslHosts.length}</span>
+            )}
+          </span>
+        </div>
+        <div className="p-5 space-y-3">
+          <p className="text-xs text-text-tertiary">{t('security.ssl.desc')}</p>
+          {sslHosts.length === 0 ? (
+            <div className="flex items-center gap-2 text-xs rounded-md border border-status-added/30 bg-status-added/10 px-3 py-2">
+              <CheckCircle size={14} className="text-status-added shrink-0" />
+              <span className="text-text-primary">{t('security.ssl.none')}</span>
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              {sslHosts.map((host) => (
+                <div
+                  key={host}
+                  className="flex items-center justify-between gap-2 rounded-md border border-border-default bg-bg-secondary/40 px-3 py-1.5"
+                >
+                  <span className="text-xs font-mono text-text-primary truncate">{host}</span>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      className="icon-btn !w-6 !h-6 hover:text-status-deleted"
+                      title={t('security.ssl.remove')}
+                      onClick={() => handleRemoveInsecureHost(host)}
+                    >
+                      <Trash size={12} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+              <p className="text-2xs text-text-tertiary">{t('security.ssl.repoHint')}</p>
+            </div>
+          )}
         </div>
       </section>
     </div>

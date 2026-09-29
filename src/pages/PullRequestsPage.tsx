@@ -13,6 +13,7 @@ import { useContextMenu } from '../lib/useContextMenu';
 import { cn, copyToClipboard, formatDate, shortHash } from '../lib/utils';
 import { useAuthStore } from '../stores/authStore';
 import { useGitStore, surfaceConflictedState } from '../stores/gitStore';
+import { offerSslBypass } from '../stores/sslBypassStore';
 import { useProviderStore } from '../stores/providerStore';
 import { useRepositoryStore } from '../stores/repositoryStore';
 import { useSelectionStore } from '../stores/selectionStore';
@@ -611,6 +612,9 @@ export function PullRequestsPage() {
       // git fetch. Without this, the user sees stale PRs after a fetch.
       void loadPRs(true);
     } catch (e) {
+      // TLS certificate rejection — the PR tool's Fetch hits the same
+      // corporate server as pull; offer the per-repo bypass + retry.
+      if (offerSslBypass(e, { repoPath: repo.path, retry: () => handleFetchAll() })) return;
       toast.error(t('pages.fetchFailed'), String(e));
     } finally {
       setSyncing(null);
@@ -625,6 +629,10 @@ export function PullRequestsPage() {
       await refreshStatus(repo.path);
       toast.success(t('pages.pulledFrom', { remote }));
     } catch (e) {
+      // TLS certificate rejection (expired / self-signed corporate remote) —
+      // offer the bypass + retry BEFORE the conflict probing (same rationale
+      // as BranchesPage.executePull).
+      if (offerSslBypass(e, { repoPath: repo.path, retry: () => handlePull() })) return;
       // State-based conflict detection (message matching is brittle — git
       // streams CONFLICT lines to stdout): navigate to the Conflicts UI.
       const conflicted = await surfaceConflictedState(repo.path);

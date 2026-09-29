@@ -575,6 +575,14 @@ export interface SettingsApi {
   get: <T = unknown>(key: string) => Promise<T | undefined>;
   set: (key: string, value: unknown) => Promise<void>;
   getAll: () => Promise<Partial<AppSettings>>;
+  /**
+   * Hosts whose TLS certificates PrismGit deliberately does not verify
+   * (GitLab/GitHub API + avatar requests). Written ONLY by the SSL bypass
+   * dialog's confirm; reviewed/removed in Settings → Security → SSL/TLS.
+   */
+  getInsecureSslHosts: () => Promise<string[]>;
+  addInsecureSslHost: (host: string) => Promise<void>;
+  removeInsecureSslHost: (host: string) => Promise<void>;
   getRepos: () => Promise<RepositoryEntry[]>;
   addRepo: (repo: { path: string; name: string }) => Promise<void>;
   removeRepo: (path: string) => Promise<void>;

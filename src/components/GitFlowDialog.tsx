@@ -4,6 +4,7 @@ import { useRepositoryStore } from '../stores/repositoryStore';
 import { useGitStore, surfaceConflictedState } from '../stores/gitStore';
 import { useToastStore, useToastActions } from '../stores/toastStore';
 import { offerPushRejection } from '../stores/pushRejectionStore';
+import { offerSslBypass } from '../stores/sslBypassStore';
 import { api } from '../lib/api';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useI18n } from '../lib/i18n';
@@ -166,7 +167,14 @@ export function GitFlowDialog({
         // mid-flow, protected branch, lease-stale). The recovery dialog
         // offers pull/rebase/force/MR instead of a dead-end error toast.
         const offered = offerPushRejection(e, { repoPath: repo.path });
-        if (!offered) toast.error(t('pages.operationFailed'), String(e));
+        if (!offered) {
+          // TLS certificate rejection — offer the bypass WITHOUT an
+          // auto-retry: the finish sequence (branch delete + tag + push) is
+          // NOT idempotent, so re-running it could double-execute flow
+          // steps. The dialog applies the bypass; the user re-runs Finish.
+          if (!offerSslBypass(e, { repoPath: repo.path }))
+            toast.error(t('pages.operationFailed'), String(e));
+        }
       } else {
         // Conflicted → the user is now on the Changes resolver; the modal
         // must not sit on top of it.
